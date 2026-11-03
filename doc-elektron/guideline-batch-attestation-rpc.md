@@ -163,21 +163,35 @@ Between tips, fee refreshes use `waitNext` on the previous template, followed by
 - **Pool-side MuHash:** would need the live UTXO accumulator and ties the pool to consensus internals. Rejected.
 - **ZMQ plus JSON-RPC polling:** works but costs latency and encoding overhead; the IPC interface already provides push semantics.
 
-## 11. Test plan
+## 11. Test plan and results
 
-1. Equivalence: for random templates on regtest, across heights below and above `MuhashAttestationActivationHeight` and `IntraBlockAttestationFixActivationHeight`, every batch attestation equals `ComputeBlockUTXOAttestationHash` on the assembled full block.
-2. Mined blocks: blocks built from batch results are accepted by an unmodified node (`submitblock`).
-3. Mutation: altered payout, extra output, order or transaction set invalidates the attestation.
-4. Extra outputs: the rejection of section 5 is confirmed; additionally verify that the same extra output is accepted when the attestation is computed with it.
-5. Race: tip change during the call returns `stale-tip`; reorg tests.
-6. Pruned, snapshot-restored and fully synced nodes return identical results.
-7. Dependent transaction chains inside the block.
-8. Fuzz the request parser and the script/outputs handling.
-9. Benchmark: time per candidate and per batch for 100, 1,000 and 4,096 scripts on production-sized UTXO sets.
+Tests live in `test/` and run against an unmodified `elektrond` on regtest (built from `elektron-net` commit `596278b`, no wallet, no IPC). They use an independent oracle written in Python: it rebuilds the post-block UTXO set from node data (`scantxoutset`, block template) with the reference MuHash implementation of the node's test framework and derives the attestation without any node help. Run all steps with `ELEKTROND=/path/to/elektrond PHOTON_DATADIR=/tmp/photon test/run_all.sh`.
+
+| Step | Script | What it proves | Result |
+|---|---|---|---|
+| 1 | `step01_oracle_matches_node.py` | Oracle MuHash of the scanned set equals `gettxoutsetinfo muhash`; oracle attestation equals the node's for an empty block | passed |
+| 2 | `step02_extra_output_counter_test.py` | `getblocktemplate mode=proposal` validates the attestation; a third OP_RETURN is rejected with the node attestation and accepted (proposal and `submitblock`) with the oracle attestation | passed |
+| 3 | `step03_multi_payout_candidates.py` | Six payout scripts (OP_TRUE and P2WPKH) give six different attestations, all accepted by proposal; a candidate with another script's attestation is rejected; mined blocks are accepted, including on the next height | passed |
+| 4 | `step04_transactions_and_tx_sets.py` | With a mempool parent, child and independent transaction: oracle equals node attestation, several payouts accepted, block with transactions mined; dropping a transaction, or reordering, is rejected with the old attestation and accepted once witness commitment and attestation are recomputed | passed |
+| 5 | `step05_stale_and_reorg.py` | A candidate for an old parent is `inconclusive-not-best-prevblk` in proposal and `inconclusive` on submit, never best; after invalidating the competing block the node reorgs onto it; fresh candidates work afterwards | passed |
+| 6 | `step06_mutation_matrix.py` | Wrong value, scriptSig suffix, wrong height, wrong digest, unattested extra spendable output are rejected; the same extra output is accepted when its coin is attested | passed |
+| 7 | `step07_many_payouts_timing.py` | 500 payout scripts: 500 distinct attestations, a sample of 25 accepted by proposal, one mined | passed |
+
+Findings:
+
+1. The shared-base model of section 2 holds: after the shared work, each payout script costs one coin hash and one 3072-bit multiplication. In Python this is 0.57 ms per candidate (500 candidates in 285 ms). A native implementation will be considerably faster. The Python base (110 ms for 130 coins) scales with the set and is not representative, the node uses its incremental accumulator.
+2. `getblocktemplate mode=proposal` checks the full attestation. It is a valid consensus check for assembled candidates (about 1.2 ms each on regtest) and closes the open question about the prevalidation path.
+3. Any change to the transaction set or its order changes the witness commitment and therefore the coinbase txid and the attestation. The batch interface MUST return a fresh commitment together with the attestations and the pool MUST NOT reuse either after changing the set. Reordering independent transactions is not free.
+4. A coinbase may claim less than the full reward, with a recomputed attestation it is valid. Payout value changes are therefore consensus-valid but not useful for the pool.
+5. Dropping or reordering transactions requires adjusting the coinbase value to subsidy plus the fees of the included transactions (`bad-cb-amount` otherwise).
+6. The legacy attestation path (below `MuhashAttestationActivationHeight`) is covered only by the negative extra-output test; the oracle implements the MuHash path used on current mainnet heights.
+
+Still to do: native benchmark of the batch call on production-sized UTXO sets, pruned and snapshot-restored nodes, fuzzing of the request parser, and an end-to-end test of the batch interface itself once it exists (compare against this oracle).
 
 ## 12. Checklist
 
 - [ ] Node commit pinned and attestation path re-verified.
+- [x] Oracle equivalence on regtest (steps 1 to 7) for the MuHash path.
 - [ ] Equivalence tests pass for all activation boundaries.
 - [x] Section 5 finding confirmed on regtest (both attestation paths).
 - [ ] Correct `guideline-coinbase-third-op-return.md` in `elektron-net`.
@@ -191,3 +205,4 @@ Between tips, fee refreshes use `waitNext` on the previous template, followed by
 2. Whether `ApplyCoinHash` multiplies strictly into the numerator in all cases (to be checked in `kernel/coinstats.cpp`).
 3. Whether the IPC build is part of the standard Elektron release artifacts for all target platforms.
 4. Whether `BlockWaitOptions` provides a fee threshold usable for refresh decisions.
+5. Native cost per candidate and per set size (the Python figures are an upper bound).
