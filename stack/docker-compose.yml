@@ -1,0 +1,59 @@
+# Complete Photon pool stack: Elektron Net node, pool daemon and Caddy (HTTPS).
+# Do not edit by hand: ./install.sh writes the files this compose file refers to
+# (.env, photond.env, node/elektron.conf, photond.toml, Caddyfile) and starts it.
+services:
+
+  node:
+    build:
+      context: ../docker/node
+      args:
+        ELEKTRON_REPO: ${ELEKTRON_REPO:-https://github.com/kutlusoy/elektron-net.git}
+        ELEKTRON_REF: ${ELEKTRON_REF:-main}
+    restart: unless-stopped
+    ports:
+      - "8333:8333"                    # P2P, public. RPC (8332) is never published.
+    volumes:
+      - ./node/elektron.conf:/config/elektron.conf:ro
+      - ./data/node:/data
+    healthcheck:
+      test: ["CMD-SHELL", "gosu elektron elektron-cli -conf=/data/elektron.conf -datadir=/data getblockchaininfo >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  photond:
+    build:
+      context: ..
+    restart: unless-stopped
+    depends_on:
+      - node
+    env_file: ./photond.env
+    ports:
+      - "${STRATUM_PORT:-3333}:${STRATUM_PORT:-3333}"   # Stratum, public. More ports: docker-compose.ports.yml
+      - "127.0.0.1:8081:8081"          # admin API and operator terminal UI, local only (SSH tunnel)
+      - "127.0.0.1:8082:8082"          # public pool page, local only (Caddy is the public entry)
+    volumes:
+      - ./photond.toml:/config/photond.toml:ro
+      - ./data/node:/node:ro           # RPC cookie of the node
+      - ./data/photon:/data            # ledger database
+
+  caddy:
+    image: caddy:2
+    profiles:
+      - tls
+    restart: unless-stopped
+    depends_on:
+      - photond
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

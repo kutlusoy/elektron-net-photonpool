@@ -14,7 +14,7 @@ Status: early development. The Rust daemon (`photond`) offers solo, PPLNS and PP
 
 ## Quick start
 
-See [`Quick-Install.md`](Quick-Install.md) for Docker and bare-metal setup, node configuration and connecting miners.
+See [`Quick-Install.md`](Quick-Install.md) for Docker and bare-metal setup, node configuration and connecting miners. `stack/` installs the complete stack (node, pool, HTTPS) with one script, see [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
 
 ## Build and run
 

@@ -170,7 +170,7 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 - [ ] Port `3333` reachable from the miners, `8081` only local.
 - [ ] Payout handling decided (see the payout modes guideline) before real miners connect.
 
-## 10. Standalone or as part of the full stack
+## 10. Standalone or complete Docker stack
 
 The pool is fully usable on its own (sections 3 and 4). For a public page with automatic HTTPS in the standalone Docker setup, point a DNS record at the server, open ports 80 and 443 and start the optional Caddy profile:
 
@@ -180,6 +180,14 @@ POOL_DOMAIN=pool.example.org docker compose --profile tls up -d
 
 The public page is then served at `https://pool.example.org`; the admin API and the operator UI stay on `127.0.0.1:8081`.
 
-### 10.1 Full stack with node, explorer and TLS
+### 10.1 Complete Docker stack (node, pool, HTTPS)
 
-The [`elektron-net-stack`](https://github.com/kutlusoy/elektron-net-stack) installer can install the Photon pool together with the node, the mempool explorer and Caddy (automatic HTTPS), pre-configured: set `POOL_TYPE=photon` in `elektron-stack.conf` (see the "Pool type: photon" section of that README). It builds this repository (`PHOTON_REF`, default `main`), creates and encrypts the pool wallet, writes `photond.toml` and puts the public page on `POOL_DOMAIN`.
+`stack/` in this repository sets up everything with one script: the Elektron Net node (built from source, with an encrypted pool wallet), the pool daemon and Caddy with automatic HTTPS, all pre-configured:
+
+```bash
+cd stack
+cp stack.conf.example stack.conf      # set at least DOMAIN, optionally POOL_NAME, EXPLORER_URL, fees ...
+./install.sh
+```
+
+The script generates the node and pool configuration, creates and encrypts the wallet (with a generated passphrase and a private-descriptor backup), starts the stack and writes `stack/CREDENTIALS.txt`. Payouts start in dry-run mode. Re-run `./install.sh` after changing `stack.conf`, or `./install.sh --update` to rebuild with fresh base images. Details: [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
