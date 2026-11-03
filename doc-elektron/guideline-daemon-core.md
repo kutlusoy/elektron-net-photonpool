@@ -99,7 +99,19 @@ The cost per address grows with mempool size and UTXO set on mainnet. This backe
 
 ## 5.1 Planned tests
 
-- **Load simulation with very many miners and full blocks:** thousands to tens of thousands of simulated miners together with a mempool that fills complete blocks and a mainnet-sized UTXO set, to measure candidate production time, tip-to-job latency, ledger write rate and fan-out under realistic block sizes, and to extrapolate the load of a real pool.
+- **Load simulation** (`test/sim_full_blocks.py`, done on one machine over loopback, regtest): 11,000 transactions per block (3.12 MWU), 25,000 extra UTXOs, 10,000 simulated miners, 430 payout addresses, two rounds.
+
+  | Measurement | Result |
+  |---|---|
+  | `getblocktemplate` | 629 ms |
+  | `getattestationbatch`, 430 candidates | 828 ms |
+  | Epoch build, `gbt` backend | 190 s |
+  | Epoch build, batch backend | 576 ms |
+  | Block request to clean job at miner | p50 838-870 ms, max 894 ms (includes ~770 ms node block generation) |
+  | Miners receiving the job | 10,000 / 10,000 |
+  | Daemon RSS | 97-104 MB |
+
+  The `gbt` backend is unusable with full blocks; the batch backend is required. Not covered: real network, ASIC firmware, mainnet UTXO set size, ledger write rate under share load.
 
 ## 6. Checklist
 
