@@ -144,7 +144,7 @@ The time from the new tip to the first job is dominated by the node's attestatio
 | Phase | What | Needs |
 |---|---|---|
 | 0 | Pool-template mode today (Stratum V1), ledger payouts | done |
-| 1 | Batch attestation RPC in the node (as a patch shipped with the pool) | next |
+| 1 | Batch attestation RPC in the node (as a patch shipped with the pool) | done, see the batch RPC guideline |
 | 2 | Photon wire protocol, gateway with own node, shares and announcements, spot checks, payout plan | this document |
 | 3 | Non-custodial coinbase payouts and the accounting commitment | needs phase 1 with `extra_outputs` |
 | 4 | Stratum V2 on the gateway side (standard channels towards ASICs) | optional |
@@ -182,18 +182,18 @@ Photon follows the goals of DATUM and borrows the framing of Stratum V2. What is
 
 ## 14. Implementation plan in this repository
 
-1. **Node patch** (`docker/node/patches/`): `getattestationbatch` with `payout_script`, `extra_outputs` and `script_sig_suffix` per candidate, applied when the node image is built. It does not change consensus code paths. Tested against the Python oracle in `test/`.
-2. **`photond` batch backend**: replaces the one-`getblocktemplate`-call-per-address bootstrap backend.
+1. **Node patch** (`docker/node/patches/`): `getattestationbatch` with `outputs`, `tail_outputs` and `script_sig_suffix` per candidate, applied when the node image is built. It does not change consensus code paths. Done and tested against the Python oracle, including the multi-output coinbase with commitment and extranonce of this protocol.
+2. **`photond` batch backend**: done (`pool.backend = auto`), replaces the one-`getblocktemplate`-call-per-address bootstrap backend.
 3. **`src/photon/`**: frame codec and Noise session, message types, channel state, plan derivation and Merkle commitment, share verifier with spot checks.
 4. **Gateway** (`photon-gateway` binary): local node client, variant generation, local Stratum V1 server reusing `stratum.rs`, Photon client.
 5. **Tests:** codec round trips and fuzzing, plan determinism, Merkle proofs, regtest with gateway, pool and two nodes (a block built by a gateway's node is accepted and pays the plan), simulation of many gateways.
 
 ## 15. Checklist
 
-- [ ] Batch attestation RPC as a node patch, equivalence against the oracle.
+- [x] Batch attestation RPC as a node patch, equivalence against the oracle.
+- [x] Coinbase with plan-style outputs, commitment and extranonce accepted by an unmodified validating node on regtest (`test/step14_batch_attestation.py`).
 - [ ] Message definitions and test vectors frozen.
 - [ ] Plan derivation specified and implemented deterministically.
-- [ ] Coinbase with plan outputs and commitment accepted by an unmodified validating node (regtest).
 - [ ] Spot check cost and adaptive probability measured.
 - [ ] Gateway with local Stratum V1 for ASICs.
 - [ ] Independent review of the Noise handshake and the key certification.

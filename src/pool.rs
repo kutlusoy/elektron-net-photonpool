@@ -2,7 +2,7 @@ use crate::addr::script_for_address;
 use crate::config::{Config, Mode};
 use crate::ledger::Ledger;
 use crate::rpc::NodeRpc;
-use crate::template::{header_hash, meets_target, Candidate, Gbt, TxSet};
+use crate::template::{header_hash, meets_target, BatchTemplate, Candidate, Gbt, TxSet};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -257,6 +257,9 @@ pub struct Pool {
     pub agg: Mutex<HashMap<(i64, String, u8), (f64, u64)>>,
     pub wallet: Option<NodeRpc>,
     pub treasury_free: AtomicI64,
+    /// 0 = batch attestation not tried yet, 1 = supported by the node, 2 = not supported.
+    pub batch_state: std::sync::atomic::AtomicU8,
+    pub backend_name: Mutex<&'static str>,
 }
 
 impl Pool {
@@ -295,6 +298,7 @@ impl Pool {
             cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
             sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
             pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0),
+            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"),
         });
         pool.stats.connected.store(true, Ordering::Relaxed);
         Ok(pool)
@@ -372,9 +376,25 @@ impl Pool {
     }
 
     /// Fetches one candidate per payout address for the current tip and validates `check` of them against the node.
-    pub async fn build_epoch(&self, check: usize) -> Result<Epoch> {
-        let t0 = Instant::now();
-        let best = self.node.best_block_hash().await?;
+    async fn fetch_candidates(&self, best: &str) -> Result<(Vec<Candidate>, u32)> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mode = self.cfg.pool.backend.as_str();
+        if mode != "gbt" && self.batch_state.load(Relaxed) != 2 {
+            match self.fetch_batch(best).await {
+                Ok(r) => {
+                    if self.batch_state.swap(1, Relaxed) != 1 {
+                        *self.backend_name.lock().unwrap() = "batch";
+                        self.event("info", "candidate backend: batch attestation (getattestationbatch)".into());
+                    }
+                    return Ok(r);
+                }
+                Err(e) if mode == "auto" && self.batch_state.load(Relaxed) == 0 && e.to_string().contains("Method not found") => {
+                    self.batch_state.store(2, Relaxed);
+                    self.event("info", "node has no getattestationbatch, using one getblocktemplate call per address".into());
+                }
+                Err(e) => return Err(e),
+            }
+        }
         let mut candidates: Vec<Candidate> = Vec::with_capacity(self.payouts.len());
         let mut height = 0;
         for p in &self.payouts {
@@ -386,6 +406,40 @@ impl Pool {
             let reuse: Option<std::sync::Arc<TxSet>> = candidates.last().map(|c| c.txs.clone());
             candidates.push(Candidate::from_gbt(g, &p.script, reuse.as_ref())?);
         }
+        Ok((candidates, height))
+    }
+
+    async fn fetch_batch(&self, best: &str) -> Result<(Vec<Candidate>, u32)> {
+        const CHUNK: usize = 2000;
+        let mut candidates: Vec<Candidate> = Vec::with_capacity(self.payouts.len());
+        let mut height = 0;
+        let mut shared: Option<std::sync::Arc<TxSet>> = None;
+        for chunk in self.payouts.chunks(CHUNK) {
+            let scripts: Vec<String> = chunk.iter().map(|p| hex::encode(&p.script)).collect();
+            let bt: BatchTemplate = serde_json::from_value(self.node.attestation_batch(&scripts).await?)?;
+            if bt.tip != best {
+                bail!("tip moved while building candidates");
+            }
+            if bt.candidates.len() != chunk.len() {
+                bail!("node returned {} candidates for {} requested", bt.candidates.len(), chunk.len());
+            }
+            let txs = match &shared {
+                Some(t) if t.matches(&bt.transactions) => t.clone(),
+                _ => std::sync::Arc::new(TxSet::from_gbt(&bt.transactions)?),
+            };
+            shared = Some(txs.clone());
+            height = bt.height;
+            for (p, c) in chunk.iter().zip(&bt.candidates) {
+                candidates.push(Candidate::from_batch(&bt, &txs, c, &p.script)?);
+            }
+        }
+        Ok((candidates, height))
+    }
+
+    pub async fn build_epoch(&self, check: usize) -> Result<Epoch> {
+        let t0 = Instant::now();
+        let best = self.node.best_block_hash().await?;
+        let (candidates, height) = self.fetch_candidates(&best).await?;
         self.stats.last_fetch_ms.store(t0.elapsed().as_millis() as u64, Ordering::Relaxed);
 
         let n = candidates.len();

@@ -153,7 +153,7 @@ function render() {
     `${span('dim', 'age       ')}${hms(age)} ${bar(age / 60, 14, age > 75 ? 'warn' : 'c1')}`,
     `${span('dim', 'node link ')}${s.node.connected ? span('ok', 'connected') : span('err', 'DOWN')} ${esc(s.node.transport)} rtt ${s.node.rttMs.toFixed(1)}ms`,
     `${span('dim', 'tip>job   ')}p50 ${s.node.p50.toFixed(0)}ms  p95 ${s.node.p95.toFixed(0)}ms  ${span('dim', 'n=' + s.node.samples)}`,
-    `${span('dim', 'found     ')}${s.found} blocks this session`,
+    `${span('dim', 'backend   ')}${esc(s.node.backend || 'gbt')}  ${span('dim', 'found')} ${s.found}`,
   ].join('\n');
   $('#pane-alloc').innerHTML = [
     `${span('dim', 'candidates ')}${num(s.alloc.candidates)} ${span('dim', 'be1q payout scripts')}`,

@@ -227,6 +227,9 @@ pub struct PoolCfg {
     pub refresh_secs: u64,
     #[serde(default = "d_spot")]
     pub spot_check: usize,
+    /// How candidates are fetched: "auto" (batch attestation when the node supports it, else one getblocktemplate call per address), "batch" or "gbt".
+    #[serde(default = "d_backend")]
+    pub backend: String,
 }
 
 #[derive(Deserialize)]
@@ -304,6 +307,7 @@ fn d_s_max_job() -> u64 { 30_000 }
 fn d_poll() -> u64 { 100 }
 fn d_refresh() -> u64 { 20 }
 fn d_spot() -> usize { 4 }
+fn d_backend() -> String { "auto".into() }
 fn d_listen() -> String { "127.0.0.1:8081".into() }
 fn d_ui() -> String { "ui".into() }
 
@@ -343,6 +347,9 @@ impl Config {
             bail!("set pool.payout_addresses, or payout.wallet together with payout.wallet_addresses");
         }
         cfg.network()?;
+        if !matches!(cfg.pool.backend.as_str(), "auto" | "batch" | "gbt") {
+            bail!("pool.backend must be auto, batch or gbt");
+        }
         cfg.api.normalize_explorer()?;
         if cfg.payout.modes.is_empty() {
             bail!("payout.modes must offer at least one mode");

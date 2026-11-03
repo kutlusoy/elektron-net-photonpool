@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Batch Attestation RPC Guideline
 
-- **Version:** 0.1 (draft)
+- **Version:** 0.2 (draft; implemented as a node patch and tested, see section 3.5)
 - **Date:** November 3, 2026
 - **Audience:** Node developers, pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ValidateUTXOCheckpoint`), `src/kernel/utxo_muhash.h`, `src/crypto/muhash.cpp`, `src/interfaces/mining.h`, `src/node/miner.cpp`, `src/node/types.h`, `src/rpc/mining.cpp` - treat as ground truth for anything the doc references
@@ -97,6 +97,42 @@ vout[1]   attestation OP_RETURN   (from the response)
 vout[2]   witness commitment      (shared)
 vout[3..] extra_outputs, verbatim, last
 ```
+
+### 3.5 As built: the Photon node patch
+
+The interface exists as a patch that is applied when the node image is built (`docker/node/patches/0001-photon-getattestationbatch.patch`, `PHOTON_NODE_PATCHES=true` by default, `NODE_PATCHES` in the stack). It adds three functions and one RPC and changes no existing code path of the node:
+
+- `ComputeAttestationBaseState` (`validation.cpp`): the tip's MuHash accumulator with all non-coinbase transactions applied, with the same rules as the incremental path of `ComputeBlockUTXOAttestationHash`, including the intra-block fix gate.
+- `AttestationForCoinbase`: the attestation of one stripped coinbase on top of that base state.
+- RPC `getattestationbatch` (`rpc/mining.cpp`, category `mining`): one block template per call, one attestation per requested coinbase variant.
+
+The patch was developed against a copy of the node source, applies cleanly to `elektron-net` at `596278b` and leaves that repository untouched.
+
+Request (JSON-RPC): `{"candidates": [ {"outputs": [{"scriptPubKey": hex, "value": leptons?}], "tail_outputs": [{"scriptPubKey": hex, "value": leptons?}], "script_sig_suffix": hex?} ]}` with 1 to 4096 candidates.
+
+- `outputs` are the payout outputs. At most one may omit its value and then receives the remainder of the reward; the sum of the explicit values must not exceed the reward.
+- `tail_outputs` follow the witness commitment (value defaults to 0), for example an accounting commitment as an `OP_RETURN`.
+- `script_sig_suffix` extends the BIP 34 prefix (extranonce); the scriptSig must stay between 2 and 100 bytes.
+- The final coinbase is `outputs`, attestation, witness commitment, `tail_outputs`. An output shaped like an attestation (`OP_RETURN <height> <32 bytes>`) is refused.
+
+Response: the template (`tip`, `height`, `version`, `bits`, `target`, `curtime`, `mintime`, `coinbasevalue`, the coinbase fields, `witness_commitment_script`, `transactions` with `data`, `txid`, `hash`, `fee`, `weight`) and `candidates[]` with `attestation_script`, `coinbase_txid` (of the stripped coinbase) and `coinbase_hex`. The call fails before the MuHash activation height, during initial block download and for malformed requests. It holds `cs_main` while it works, which is acceptable at the measured speed; computing outside the lock and the shared-inverse optimisation of section 2 are possible refinements.
+
+Tests (`test/step14_batch_attestation.py`, patched node on regtest, mempool with a dependent transaction chain):
+
+- Every attestation equals the independent oracle; `coinbase_txid` is the stripped-coinbase txid.
+- Assembled blocks are accepted by `getblocktemplate` proposal and by `submitblock`; the block pays the requested script.
+- A multi-output coinbase with an `OP_RETURN` accounting commitment and an extranonce suffix is accepted (this is the coinbase layout of the Photon protocol).
+- Variants that differ only in the extranonce get different attestations; oversized requests, outputs above the reward, two remainder outputs, attestation-shaped outputs and oversized scriptSigs are refused.
+
+Measured on regtest (small UTXO set, JSON included, one call): 100 candidates in 8 ms, 1,000 in 69 ms, 4,000 in 276 ms, about 0.07 ms per candidate. In the pool (`test/bench_candidates.py`, including local coinbase rebuild and comparison with the node's coinbase, all candidates validated by the node):
+
+| Payout addresses | One `getblocktemplate` call per address | Batch backend |
+|---|---|---|
+| 100 | 72 ms | 12 ms |
+| 430 | 349 ms | 47 ms |
+| 2,000 | 1,786 ms | 136 ms |
+
+Mainnet-sized UTXO sets and mempools are not covered by these numbers.
 
 ## 4. Attested coinbase form
 

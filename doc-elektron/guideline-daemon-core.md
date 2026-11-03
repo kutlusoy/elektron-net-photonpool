@@ -22,7 +22,7 @@
 | `api.rs` | Read-only `/api/v1` (summary, miners, blocks, events) and static UI | done |
 | `stratum.rs`, `diff.rs` | Stratum V1 server: subscribe, authorize, notify, submit, version rolling, vardiff, pre-rendered notify, session statistics | done, see [`guideline-stratum-v1.md`](./guideline-stratum-v1.md) |
 | Stratum V2 frontend | Noise, standard channels | not yet |
-| Batch attestation backend | Candidates for all payout scripts in one node call | not yet (needs the node-side interface) |
+| Batch attestation backend | Candidates for all payout scripts in one node call (Photon node patch, `pool.backend = auto`, falls back to `getblocktemplate`) | done, see [`guideline-batch-attestation-rpc.md`](./guideline-batch-attestation-rpc.md) |
 | `ledger.rs`, `accounting.rs` | SQLite ledger, PPLNS and PPS accounting, block maturity, payout worker, wallet address provisioning | done, see [`guideline-payout-modes.md`](./guideline-payout-modes.md) |
 | `public.rs` | Public pool page and read-only API with rate limiting | done, see [`guideline-public-page.md`](./guideline-public-page.md) |
 
@@ -93,7 +93,7 @@ The cost per address grows with mempool size and UTXO set on mainnet. This backe
 ## 5. Next steps
 
 1. Hardware tests of the Stratum V1 server and payouts on real devices and mainnet.
-2. Batch attestation backend once the node interface exists, verified against the Python oracle in `test/`.
+2. Photon protocol (see [`guideline-photon-protocol.md`](./guideline-photon-protocol.md)).
 3. Tip notifications through the node mining IPC interface instead of polling.
 4. Stratum V2 standard channels.
 

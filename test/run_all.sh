@@ -1,6 +1,6 @@
 #!/bin/sh
 # usage: ELEKTROND=/path/to/elektrond [ELEKTROND_WALLET=/path/to/wallet-enabled/elektrond] PHOTON_DATADIR=/tmp/photon ./run_all.sh
-# step11 and step13 need a node built with the wallet; it is skipped when ELEKTROND_WALLET is not set.
+# step14 needs a node built with docker/node/patches/*.patch (ELEKTROND_BATCH); step11 and step13 need a node built with the wallet; it is skipped when ELEKTROND_WALLET is not set.
 cd "$(dirname "$0")" || exit 1
 rc=0
 for s in step0*.py step10*.py step12*.py; do python3 "$s" || rc=1; done
@@ -9,5 +9,10 @@ if [ -n "$ELEKTROND_WALLET" ]; then
   ELEKTROND="$ELEKTROND_WALLET" python3 step13_encrypted_wallet.py || rc=1
 else
   echo "[step11, step13] skipped (set ELEKTROND_WALLET to a wallet-enabled elektrond)"
+fi
+if [ -n "$ELEKTROND_BATCH" ]; then
+  ELEKTROND="$ELEKTROND_BATCH" python3 step14_batch_attestation.py || rc=1
+else
+  echo "[step14] skipped (set ELEKTROND_BATCH to an elektrond built with the Photon node patch)"
 fi
 exit $rc

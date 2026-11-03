@@ -62,7 +62,7 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
             "height": height, "tip": tip, "tipTime": tip_time, "connected": s.connected.load(Ordering::Relaxed), "transport": "http-rpc",
             "rttMs": p.node.last_rtt_us.load(Ordering::Relaxed) as f64 / 1000.0,
             "p50": quantile(&lat, 0.5), "p95": quantile(&lat, 0.95), "samples": lat.len(),
-            "batchMs": s.last_fetch_ms.load(Ordering::Relaxed),
+            "batchMs": s.last_fetch_ms.load(Ordering::Relaxed), "backend": *p.backend_name.lock().unwrap(),
         },
         "hashrate": {"now": live.hashrate, "m1": live.m1, "h1": live.h1, "hist": if live.hist.is_empty() { vec![0.0] } else { live.hist.iter().copied().collect() }},
         "miners": {"online": live.online, "total": live.total, "v1": live.total, "v2": 0, "edge": 0},

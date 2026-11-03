@@ -76,6 +76,40 @@ fn stratum_prevhash(prev: &[u8; 32]) -> String {
     hex::encode(out)
 }
 
+impl TxSet {
+    pub fn from_gbt(txs: &[GbtTx]) -> Result<Self> {
+        let txids = txs.iter().map(|t| rev32(&t.txid)).collect::<Result<Vec<_>>>()?;
+        Ok(Self { datas: txs.iter().map(|t| hex::decode(&t.data)).collect::<Result<Vec<_>, _>>()?, branch: merkle_branch(&txids), txids })
+    }
+
+    pub fn matches(&self, txs: &[GbtTx]) -> bool {
+        self.txids.len() == txs.len() && self.txids.iter().zip(txs).all(|(a, b)| rev32(&b.txid).map(|x| &x == a).unwrap_or(false))
+    }
+}
+
+/// Response of the Photon node patch `getattestationbatch`: one template, many coinbase variants.
+#[derive(Deserialize)]
+pub struct BatchTemplate {
+    pub tip: String,
+    pub height: u32,
+    pub version: i32,
+    pub bits: String,
+    pub target: String,
+    pub curtime: u32,
+    pub mintime: u32,
+    pub coinbasevalue: i64,
+    pub coinbase_script_sig_prefix: String,
+    pub witness_commitment_script: String,
+    pub transactions: Vec<GbtTx>,
+    pub candidates: Vec<BatchCand>,
+}
+
+#[derive(Deserialize)]
+pub struct BatchCand {
+    pub attestation_script: String,
+    pub coinbase_hex: String,
+}
+
 impl Candidate {
     pub fn from_gbt(g: Gbt, payout_script: &[u8], reuse: Option<&Arc<TxSet>>) -> Result<Self> {
         if g.coinbase_required_outputs.len() != 2 {
@@ -86,41 +120,60 @@ impl Candidate {
         for o in &g.coinbase_required_outputs {
             outputs.push(TxOutput { value: o.value, script: hex::decode(&o.script_pub_key)? });
         }
-        let cb = build_coinbase(&sig, g.height, &outputs);
-
-        let txids = g.transactions.iter().map(|t| rev32(&t.txid)).collect::<Result<Vec<_>>>()?;
         let txs = match reuse {
-            Some(r) if r.txids == txids => r.clone(),
-            _ => Arc::new(TxSet {
-                datas: g.transactions.iter().map(|t| hex::decode(&t.data)).collect::<Result<Vec<_>, _>>()?,
-                branch: merkle_branch(&txids),
-                txids,
-            }),
+            Some(r) if r.matches(&g.transactions) => r.clone(),
+            _ => Arc::new(TxSet::from_gbt(&g.transactions)?),
         };
+        let fees = g.transactions.iter().map(|t| t.fee).sum();
+        Self::assemble(&g.previousblockhash, g.version, &g.bits, &g.target, g.curtime, g.mintime, g.coinbasevalue, fees, &sig, g.height, &outputs, txs).map(|(c, _)| c)
+    }
 
-        let prev = rev32(&g.previousblockhash)?;
-        let bits = u32::from_str_radix(&g.bits, 16).context("bad bits")?;
+    /// Candidate from a batch response. The coinbase is rebuilt locally and must equal the one the node returned.
+    pub fn from_batch(bt: &BatchTemplate, txs: &Arc<TxSet>, cand: &BatchCand, payout_script: &[u8]) -> Result<Self> {
+        let sig = hex::decode(&bt.coinbase_script_sig_prefix)?;
+        let outputs = vec![
+            TxOutput { value: bt.coinbasevalue, script: payout_script.to_vec() },
+            TxOutput { value: 0, script: hex::decode(&cand.attestation_script)? },
+            TxOutput { value: 0, script: hex::decode(&bt.witness_commitment_script)? },
+        ];
+        let fees = bt.transactions.iter().map(|t| t.fee).sum();
+        let (c, nowit) = Self::assemble(&bt.tip, bt.version, &bt.bits, &bt.target, bt.curtime, bt.mintime, bt.coinbasevalue, fees, &sig, bt.height, &outputs, txs.clone())?;
+        if hex::encode(nowit) != cand.coinbase_hex.to_ascii_lowercase() {
+            bail!("coinbase built locally differs from the node's");
+        }
+        Ok(c)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(prev_hex: &str, version: i32, bits_hex: &str, target_hex: &str, curtime: u32, mintime: u32, coinbase_value: i64, fees: i64, sig: &[u8], height: u32, outputs: &[TxOutput], txs: Arc<TxSet>) -> Result<(Self, Vec<u8>)> {
+        let cb = build_coinbase(sig, height, outputs);
+        let prev = rev32(prev_hex)?;
+        let bits = u32::from_str_radix(bits_hex, 16).context("bad bits")?;
         let split = 4 + 1 + 36 + varint_len(sig.len()) + sig.len();
         let branch = txs.branch.iter().map(|h| format!("\"{}\"", hex::encode(h))).collect::<Vec<_>>().join(",");
         let notify_b = format!("\",\"{}\",\"{}\",\"{}\",[{}],\"", stratum_prevhash(&prev), hex::encode(&cb.nowit[..split]), hex::encode(&cb.nowit[split..]), branch);
         let notify_c = format!("\",\"{bits:08x}\",\"");
         let mut target = [0u8; 32];
-        target.copy_from_slice(&hex::decode(&g.target)?);
-        Ok(Self {
-            prev,
-            version: g.version as u32,
-            bits,
-            target,
-            curtime: g.curtime,
-            mintime: g.mintime,
-            coinbase_value: g.coinbasevalue,
-            fees: g.transactions.iter().map(|t| t.fee).sum(),
-            coinbase_wit: cb.wit,
-            merkle_root: merkle_root(&cb.txid, &txs.branch),
-            txs,
-            notify_b,
-            notify_c,
-        })
+        target.copy_from_slice(&hex::decode(target_hex)?);
+        let nowit = cb.nowit.clone();
+        Ok((
+            Self {
+                prev,
+                version: version as u32,
+                bits,
+                target,
+                curtime,
+                mintime,
+                coinbase_value,
+                fees,
+                coinbase_wit: cb.wit,
+                merkle_root: merkle_root(&cb.txid, &txs.branch),
+                txs,
+                notify_b,
+                notify_c,
+            },
+            nowit,
+        ))
     }
 
     /// Appends a complete mining.notify line; the candidate-specific parts are pre-rendered.

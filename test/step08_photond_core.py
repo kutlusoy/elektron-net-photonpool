@@ -49,7 +49,7 @@ with Harness("step08") as h:
     r = photond(cfg, "check")
     rep = json.loads(r.stdout) if r.returncode == 0 else {}
     h.check("check: 8 candidates built and validated by the node", r.returncode == 0 and rep.get("candidates") == 8 and rep.get("rejected") == 0, (r.stderr or r.stdout)[-200:])
-    print(f"  info candidate fetch for 8 addresses: {rep.get('fetch_ms')} ms via getblocktemplate")
+    print(f"  info candidate fetch for 8 addresses: {rep.get('fetch_ms')} ms")
 
     height0 = n.rpc("getblockcount")
     for i in range(3):

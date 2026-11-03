@@ -77,10 +77,14 @@ class Harness:
         self.node.rpc("generatetodescriptor", self.blocks, "raw(51)")
         return self
 
-    def __exit__(self, *a):
+    def __exit__(self, exc_type, *a):
         self.node.stop()
-        print(f"[{self.name}] {'FAILED' if self.failed else 'PASSED'}")
-        if self.failed: sys.exit(1)
+        if exc_type is not None:
+            import traceback
+            traceback.print_exception(exc_type, *a)
+        ok = not self.failed and exc_type is None
+        print(f"[{self.name}] {'PASSED' if ok else 'FAILED'}")
+        if not ok: sys.exit(1)
 
     def check(self, label, ok, detail=""):
         print(f"  {'ok  ' if ok else 'FAIL'} {label}" + (f"  ({detail})" if detail else ""))

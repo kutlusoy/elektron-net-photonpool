@@ -7,6 +7,7 @@ services:
       context: ./docker/node
       args:
         ELEKTRON_REF: main
+        PHOTON_NODE_PATCHES: ${PHOTON_NODE_PATCHES:-true}
     restart: unless-stopped
     ports:
       - "8333:8333"          # P2P, public. RPC (8332) is never published.

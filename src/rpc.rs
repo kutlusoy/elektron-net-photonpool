@@ -87,6 +87,12 @@ impl NodeRpc {
         self.call("getblocktemplate", json!([{"rules": ["segwit"], "coinbaseaddress": address}])).await
     }
 
+    /// Photon node patch: one call, one attestation per payout script (see doc-elektron/guideline-batch-attestation-rpc.md).
+    pub async fn attestation_batch(&self, scripts: &[String]) -> Result<Value> {
+        let cands: Vec<Value> = scripts.iter().map(|s| json!({"outputs": [{"scriptPubKey": s}]})).collect();
+        self.call("getattestationbatch", json!([{"candidates": cands}])).await
+    }
+
     pub async fn proposal(&self, block_hex: &str) -> Result<Option<String>> {
         let v = self.call("getblocktemplate", json!([{"mode": "proposal", "data": block_hex, "rules": ["segwit"]}])).await?;
         Ok(v.as_str().map(str::to_string))

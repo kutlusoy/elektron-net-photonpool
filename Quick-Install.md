@@ -145,6 +145,7 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 | `pool.payout_addresses` | Pool-owned addresses; more addresses give miners more independent search space (see the sizing table in [`doc-elektron/guideline-photon-architecture.md`](doc-elektron/guideline-photon-architecture.md)) |
 | `public.*` | Public pool page and its rate limit (see the next section) |
 | `pool.spot_check` | Candidates per epoch validated against the node |
+| `pool.backend` | `auto` (default): batch attestation when the node has the Photon patch, else one `getblocktemplate` call per address; `batch`, `gbt` force one |
 | `stratum.listen`, `stratum.initial_difficulty`, `stratum.share_secs` | Miner port, starting difficulty, target seconds per share |
 | `stratum.max_connections` | Upper bound for sockets |
 | `api.listen`, `api.ui_dir` | Admin API and UI location |
