@@ -108,14 +108,25 @@ vout[3..] extra_outputs, verbatim, last
 
 The batch call MUST compute the coinbase txid over exactly this form (version, input with `script_sig_prefix`, sequence `0xFFFFFFFE`, outputs as above, `lock_time = height - 1`) and MUST insert one coin per spendable output at that txid, with the block height and the coinbase flag, as the consensus code does. Unspendable outputs are skipped.
 
-## 5. Finding: extra coinbase outputs change the attestation
+## 5. Confirmed: extra coinbase outputs change the attestation
 
-`guideline-coinbase-third-op-return.md` states that a pool-side informational OP_RETURN needs no node involvement. From the code this does not hold:
+`guideline-coinbase-third-op-return.md` in `elektron-net` states that a pool-side informational OP_RETURN needs no node involvement. The code and a regtest experiment show otherwise:
 
 - `StripAttestationOutput` removes only an output matching `<height><32 bytes>`. A third single-push OP_RETURN stays in the stripped coinbase.
 - The coinbase txid, which is part of the attested coin outpoint, then differs from the txid the node used when it built the template.
 
-Consequence: a pool that appends an output after the attestation was computed without it produces a block with `bad-utxo-attestation`. This MUST be confirmed on regtest before relying on either document. The batch interface supports `extra_outputs` so that such an output can be attested correctly. Until confirmed, the pool MUST NOT add any output beyond the node-provided set.
+Experiment (`test/regtest_attestation_extra_output.py`, unmodified node built from `elektron-net` commit `596278b`, regtest):
+
+| Height | Case | `submitblock` result |
+|---|---|---|
+| 21, 131 | Coinbase exactly as `getblocktemplate` describes | accepted |
+| 22, 132 | One extra byte appended to the scriptSig | `bad-utxo-attestation` |
+| 22, 132 | Third OP_RETURN (single push) appended as the last output | `bad-utxo-attestation` |
+| 22, 132 | Control again after the rejected attempts | accepted |
+
+Heights 21/22 are below and 131/132 above `MuhashAttestationActivationHeight` (50 on regtest) and `IntraBlockAttestationFixActivationHeight` (110 on regtest), so both the legacy and the incremental attestation path reject the extra output.
+
+Consequence: a pool MUST NOT add any coinbase output beyond the node-provided set unless the attestation was computed for exactly that coinbase. The batch interface supports `extra_outputs` for this purpose. The pool-side tag described in the `elektron-net` document would currently produce invalid blocks and MUST NOT be implemented as written.
 
 ## 6. Consistency and locking
 
@@ -157,7 +168,7 @@ Between tips, fee refreshes use `waitNext` on the previous template, followed by
 1. Equivalence: for random templates on regtest, across heights below and above `MuhashAttestationActivationHeight` and `IntraBlockAttestationFixActivationHeight`, every batch attestation equals `ComputeBlockUTXOAttestationHash` on the assembled full block.
 2. Mined blocks: blocks built from batch results are accepted by an unmodified node (`submitblock`).
 3. Mutation: altered payout, extra output, order or transaction set invalidates the attestation.
-4. Extra outputs: confirm the finding of section 5 in both directions.
+4. Extra outputs: the rejection of section 5 is confirmed; additionally verify that the same extra output is accepted when the attestation is computed with it.
 5. Race: tip change during the call returns `stale-tip`; reorg tests.
 6. Pruned, snapshot-restored and fully synced nodes return identical results.
 7. Dependent transaction chains inside the block.
@@ -168,7 +179,8 @@ Between tips, fee refreshes use `waitNext` on the previous template, followed by
 
 - [ ] Node commit pinned and attestation path re-verified.
 - [ ] Equivalence tests pass for all activation boundaries.
-- [ ] Finding of section 5 confirmed or refuted on regtest.
+- [x] Section 5 finding confirmed on regtest (both attestation paths).
+- [ ] Correct `guideline-coinbase-third-op-return.md` in `elektron-net`.
 - [ ] Benchmark confirms the per-candidate cost model.
 - [ ] Authentication, limits and error handling reviewed.
 - [ ] No consensus file touched.
