@@ -125,10 +125,11 @@ Copy `target/release/photond` and the `ui/` folder to `/opt/photond`, then `syst
 
 Enable version rolling (BIP 310) in the miner if it has the option. The pool uses a fixed coinbase, so it advertises an empty `extranonce1` and `extranonce2_size = 0`; the search space comes from the negotiated version bits, nonce and nTime. Firmware that cannot work with this is a known open risk.
 
-## 6. Web UI and API
+## 6. Web UI, public page and API
 
 - UI: `http://127.0.0.1:8081/` (for a remote host use an SSH tunnel: `ssh -L 8081:127.0.0.1:8081 user@host`).
 - API (read-only): `/api/v1/summary`, `/miners`, `/blocks`, `/events`.
+- **Public page for miners:** set `[public] enabled = true` to serve a public terminal page (pool statistics, connection details, modes and fees, blocks, payouts, address lookup) on its own listener, default `127.0.0.1:8082`. Put a reverse proxy with TLS in front of it and set `trust_proxy = true`. The operator UI and API are never served there. See [`doc-elektron/guideline-public-page.md`](doc-elektron/guideline-public-page.md).
 - The UI shows a `DEMO DATA` tag and simulated numbers when it cannot reach the API.
 
 ## 7. Configuration reference

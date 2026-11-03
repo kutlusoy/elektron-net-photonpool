@@ -152,3 +152,13 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 @media (prefers-reduced-motion: reduce) {
   .tag.demo, .pulse { animation: none; }
 }
+
+.grid.pub { grid-template-columns: 1.2fr 1.2fr 1fr; grid-template-rows: auto minmax(0, 1fr) minmax(0, 1.2fr); grid-template-areas: "pool connect modes" "blocks blocks payouts" "tty tty tty"; }
+.p-connect { grid-area: connect; } .p-modes { grid-area: modes; } .p-payouts { grid-area: payouts; }
+.grid.pub .p-blocks { grid-area: blocks; }
+@media (max-width: 1100px) {
+  .grid.pub { grid-template-columns: 1fr 1fr; grid-template-areas: "pool connect" "modes payouts" "blocks blocks" "tty tty"; grid-template-rows: auto auto minmax(160px, 1fr) minmax(200px, 1fr); }
+}
+@media (max-width: 720px) {
+  .grid.pub { grid-template-columns: 1fr; grid-template-areas: "pool" "connect" "modes" "blocks" "payouts" "tty"; grid-template-rows: none; }
+}

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHOTON POOL</title>
+<meta name="description" content="Public statistics and connection details of a Photon mining pool for Elektron Net">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="cyan">
+<div class="fx" aria-hidden="true"></div>
+<div class="window" id="window">
+  <header class="titlebar">
+    <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="wtitle">photon@<span id="pool-name">pool</span>:~ <b id="mode-tag" class="tag">...</b></span>
+    <span class="clock" id="clock">--:--:--</span>
+  </header>
+  <div class="statusline" id="statusline" role="status" aria-live="off"></div>
+  <main class="grid pub">
+    <section class="pane p-pool" aria-label="Pool"><h2><span>POOL</span></h2><pre id="pane-pool"></pre></section>
+    <section class="pane p-connect" aria-label="Connect"><h2><span>CONNECT</span></h2><pre id="pane-connect"></pre></section>
+    <section class="pane p-modes" aria-label="Payout modes"><h2><span>MODES</span></h2><pre id="pane-modes"></pre></section>
+    <section class="pane p-blocks" aria-label="Blocks"><h2><span>BLOCKS</span></h2><pre id="pane-blocks"></pre></section>
+    <section class="pane p-payouts" aria-label="Payouts"><h2><span>PAYOUTS</span></h2><pre id="pane-payouts"></pre></section>
+    <section class="pane p-tty" aria-label="Console"><h2><span>TTY</span><em>try <kbd>account &lt;your address&gt;</kbd> or <kbd>help</kbd></em></h2>
+      <div class="tty" id="tty" tabindex="-1"></div>
+      <form class="prompt" id="prompt" autocomplete="off">
+        <label for="cmd"><span class="u">guest</span><span class="at">@</span><span class="h">photon</span><span class="sep">:~$</span></label>
+        <input id="cmd" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="command line">
+      </form>
+    </section>
+  </main>
+</div>
+<script src="common.js"></script>
+<script src="public.js"></script>
+</body>
+</html>

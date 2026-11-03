@@ -296,6 +296,10 @@ pub fn blocks_by_status(conn: &Connection) -> Result<Vec<(String, i64)>> {
     Ok(v)
 }
 
+pub fn blocks_since(conn: &Connection, ts: i64) -> Result<i64> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM blocks WHERE found_at >= ?1 AND status != 'orphaned'", params![ts], |r| r.get(0))?)
+}
+
 pub fn prune_shares(conn: &Connection, older_than_minute: i64) -> Result<usize> {
     Ok(conn.execute("DELETE FROM share_buckets WHERE minute < ?1", params![older_than_minute])?)
 }

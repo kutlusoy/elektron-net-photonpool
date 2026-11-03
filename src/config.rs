@@ -13,7 +13,38 @@ pub struct Config {
     pub payout: PayoutCfg,
     #[serde(default)]
     pub ledger: LedgerCfg,
+    #[serde(default)]
+    pub public: PublicCfg,
 }
+
+/// The public pool page and its read-only API, served on its own listener.
+#[derive(Deserialize, Clone)]
+pub struct PublicCfg {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "d_pub_listen")]
+    pub listen: String,
+    #[serde(default = "d_pub_name")]
+    pub name: String,
+    /// Host name shown in the connection instructions.
+    #[serde(default)]
+    pub stratum_host: String,
+    /// Take the client address from X-Forwarded-For (only behind a trusted reverse proxy).
+    #[serde(default)]
+    pub trust_proxy: bool,
+    #[serde(default = "d_pub_rate")]
+    pub rate_per_min: u32,
+}
+
+impl Default for PublicCfg {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+fn d_pub_listen() -> String { "127.0.0.1:8082".into() }
+fn d_pub_name() -> String { "Photon Pool".into() }
+fn d_pub_rate() -> u32 { 120 }
 
 #[derive(Deserialize, Clone)]
 pub struct LedgerCfg {

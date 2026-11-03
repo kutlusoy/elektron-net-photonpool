@@ -90,6 +90,17 @@ max_hashrate_share = 0.25
 # listen = "0.0.0.0:3335"
 # mode = "solo"
 
+[public]
+# Public pool page and read-only API on their own listener (off by default).
+enabled = false
+listen = "127.0.0.1:8082"
+name = "Photon Pool"
+# Host name shown in the connection instructions.
+stratum_host = ""
+# Trust X-Forwarded-For (only behind your own reverse proxy).
+trust_proxy = false
+rate_per_min = 120
+
 [ledger]
 # Share and payout database (SQLite).
 path = "photond.db"

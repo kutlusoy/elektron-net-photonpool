@@ -5,6 +5,7 @@ mod config;
 mod diff;
 mod ledger;
 mod pool;
+mod public;
 mod rpc;
 mod stratum;
 mod template;
@@ -60,6 +61,14 @@ async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
     pool.event("info", format!("photond {} listening on {}", env!("CARGO_PKG_VERSION"), pool.cfg.api.listen));
     tokio::spawn(pool.clone().run_tip_loop());
     tokio::spawn(pool.clone().run_accounting());
+    if pool.cfg.public.enabled {
+        let p = pool.clone();
+        tokio::spawn(async move {
+            if let Err(e) = public::serve(p.clone()).await {
+                p.event("err", format!("public page stopped: {e}"));
+            }
+        });
+    }
     if pool.cfg.stratum.enabled {
         tokio::spawn(stratum::serve(pool.clone()));
     }
