@@ -48,3 +48,6 @@ require_address = true
 # Read-only admin API and web UI. Keep this on loopback or a management network.
 listen = "127.0.0.1:8081"
 ui_dir = "ui"
+# Optional: base URL of a mempool-style block explorer. Found blocks and the chain tip
+# link to <explorer_url>/block/<hash> in the web UI. Leave empty to disable links.
+explorer_url = "https://mempool.elektron-net.org"

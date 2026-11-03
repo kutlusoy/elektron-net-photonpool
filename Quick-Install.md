@@ -144,6 +144,7 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 | `stratum.listen`, `stratum.initial_difficulty`, `stratum.share_secs` | Miner port, starting difficulty, target seconds per share |
 | `stratum.max_connections` | Upper bound for sockets |
 | `api.listen`, `api.ui_dir` | Admin API and UI location |
+| `api.explorer_url` | Optional base URL of a mempool-style block explorer (for example `https://mempool.elektron-net.org`). Found blocks and the chain tip then link to `<explorer_url>/block/<hash>` in the UI and in `/api/v1/blocks`. Must start with `http://` or `https://`. |
 
 ## 8. Troubleshooting
 

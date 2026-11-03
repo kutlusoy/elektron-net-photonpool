@@ -49,7 +49,7 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
         None => (0, String::new(), unix_now(), 0, 0, 1, 0),
     };
     Json(json!({
-        "pool": {"name": "photon", "version": env!("CARGO_PKG_VERSION"), "uptime": p.started.elapsed().as_secs_f64(), "mode": "core"},
+        "pool": {"name": "photon", "version": env!("CARGO_PKG_VERSION"), "uptime": p.started.elapsed().as_secs_f64(), "mode": "core", "explorerUrl": p.cfg.api.explorer_url},
         "node": {
             "height": height, "tip": tip, "tipTime": tip_time, "connected": s.connected.load(Ordering::Relaxed), "transport": "http-rpc",
             "rttMs": p.node.last_rtt_us.load(Ordering::Relaxed) as f64 / 1000.0,
@@ -90,7 +90,42 @@ async fn miners(State(p): State<Arc<Pool>>, Query(q): Query<Limit>) -> Json<Valu
 async fn blocks(State(p): State<Arc<Pool>>, Query(q): Query<Limit>) -> Json<Value> {
     let found = p.stats.found.lock().unwrap();
     let n = q.limit.unwrap_or(12).min(200);
-    Json(json!(found.iter().rev().take(n).collect::<Vec<_>>()))
+    let base = &p.cfg.api.explorer_url;
+    Json(Value::Array(
+        found
+            .iter()
+            .rev()
+            .take(n)
+            .map(|b| {
+                let mut v = json!(b);
+                if let Some(u) = block_url(base, &b.hash) {
+                    v["url"] = json!(u);
+                }
+                v
+            })
+            .collect(),
+    ))
+}
+
+/// Link to a block page of a mempool-style explorer; `None` when no explorer is configured.
+pub fn block_url(base: &str, hash: &str) -> Option<String> {
+    if base.is_empty() || hash.len() != 64 || !hash.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("{base}/block/{hash}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn block_links() {
+        let h = "ab".repeat(32);
+        assert_eq!(block_url("https://mempool.example", &h), Some(format!("https://mempool.example/block/{h}")));
+        assert_eq!(block_url("", &h), None);
+        assert_eq!(block_url("https://mempool.example", "not-a-hash"), None);
+    }
 }
 
 async fn events(State(p): State<Arc<Pool>>) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {

@@ -32,6 +32,7 @@ min_job_interval_ms = 200
 [api]
 listen = "127.0.0.1:{API}"
 ui_dir = "{os.path.join(ROOT, 'ui')}"
+explorer_url = "https://mempool.example/elektron/"
 ''')
 
 def get(path): return urllib.request.urlopen(f"http://127.0.0.1:{API}{path}", timeout=5).read()
@@ -137,6 +138,13 @@ async def main(h):
         if n.rpc("getblockcount") == height0 + 1: break
         await asyncio.sleep(0.05)
     h.check("node accepted the block built from the Stratum job", n.rpc("getblockcount") == height0 + 1 and n.rpc("getbestblockhash") == bhash, bhash[:16])
+    blocks = []
+    for _ in range(100):
+        blocks = json.loads(get("/api/v1/blocks"))
+        if blocks: break
+        await asyncio.sleep(0.05)
+    h.check("found block is listed with a link to the configured explorer", blocks and blocks[0]["url"] == f"https://mempool.example/elektron/block/{bhash}", str(blocks[:1]))
+    h.check("summary carries the normalized explorer base URL", json.loads(get("/api/v1/summary"))["pool"]["explorerUrl"] == "https://mempool.example/elektron")
     paid = n.rpc("getblock", bhash, 2)["tx"][0]["vout"][0]["scriptPubKey"]["hex"]
     h.check("block pays one of the pool payout scripts", paid in scripts)
 

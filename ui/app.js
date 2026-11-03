@@ -9,6 +9,17 @@ const num = (n) => Math.round(n).toLocaleString('en-US');
 const pct = (x) => (x * 100).toFixed(1) + '%';
 const hms = (s) => { s = Math.max(0, Math.floor(s)); return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((v) => String(v).padStart(2, '0')).join(':'); };
 const dhms = (s) => `${Math.floor(s / 86400)}d ${hms(s % 86400)}`;
+const safeUrl = (u) => typeof u === 'string' && /^https?:\/\/[^\s"'<>]+$/.test(u);
+const link = (url, text, cls) => (safeUrl(url) ? `<a class="lnk ${cls || ''}" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : span(cls || '', text));
+const linkPad = (url, text, w, cls) => link(url, text, cls) + ' '.repeat(Math.max(0, w - text.length));
+const blockUrl = (base, hash) => (safeUrl(base) && /^[0-9a-f]{64}$/.test(hash || '') ? `${base.replace(/\/+$/, '')}/block/${hash}` : '');
+const trunc = (s, n) => (s.length > n ? s.slice(0, n - 2) + '..' : s);
+const workerLabel = (name) => {
+  const i = name.indexOf('.');
+  const addr = i < 0 ? name : name.slice(0, i);
+  const rest = i < 0 ? '' : name.slice(i);
+  return (addr.length > 12 ? addr.slice(0, 4) + '..' + addr.slice(-4) : addr) + rest;
+};
 const short = (h, a = 8, b = 6) => (h.length > a + b + 1 ? h.slice(0, a) + '..' + h.slice(-b) : h);
 
 function fmtHash(h) {
@@ -102,7 +113,7 @@ function demoSource() {
       const q = (p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : 0);
       const units = hr / 17592186044416;
       return {
-        pool: { name: 'photon', version: '0.1.0-demo', uptime: now() - st.start, mode: 'pplns' },
+        pool: { name: 'photon', version: '0.1.0-demo', uptime: now() - st.start, mode: 'pplns', explorerUrl: '' },
         node: { height: st.height, tip: st.tip, tipTime: st.tipTime, connected: true, transport: 'ipc', rttMs: 0.4, p50: q(0.5), p95: q(0.95), samples: st.lat.length, batchMs: st.batchMs },
         hashrate: { now: hr, m1: st.hist.slice(-12).reduce((a, b) => a + b, 0) / 12, h1: st.hist.reduce((a, b) => a + b, 0) / st.hist.length, hist: st.hist },
         miners: { online: miners.filter((m) => m.seen === 0).length, total: miners.length, v1: miners.filter((m) => m.proto === 'V1').length, v2: miners.filter((m) => m.proto === 'V2').length, edge: miners.filter((m) => m.proto === 'EDGE').length },
@@ -183,7 +194,7 @@ function render() {
   ].join('\n');
   $('#pane-tip').innerHTML = [
     `${span('dim', 'height    ')}${span('hl', num(s.node.height))}`,
-    `${span('dim', 'hash      ')}${span('c1', short(s.node.tip, 10, 8))}`,
+    `${span('dim', 'hash      ')}${link(blockUrl(s.pool.explorerUrl, s.node.tip), short(s.node.tip, 10, 8), 'c1')}`,
     `${span('dim', 'age       ')}${hms(age)} ${bar(age / 60, 14, age > 75 ? 'warn' : 'c1')}`,
     `${span('dim', 'node link ')}${s.node.connected ? span('ok', 'connected') : span('err', 'DOWN')} ${esc(s.node.transport)} rtt ${s.node.rttMs.toFixed(1)}ms`,
     `${span('dim', 'tip>job   ')}p50 ${s.node.p50.toFixed(0)}ms  p95 ${s.node.p95.toFixed(0)}ms  ${span('dim', 'n=' + s.node.samples)}`,
@@ -199,11 +210,11 @@ function render() {
   ].join('\n');
   renderMiners();
   const blocks = ui.src.blocks();
-  $('#pane-blocks').innerHTML = [span('row-h', pad('HEIGHT', 9) + pad('AGE', 9) + pad('WORKER', 10) + 'STATE')]
+  $('#pane-blocks').innerHTML = [span('row-h', pad('HEIGHT', 9) + pad('AGE', 9) + pad('WORKER', 19) + 'STATE')]
     .concat(blocks.map((b) => {
       const a = Date.now() / 1000 - b.time;
       const cls = b.status === 'found' ? 'ok' : b.status === 'maturing' ? 'c3' : 'dim';
-      return `${pad(num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 9)}${pad(b.worker, 10)}${span(cls, b.status)}`;
+      return `${linkPad(b.url || blockUrl(s.pool.explorerUrl, b.hash), num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 9)}${pad(trunc(workerLabel(b.worker), 18), 19)}${span(cls, b.status)}`;
     })).join('\n');
 }
 
@@ -217,11 +228,11 @@ function renderMiners() {
   const rows = minerRows();
   const shown = rows.slice(0, ui.minerLimit);
   $('#miners-hint').textContent = `${shown.length}/${rows.length} sort:${ui.minerSort}${ui.minerFilter ? ' grep:' + ui.minerFilter : ''}`;
-  $('#pane-miners').innerHTML = [span('row-h', pad('WORKER', 11) + pad('PROTO', 6) + lpad('HASHRATE', 12) + lpad('DIFF', 10) + lpad('OK', 8) + lpad('STALE', 7) + lpad('DUP', 6) + '  ' + pad('LAST', 6) + 'UNIT')]
+  $('#pane-miners').innerHTML = [span('row-h', pad('WORKER', 19) + pad('PROTO', 6) + lpad('HASHRATE', 12) + lpad('DIFF', 10) + lpad('OK', 8) + lpad('STALE', 7) + lpad('DUP', 6) + '  ' + pad('LAST', 6) + 'UNIT')]
     .concat(shown.map((m) => {
       const stale = m.stale / Math.max(1, m.ok + m.stale);
       const seen = m.seen === 0 ? span('ok', 'now   ') : span(m.seen > 5 ? 'warn' : 'dim', pad(m.seen + 's', 6));
-      return `${pad(m.name, 11)}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', m.unit)}`;
+      return `${pad(trunc(workerLabel(m.name), 18), 19)}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', m.unit)}`;
     })).join('\n');
 }
 
@@ -243,7 +254,7 @@ const cmds = {
   },
   tip() {
     const s = ui.src.summary();
-    out(`height ${span('hl', num(s.node.height))}   hash ${span('c1', s.node.tip)}`);
+    out(`height ${span('hl', num(s.node.height))}   hash ${link(blockUrl(s.pool.explorerUrl, s.node.tip), s.node.tip, 'c1')}`);
     out(`tip>job p50 ${s.node.p50.toFixed(0)}ms p95 ${s.node.p95.toFixed(0)}ms (n=${s.node.samples})   batch rpc ${s.node.batchMs.toFixed(0)}ms`);
   },
   miners(a) {
@@ -256,7 +267,10 @@ const cmds = {
     renderMiners();
     out(span('dim', `miners pane: ${ui.minerLimit} rows, sort ${ui.minerSort}${ui.minerFilter ? ', grep ' + ui.minerFilter : ''}`));
   },
-  blocks() { ui.src.blocks().slice(0, 8).forEach((b) => out(`${pad(num(b.height), 9)}${span('c1', short(b.hash, 12, 8))}  ${pad(b.worker, 10)} ${b.status}`)); },
+  blocks() {
+    const base = ui.src.summary().pool.explorerUrl;
+    ui.src.blocks().slice(0, 8).forEach((b) => out(`${pad(num(b.height), 9)}${link(b.url || blockUrl(base, b.hash), short(b.hash, 12, 8), 'c1')}  ${trunc(workerLabel(b.worker), 24)} ${b.status}`));
+  },
   alloc() {
     const s = ui.src.summary();
     out(`candidates ${num(s.alloc.candidates)}   units/s ${num(s.alloc.unitsPerSec)}   epoch use ${pct(s.alloc.epochUse)}   overlap ${s.alloc.overlap}`);

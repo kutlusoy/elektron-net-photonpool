@@ -67,6 +67,11 @@ with Harness("step08") as h:
     r = photond(bad_net, "check")
     h.check("config for another chain than the node is refused", r.returncode != 0 and "node is on chain regtest" in r.stderr, r.stderr.strip()[-120:])
 
+    bad_url = os.path.join(h.node.datadir + "-bad3.toml"); write_cfg(bad_url)
+    open(bad_url, "a").write('explorer_url = "javascript:alert(1)"\n')
+    r = photond(bad_url, "check")
+    h.check("a non-http explorer_url is refused", r.returncode != 0 and "explorer_url must start with http" in r.stderr, r.stderr.strip()[-120:])
+
     d = subprocess.Popen([PHOTOND, "-c", cfg, "run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         s = None

@@ -14,7 +14,7 @@ The operator UI (`ui/`) is a terminal-style single page: static HTML, CSS and Ja
 
 ## 2. UI behaviour
 
-- Panes: pool, chain tip, allocator, miners, blocks and a console (TTY) with a command line.
+- Panes: pool, chain tip, allocator, miners, blocks and a console (TTY) with a command line. With `api.explorer_url` set, the chain tip hash and the block heights in the blocks pane (and the output of `tip` and `blocks`) are links to the explorer.
 - Commands: `help`, `status`, `tip`, `miners [n] [sort k] [grep s] [reset]`, `blocks`, `alloc`, `log [n]`, `watch`, `theme cyan|amber|green|magenta`, `clear`, `about`. Tab completes, Up and Down recall history, Ctrl+L clears.
 - On load the page probes `/api/v1/summary`. If it is unreachable, or the page is opened from `file://`, it switches to a simulated engine and marks this with a blinking `DEMO DATA` tag in the title bar. Simulated numbers MUST NOT be shown without that tag. `?demo` forces demo mode.
 - The layout follows the viewport (three columns on wide screens, stacked on phones). Animations stop with `prefers-reduced-motion`. Theme choice is kept in `localStorage` when available.
@@ -26,9 +26,9 @@ All responses are JSON. Authentication and binding are described in section 4.
 
 | Endpoint | Content |
 |---|---|
-| `GET /api/v1/summary` | `pool {name, version, uptime, mode}`, `node {height, tip, tipTime, connected, transport, rttMs, p50, p95, samples, batchMs}`, `hashrate {now, m1, h1, hist[]}`, `miners {online, total, v1, v2, edge}`, `shares {perSec, ok, stale, dup, inv, total}`, `alloc {candidates, unitsPerSec, epochUse, overlap}`, `found` |
+| `GET /api/v1/summary` | `pool {name, version, uptime, mode, explorerUrl}`, `node {height, tip, tipTime, connected, transport, rttMs, p50, p95, samples, batchMs}`, `hashrate {now, m1, h1, hist[]}`, `miners {online, total, v1, v2, edge}`, `shares {perSec, ok, stale, dup, inv, total}`, `alloc {candidates, unitsPerSec, epochUse, overlap}`, `found` |
 | `GET /api/v1/miners?limit=n` | array of `{name, proto, hashrate, diff, ok, stale, dup, seen, unit}` |
-| `GET /api/v1/blocks?limit=n` | array of `{height, hash, time, worker, status}` with status `found`, `maturing` or `mature` |
+| `GET /api/v1/blocks?limit=n` | array of `{height, hash, time, worker, status, url?}` with status `found`, `maturing` or `mature`; `url` is `<explorer_url>/block/<hash>` and only present when `api.explorer_url` is configured |
 | `GET /api/v1/events` | Server-Sent Events, each event a JSON object `{t, lvl, msg}` with `lvl` one of `info`, `share`, `job`, `warn`, `err`, `blk` |
 
 Units: hashrate in hashes per second, times as Unix seconds (`tipTime`, `time`, `t`) or seconds (`uptime`, `seen`), ratios between 0 and 1. `tip>job` latencies (`p50`, `p95`) are milliseconds from tip change to the first job on the wire.
@@ -41,6 +41,7 @@ Units: hashrate in hashes per second, times as Unix seconds (`tipTime`, `time`, 
 4. The server SHOULD send a strict `Content-Security-Policy` (`default-src 'self'`) and `X-Content-Type-Options: nosniff`.
 5. Worker names and other miner-supplied text are untrusted. The UI escapes all dynamic text before rendering.
 6. The event stream and `limit` parameters MUST be bounded server-side.
+7. `api.explorer_url` MUST start with `http://` or `https://` and contain no quotes, angle brackets or spaces (checked at start-up). The UI additionally renders a link only for `http(s)` URLs and opens it with `rel="noopener noreferrer"`, so a bad value can never become a script URL.
 
 ## 5. Checklist
 

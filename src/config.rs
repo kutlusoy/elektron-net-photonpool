@@ -35,11 +35,14 @@ pub struct ApiCfg {
     pub listen: String,
     #[serde(default = "d_ui")]
     pub ui_dir: String,
+    /// Base URL of a mempool-style block explorer, used to link found blocks. Empty disables links.
+    #[serde(default)]
+    pub explorer_url: String,
 }
 
 impl Default for ApiCfg {
     fn default() -> Self {
-        Self { listen: d_listen(), ui_dir: d_ui() }
+        Self { listen: d_listen(), ui_dir: d_ui(), explorer_url: String::new() }
     }
 }
 
@@ -92,6 +95,20 @@ fn d_spot() -> usize { 4 }
 fn d_listen() -> String { "127.0.0.1:8081".into() }
 fn d_ui() -> String { "ui".into() }
 
+impl ApiCfg {
+    fn normalize_explorer(&mut self) -> Result<()> {
+        let url = self.explorer_url.trim().trim_end_matches('/').to_string();
+        if !url.is_empty() && !(url.starts_with("https://") || url.starts_with("http://")) {
+            bail!("api.explorer_url must start with http:// or https://");
+        }
+        if url.contains(['"', '\'', '<', '>', ' ']) {
+            bail!("api.explorer_url contains invalid characters");
+        }
+        self.explorer_url = url;
+        Ok(())
+    }
+}
+
 pub struct Network {
     pub hrp: &'static str,
     pub chain: &'static str,
@@ -100,11 +117,12 @@ pub struct Network {
 
 impl Config {
     pub fn load(path: &std::path::Path) -> Result<Self> {
-        let cfg: Config = toml::from_str(&std::fs::read_to_string(path)?)?;
+        let mut cfg: Config = toml::from_str(&std::fs::read_to_string(path)?)?;
         if cfg.pool.payout_addresses.is_empty() {
             bail!("pool.payout_addresses must not be empty");
         }
         cfg.network()?;
+        cfg.api.normalize_explorer()?;
         Ok(cfg)
     }
 

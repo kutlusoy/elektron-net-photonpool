@@ -27,3 +27,5 @@ share_secs = 10
 # Reachable from the host on 127.0.0.1:8081 only (see docker-compose.yml).
 listen = "0.0.0.0:8081"
 ui_dir = "/app/ui"
+# Optional: block explorer for links to found blocks (<explorer_url>/block/<hash>).
+explorer_url = "https://mempool.elektron-net.org"

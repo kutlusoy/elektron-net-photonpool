@@ -111,6 +111,8 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .c1 { color: var(--c1); } .c2 { color: var(--c2); } .c3 { color: var(--c3); }
 .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
 .hl { color: var(--fg); text-shadow: 0 0 8px var(--glow); }
+.lnk { color: var(--c1); text-decoration: underline dotted; text-underline-offset: 3px; }
+.lnk:hover, .lnk:focus-visible { color: var(--c3); text-shadow: 0 0 8px var(--glow); outline: none; }
 .row-h { color: var(--dim); border-bottom: 1px solid var(--line); }
 
 .tty { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px; white-space: pre-wrap; word-break: break-word; }
