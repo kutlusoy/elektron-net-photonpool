@@ -11,7 +11,27 @@ pub struct Config {
     pub stratum: StratumCfg,
     #[serde(default)]
     pub payout: PayoutCfg,
+    #[serde(default)]
+    pub ledger: LedgerCfg,
 }
+
+#[derive(Deserialize, Clone)]
+pub struct LedgerCfg {
+    #[serde(default = "d_db")]
+    pub path: String,
+    /// Share history older than this many days is deleted.
+    #[serde(default = "d_keep")]
+    pub keep_days: i64,
+}
+
+impl Default for LedgerCfg {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+fn d_db() -> String { "photond.db".into() }
+fn d_keep() -> i64 { 14 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -60,6 +80,27 @@ pub struct PayoutCfg {
     /// Maximum number of distinct solo accounts that get their own candidate per epoch.
     #[serde(default = "d_max_solo")]
     pub max_solo_accounts: usize,
+    /// Log what would be paid without sending anything. Turn off to pay for real.
+    #[serde(default = "d_true")]
+    pub dry_run: bool,
+    #[serde(default = "d_interval")]
+    pub interval_secs: u64,
+    /// Name of the node wallet used for payouts and PPS treasury checks. Empty disables wallet features.
+    #[serde(default)]
+    pub wallet: String,
+    /// Pool payout addresses to provision from the wallet (label "photon-pool") in addition to `pool.payout_addresses`.
+    #[serde(default)]
+    pub wallet_addresses: usize,
+    /// Environment variable holding the wallet passphrase (the wallet is unlocked only while paying).
+    #[serde(default = "d_pass_env")]
+    pub wallet_passphrase_env: String,
+    #[serde(default = "d_maturity_poll")]
+    pub maturity_poll_secs: u64,
+    #[serde(default = "d_max_outputs")]
+    pub max_outputs_per_tx: usize,
+    /// Fixed fee rate in sat/vB for payout transactions. Use it when the node cannot estimate fees (small or young networks).
+    #[serde(default)]
+    pub fee_rate: Option<f64>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -133,6 +174,10 @@ fn d_window() -> f64 { 2.0 }
 fn d_reserve() -> f64 { 5.0 }
 fn d_pps_share() -> f64 { 0.25 }
 fn d_max_solo() -> usize { 1000 }
+fn d_interval() -> u64 { 600 }
+fn d_pass_env() -> String { "PHOTON_WALLET_PASSPHRASE".into() }
+fn d_maturity_poll() -> u64 { 30 }
+fn d_max_outputs() -> usize { 100 }
 
 #[derive(Deserialize)]
 pub struct NodeCfg {
@@ -145,6 +190,7 @@ pub struct NodeCfg {
 #[derive(Deserialize)]
 pub struct PoolCfg {
     pub network: String,
+    #[serde(default)]
     pub payout_addresses: Vec<String>,
     #[serde(default = "d_refresh")]
     pub refresh_secs: u64,
@@ -262,8 +308,8 @@ impl Config {
 
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let mut cfg: Config = toml::from_str(&std::fs::read_to_string(path)?)?;
-        if cfg.pool.payout_addresses.is_empty() {
-            bail!("pool.payout_addresses must not be empty");
+        if cfg.pool.payout_addresses.is_empty() && !(cfg.payout.wallet_addresses > 0 && !cfg.payout.wallet.is_empty()) {
+            bail!("set pool.payout_addresses, or payout.wallet together with payout.wallet_addresses");
         }
         cfg.network()?;
         cfg.api.normalize_explorer()?;

@@ -52,6 +52,18 @@ modes = ["solo", "pplns", "pps"]
 min_payout = 0.01
 max_solo_accounts = 1000
 
+# Payouts. dry_run = true only logs what would be paid; set it to false to pay for real.
+dry_run = true
+interval_secs = 600
+# Node wallet for payouts and the PPS reserve check (empty disables both). The wallet is created or loaded
+# automatically; wallet_addresses pool addresses are provisioned from it (label "photon-pool").
+wallet = ""
+wallet_addresses = 0
+# Environment variable with the wallet passphrase, if the wallet is encrypted.
+wallet_passphrase_env = "PHOTON_WALLET_PASSPHRASE"
+# Fixed fee rate in sat/vB if the node cannot estimate fees.
+# fee_rate = 5.0
+
 [payout.fee_pct]
 pplns = 1.0
 pps = 2.0
@@ -77,6 +89,11 @@ max_hashrate_share = 0.25
 # [[stratum.ports]]
 # listen = "0.0.0.0:3335"
 # mode = "solo"
+
+[ledger]
+# Share and payout database (SQLite).
+path = "photond.db"
+keep_days = 14
 
 [api]
 # Read-only admin API and web UI. Keep this on loopback or a management network.

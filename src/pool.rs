@@ -1,11 +1,12 @@
 use crate::addr::script_for_address;
 use crate::config::{Config, Mode};
+use crate::ledger::Ledger;
 use crate::rpc::NodeRpc;
 use crate::template::{header_hash, meets_target, Candidate, Gbt, TxSet};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, watch};
@@ -98,6 +99,7 @@ pub struct Live {
     pub units_per_sec: f64,
     pub online: u64,
     pub total: u64,
+    pub pps_hashrate: f64,
 }
 
 pub struct Unit {
@@ -252,6 +254,10 @@ pub struct Pool {
     pub live: Mutex<Live>,
     pub solo_active: Mutex<HashMap<String, Instant>>,
     pub pps_ready: AtomicBool,
+    pub ledger: Ledger,
+    pub agg: Mutex<HashMap<(i64, String, u8), (f64, u64)>>,
+    pub wallet: Option<NodeRpc>,
+    pub treasury_free: AtomicI64,
 }
 
 impl Pool {
@@ -268,15 +274,29 @@ impl Pool {
         if height < net.min_height {
             bail!("node height {height} is below the attestation fix height {}", net.min_height);
         }
-        let payouts = cfg
-            .pool
-            .payout_addresses
+        let wallet = if cfg.payout.wallet.is_empty() { None } else { Some(crate::accounting::wallet_rpc(&cfg.node.rpc_url, &cfg.node.auth, &cfg.payout.wallet)?) };
+        let mut addresses = cfg.pool.payout_addresses.clone();
+        if let (Some(w), n) = (&wallet, cfg.payout.wallet_addresses) {
+            if n > 0 {
+                for a in crate::accounting::provision_wallet_addresses(&node, w, &cfg.payout.wallet, n).await.context("provisioning pool addresses from the wallet")? {
+                    if !addresses.contains(&a) {
+                        addresses.push(a);
+                    }
+                }
+            }
+        }
+        let payouts = addresses
             .iter()
             .map(|a| Ok(Payout { address: a.clone(), script: script_for_address(a, net.hrp)? }))
             .collect::<Result<Vec<_>>>()?;
+        let ledger = Ledger::open(&cfg.ledger.path).with_context(|| format!("opening ledger {}", cfg.ledger.path))?;
         let (events, _) = broadcast::channel(1024);
         let (epoch, _) = watch::channel(None);
-        let pool = Arc::new(Pool { cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0), sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()), pps_ready: AtomicBool::new(false) });
+        let pool = Arc::new(Pool {
+            cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
+            sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
+            pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0),
+        });
         pool.stats.connected.store(true, Ordering::Relaxed);
         Ok(pool)
     }

@@ -25,6 +25,9 @@ spot_check = 4
 [stratum]
 enabled = false
 
+[ledger]
+path = "{path}.db"
+
 [api]
 listen = "127.0.0.1:{API}"
 ui_dir = "{os.path.join(ROOT, 'ui')}"

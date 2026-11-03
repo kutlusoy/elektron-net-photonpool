@@ -1,6 +1,7 @@
 use crate::addr::script_for_address;
 use crate::config::{Mode, PortCfg, StratumCfg};
 use crate::diff::{hashes_per_share, target_from_difficulty};
+use crate::accounting::minute_now;
 use crate::pool::{get_f64, set_f64, unix_now, Epoch, FoundBlock, Pool, SessionStats, ShareResult, SoloEntry, MINER_VERSION_MASK, POOL_VERSION_SHIFT};
 use crate::template::Candidate;
 use crate::template::{header_hash, meets_target};
@@ -104,6 +105,10 @@ struct Session {
     last_adjust: Instant,
     shares_since_adjust: u32,
     bad: u32,
+    acc_minute: i64,
+    acc_diff: f64,
+    acc_cnt: u64,
+    acc_last: Instant,
 }
 
 #[derive(Deserialize)]
@@ -140,10 +145,17 @@ impl Session {
             pool, cfg, stats, id, mode: port.mode, port, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
             difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0, rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(),
             next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_adjust: now, shares_since_adjust: 0, bad: 0,
+            acc_minute: 0, acc_diff: 0.0, acc_cnt: 0, acc_last: now,
         }
     }
 
     async fn run(mut self, stream: TcpStream) -> Result<()> {
+        let res = self.run_inner(stream).await;
+        self.flush_acc();
+        res
+    }
+
+    async fn run_inner(&mut self, stream: TcpStream) -> Result<()> {
         let (rd, mut wr) = stream.into_split();
         let mut rd = BufReader::with_capacity(4096, rd);
         let mut buf: Vec<u8> = Vec::with_capacity(512);
@@ -311,6 +323,9 @@ impl Session {
     }
 
     async fn send_job(&mut self, wr: &mut OwnedWriteHalf, force_clean: bool) -> Result<()> {
+        if self.acc_cnt > 0 && self.acc_last.elapsed() > Duration::from_secs(2) {
+            self.flush_acc();
+        }
         let Some(epoch) = self.epoch_rx.borrow().clone() else {
             self.schedule_next();
             return Ok(());
@@ -444,7 +459,29 @@ impl Session {
         self.pool.stats.inv.fetch_add(1, Ordering::Relaxed);
     }
 
+    fn flush_acc(&mut self) {
+        if self.acc_cnt > 0 {
+            self.pool.agg_add(self.acc_minute, &self.account, self.mode, self.acc_diff, self.acc_cnt);
+            self.acc_diff = 0.0;
+            self.acc_cnt = 0;
+        }
+    }
+
+    fn acc_share(&mut self, diff: f64) {
+        let minute = minute_now();
+        if self.acc_cnt > 0 && minute != self.acc_minute {
+            self.flush_acc();
+        }
+        if self.acc_cnt == 0 {
+            self.acc_minute = minute;
+            self.acc_last = Instant::now();
+        }
+        self.acc_diff += diff;
+        self.acc_cnt += 1;
+    }
+
     fn count_ok(&mut self, credit: f64) {
+        self.acc_share(credit);
         self.stats.ok.fetch_add(1, Ordering::Relaxed);
         self.pool.stats.ok.fetch_add(1, Ordering::Relaxed);
         self.shares_since_adjust += 1;
@@ -474,17 +511,22 @@ impl Session {
         self.set_difficulty(wr, d).await
     }
 
-    fn block_found(&self, epoch: &Arc<Epoch>, c: &Candidate, version: u32, ntime: u32, nonce: u32) {
+    fn block_found(&mut self, epoch: &Arc<Epoch>, c: &Candidate, version: u32, ntime: u32, nonce: u32) {
+        self.flush_acc();
         let hex = c.block_hex(version, ntime, nonce);
         let mut h = header_hash(&c.header(version, ntime, nonce));
         debug_assert!(meets_target(&h, &c.target));
         h.reverse();
-        let (pool, height, hash, worker, mode) = (self.pool.clone(), epoch.height, hex::encode(h), format!("{}.{}", self.account, self.worker), self.mode.as_str());
+        let (pool, height, hash, account, worker, mode) = (self.pool.clone(), epoch.height, hex::encode(h), self.account.clone(), format!("{}.{}", self.account, self.worker), self.mode);
+        let (reward, subsidy, net_diff) = (c.coinbase_value, c.subsidy(), crate::diff::difficulty_from_target(&c.target));
         tokio::spawn(async move {
             match pool.node.submit_block(&hex).await {
                 Ok(None) => {
-                    pool.stats.found.lock().unwrap().push(FoundBlock { height, hash: hash.clone(), time: unix_now(), worker: worker.clone(), mode, status: "found" });
-                    pool.event("blk", format!("BLOCK FOUND {height} {}.. by {worker} [{mode}] -> submitblock: accepted", &hash[..16]));
+                    pool.stats.found.lock().unwrap().push(FoundBlock { height, hash: hash.clone(), time: unix_now(), worker: worker.clone(), mode: mode.as_str(), status: "found" });
+                    if let Err(e) = pool.record_block(height, reward, subsidy, net_diff, hash.clone(), account, worker.clone(), mode).await {
+                        pool.event("err", format!("ledger could not record block {height}: {e}"));
+                    }
+                    pool.event("blk", format!("BLOCK FOUND {height} {}.. by {worker} [{}] -> submitblock: accepted", &hash[..16], mode.as_str()));
                 }
                 Ok(Some(r)) => pool.event("err", format!("block {height} by {worker} rejected by node: {r}")),
                 Err(e) => pool.event("err", format!("submitblock failed for {height}: {e}")),
@@ -501,9 +543,12 @@ async fn stats_task(pool: Arc<Pool>) {
         tick.tick().await;
         let sessions: Vec<Arc<SessionStats>> = pool.sessions.lock().unwrap().values().cloned().collect();
         let now = unix_now();
-        let (mut hr, mut online, mut shares) = (0.0, 0u64, 0u64);
+        let (mut hr, mut online, mut shares, mut pps_hr) = (0.0, 0u64, 0u64, 0.0);
         for s in &sessions {
             hr += get_f64(&s.hashrate);
+            if s.mode.load(Ordering::Relaxed) == Mode::Pps as u64 {
+                pps_hr += get_f64(&s.hashrate);
+            }
             if now - get_f64(&s.last_seen) < 120.0 {
                 online += 1;
             }
@@ -515,6 +560,7 @@ async fn stats_task(pool: Arc<Pool>) {
         live.units_per_sec = if eid == prev_epoch && used >= prev_units { (used - prev_units) as f64 } else { 0.0 };
         live.shares_per_sec = shares.saturating_sub(prev_shares) as f64;
         live.hashrate = hr;
+        live.pps_hashrate = pps_hr;
         live.m1 = if live.m1 == 0.0 { hr } else { live.m1 + (hr - live.m1) * (1.0 - (-1.0f64 / 60.0).exp()) };
         live.h1 = if live.h1 == 0.0 { hr } else { live.h1 + (hr - live.h1) * (1.0 - (-1.0f64 / 3600.0).exp()) };
         live.hist.push_back(hr);

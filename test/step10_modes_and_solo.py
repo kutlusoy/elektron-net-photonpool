@@ -43,6 +43,9 @@ listen = "127.0.0.1:{SOLOPORT}"
 mode = "solo"
 allow_override = false
 
+[ledger]
+path = "{path}.db"
+
 [api]
 listen = "127.0.0.1:{API}"
 ui_dir = "{os.path.join(ROOT, 'ui')}"

@@ -1,7 +1,9 @@
+mod accounting;
 mod addr;
 mod api;
 mod config;
 mod diff;
+mod ledger;
 mod pool;
 mod rpc;
 mod stratum;
@@ -57,6 +59,7 @@ async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&pool.cfg.api.listen).await?;
     pool.event("info", format!("photond {} listening on {}", env!("CARGO_PKG_VERSION"), pool.cfg.api.listen));
     tokio::spawn(pool.clone().run_tip_loop());
+    tokio::spawn(pool.clone().run_accounting());
     if pool.cfg.stratum.enabled {
         tokio::spawn(stratum::serve(pool.clone()));
     }

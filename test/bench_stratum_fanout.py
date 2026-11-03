@@ -30,6 +30,9 @@ listen = "127.0.0.1:{STRATUM}"
 initial_difficulty = 0.001
 max_connections = 100000
 
+[ledger]
+path = "{path}.db"
+
 [api]
 listen = "127.0.0.1:{API}"
 ui_dir = "{os.path.join(ROOT, 'ui')}"

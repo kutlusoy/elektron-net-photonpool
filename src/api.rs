@@ -1,3 +1,4 @@
+use crate::ledger;
 use crate::pool::{get_f64, unix_now, Pool};
 use axum::extract::{Query, State};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
@@ -24,6 +25,8 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/api/v1/miners", get(miners))
         .route("/api/v1/blocks", get(blocks))
         .route("/api/v1/events", get(events))
+        .route("/api/v1/ledger", get(ledger_view))
+        .route("/api/v1/account/:address", get(account))
         .fallback_service(ServeDir::new(ui))
         .with_state(pool)
 }
@@ -48,6 +51,11 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
         Some(e) => (e.height, e.tip_hex.clone(), e.started_unix, e.candidates.len(), e.units_used(), e.units_total(), e.overlap.load(Ordering::Relaxed)),
         None => (0, String::new(), unix_now(), 0, 0, 1, 0),
     };
+    let modes: Vec<Value> = [crate::config::Mode::Solo, crate::config::Mode::Pplns, crate::config::Mode::Pps]
+        .iter()
+        .filter(|m| p.cfg.payout.offers(**m))
+        .map(|m| json!({"mode": m.as_str(), "fee": p.cfg.payout.fee(*m), "available": p.mode_available(*m).is_ok()}))
+        .collect();
     Json(json!({
         "pool": {"name": "photon", "version": env!("CARGO_PKG_VERSION"), "uptime": p.started.elapsed().as_secs_f64(), "mode": "core", "explorerUrl": p.cfg.api.explorer_url},
         "node": {
@@ -61,6 +69,7 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
         "shares": {"perSec": live.shares_per_sec, "ok": frac(ok), "stale": frac(stale), "dup": frac(dup), "inv": frac(inv), "total": total},
         "alloc": {"candidates": cands, "unitsPerSec": live.units_per_sec, "epochUse": used as f64 / total_units as f64, "overlap": overlap},
         "found": s.found.lock().unwrap().len(),
+        "modes": modes,
     }))
 }
 
@@ -88,23 +97,88 @@ async fn miners(State(p): State<Arc<Pool>>, Query(q): Query<Limit>) -> Json<Valu
 }
 
 async fn blocks(State(p): State<Arc<Pool>>, Query(q): Query<Limit>) -> Json<Value> {
-    let found = p.stats.found.lock().unwrap();
-    let n = q.limit.unwrap_or(12).min(200);
+    Json(blocks_view(&p, q.limit.unwrap_or(12).min(200) as i64).await)
+}
+
+pub fn mode_name(mode: i64) -> &'static str {
+    match mode {
+        0 => "solo",
+        1 => "pplns",
+        _ => "pps",
+    }
+}
+
+pub async fn blocks_view(p: &Arc<Pool>, n: i64) -> Value {
+    let rows = p.ledger.call(move |c| ledger::recent_blocks(c, n)).await.unwrap_or_default();
     let base = &p.cfg.api.explorer_url;
-    Json(Value::Array(
-        found
-            .iter()
-            .rev()
-            .take(n)
+    Value::Array(
+        rows.into_iter()
             .map(|b| {
-                let mut v = json!(b);
+                let mut v = json!({"height": b.height, "hash": b.hash, "time": b.found_at, "worker": b.worker, "mode": mode_name(b.mode), "status": b.status});
                 if let Some(u) = block_url(base, &b.hash) {
                     v["url"] = json!(u);
                 }
                 v
             })
             .collect(),
-    ))
+    )
+}
+
+/// Balances in leptons, shares as summed difficulty; `None` for an address that does not belong to the configured network.
+pub async fn account_view(p: &Arc<Pool>, address: &str) -> Option<Value> {
+    crate::addr::script_for_address(address, p.cfg.network().ok()?.hrp).ok()?;
+    let now_min = crate::accounting::minute_now();
+    let addr = address.to_string();
+    let (info, day, hour, payouts) = p
+        .ledger
+        .call(move |c| {
+            Ok((ledger::account_info(c, &addr)?, ledger::account_shares(c, &addr, now_min - 1440)?, ledger::account_shares(c, &addr, now_min - 60)?, ledger::account_payouts(c, &addr, 10)?))
+        })
+        .await
+        .ok()?;
+    let prefix = format!("{address}.");
+    let (mut hashrate, mut workers) = (0.0, 0u64);
+    for s in p.sessions.lock().unwrap().values() {
+        if s.name.lock().unwrap().starts_with(&prefix) {
+            hashrate += get_f64(&s.hashrate);
+            workers += 1;
+        }
+    }
+    let shares = |rows: Vec<(i64, f64, i64)>| {
+        let mut m = serde_json::Map::new();
+        for (mode, diff, cnt) in rows {
+            m.insert(mode_name(mode).into(), json!({"difficulty": diff, "count": cnt}));
+        }
+        Value::Object(m)
+    };
+    Some(json!({
+        "address": address, "hashrate": hashrate, "workers": workers,
+        "shares1h": shares(hour), "shares24h": shares(day),
+        "balance": {"pending": info.pending, "confirmed": info.confirmed, "paid": info.paid},
+        "payouts": payouts.into_iter().map(|r| json!({"time": r.created_at, "txid": r.txid, "amount": r.amount, "status": r.status})).collect::<Vec<_>>(),
+    }))
+}
+
+async fn account(State(p): State<Arc<Pool>>, axum::extract::Path(address): axum::extract::Path<String>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match account_view(&p, &address).await {
+        Some(v) => Json(v).into_response(),
+        None => (axum::http::StatusCode::BAD_REQUEST, "invalid address").into_response(),
+    }
+}
+
+async fn ledger_view(State(p): State<Arc<Pool>>) -> Json<Value> {
+    let (liabilities, payable, payouts, by_status) = p
+        .ledger
+        .call(|c| Ok((ledger::liabilities(c)?, ledger::payable(c, 1)?.len(), ledger::recent_payouts(c, 10)?, ledger::blocks_by_status(c)?)))
+        .await
+        .unwrap_or_default();
+    Json(json!({
+        "dryRun": p.cfg.payout.dry_run, "wallet": p.wallet.is_some(), "ppsReady": p.pps_ready.load(Ordering::Relaxed),
+        "liabilities": liabilities, "treasuryFree": p.treasury_free.load(Ordering::Relaxed), "payableAccounts": payable,
+        "blocks": by_status.into_iter().collect::<std::collections::HashMap<_, _>>(),
+        "payouts": payouts.into_iter().map(|r| json!({"id": r.id, "time": r.created_at, "txid": r.txid, "amount": r.amount, "status": r.status})).collect::<Vec<_>>(),
+    }))
 }
 
 /// Link to a block page of a mempool-style explorer; `None` when no explorer is configured.

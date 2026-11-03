@@ -2,3 +2,6 @@
 __pycache__/
 photond.toml
 data/
+*.db
+*.db-wal
+*.db-shm

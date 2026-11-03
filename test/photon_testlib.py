@@ -54,9 +54,9 @@ class Node:
         except Exception: self.proc.terminate()
         self.proc.wait(timeout=60)
 
-    def rpc(self, method, *params):
+    def rpc(self, method, *params, wallet=None):
         body = json.dumps({"method": method, "params": list(params), "id": 1}).encode()
-        req = urllib.request.Request(f"http://127.0.0.1:{RPCPORT}/", body, {"Authorization": "Basic " + self.auth, "Content-Type": "application/json"})
+        req = urllib.request.Request(f"http://127.0.0.1:{RPCPORT}/" + (f"wallet/{wallet}" if wallet else ""), body, {"Authorization": "Basic " + self.auth, "Content-Type": "application/json"})
         try: raw = urllib.request.urlopen(req).read()
         except urllib.error.HTTPError as e: raw = e.read()
         r = json.loads(raw, parse_float=Decimal)

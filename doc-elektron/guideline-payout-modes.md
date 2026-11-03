@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Payout Modes Guideline
 
-- **Version:** 0.2 (draft; mode selection and solo direct payout implemented, ledger and payouts in progress)
+- **Version:** 0.3 (draft; implemented and tested on regtest: mode selection, solo direct payout, ledger, PPLNS, PPS, maturity tracking, payouts)
 - **Date:** November 3, 2026
 - **Audience:** Pool developers and operators
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/node/miner.cpp` (coinbase construction), `src/consensus/consensus.h` (`COINBASE_MATURITY`) - treat as ground truth for anything the doc references
@@ -82,21 +82,24 @@ At block maturity the reward minus fee is split over the shares inside the windo
 
 ## 4. Ledger
 
-Persistent store (SQLite first, no external service needed):
+SQLite (`ledger.path`, default `photond.db`) on a dedicated thread, no external service. Tables: `share_buckets` (per minute, account and mode: summed difficulty and count), `blocks` (finder, mode, reward, status `found`, `maturing`, `mature`, `orphaned`), `credits` (pending PPLNS credit per block and account), `balance` (confirmed and paid per account), `payouts` and `payout_items`.
 
-| Table | Content |
-|---|---|
-| `accounts` | payout address, creation time |
-| `share_buckets` | per minute, account and mode: summed accepted difficulty (aggregated, to keep the write rate low) |
-| `blocks` | height, hash, finder account and mode, reward, status (`found`, `maturing`, `mature`, `orphaned`) |
-| `credits` | account, mode, amount, source (block or PPS share bucket), status |
-| `payouts` | account, amount, transaction id, status (`pending`, `broadcast`, `confirmed`, `failed`) |
+Shares are aggregated in memory per session and flushed every few seconds in one transaction; nothing is written per share. Share history older than `ledger.keep_days` (default 14) is pruned.
 
-Share counters are flushed in batches from memory, never per share. The ledger is the only source of truth; the UI reads it through the admin API.
+## 5. Accounting rules (as implemented)
 
-## 5. Payout worker
+- **PPLNS:** when a PPLNS miner finds a block, the reward minus the PPLNS fee is split over the newest PPLNS shares up to `window_factor * network difficulty` of difficulty. The newest minute bucket that crosses the window boundary is taken proportionally. Credits stay `pending` until the block is mature (101 confirmations), become `confirmed` balance then, and are cancelled when the block is orphaned.
+- **PPS:** every flushed PPS share row is credited immediately to the confirmed balance with `difficulty / network difficulty * subsidy * (1 - fee)`. A share is never credited more than a whole block (`subsidy * (1 - fee)`), which only matters on networks with a very low difficulty. The base is the block subsidy, transaction fees are not part of it.
+- **Solo:** paid in the coinbase, only recorded in the ledger.
+- **Treasury guard:** PPS is available only while `wallet balance - liabilities >= payout.pps.reserve_min` and the PPS share of the pool hashrate is within `max_hashrate_share`. The guard runs every payout interval; new PPS connections are refused with a clear message while it is off.
 
-A separate task: selects accounts whose confirmed balance reaches `min_payout`, builds one batched transaction with the node wallet (RPC `sendmany`), records the payout before broadcasting and keeps it idempotent so a restart can never pay twice. Orphaned blocks reverse their pending credits. The node used for payouts needs a wallet; the wallet keys are not stored in the pool process.
+## 5.1 Payout worker
+
+- Runs every `payout.interval_secs` (default 600), selects accounts with at least `payout.min_payout` and pays them in batches of at most `max_outputs_per_tx` with one `sendmany` per batch. The pool wallet pays the network fee. `payout.fee_rate` (sat/vB) fixes the rate when the node cannot estimate fees.
+- **Dry run is the default.** With `payout.dry_run = true` the worker only logs what it would pay. Set it to `false` to pay for real.
+- Safety: the balances are debited and a `pending` payout row is written before `sendmany`. A definitive RPC error reverts the balances, an unknown outcome (node unreachable) leaves the row pending. On every cycle pending rows are reconciled against the wallet through the unique comment `photon-payout-<id>`, so a crash can neither lose nor double-pay a batch. Repeated failures back off exponentially.
+- The wallet can be encrypted: the passphrase comes from the environment variable named by `payout.wallet_passphrase_env`, the wallet is unlocked only while paying.
+- With `payout.wallet` and `payout.wallet_addresses` the pool creates or loads the wallet and provisions its payout addresses itself (label `photon-pool`), so no address list has to be maintained.
 
 ## 6. Decisions taken
 
@@ -105,18 +108,18 @@ A separate task: selects accounts whose confirmed balance reaches `min_payout`, 
 3. PPS is offered but starts paused until the pool wallet holds the configured reserve.
 4. Payouts use a wallet on the pool's Elektron Net node (as in the existing stack), with a dry-run switch that is on by default.
 
-## 7. Implementation plan
+## 7. Implementation status
 
-1. (done) Mode selection and solo direct payout in the Stratum server.
-2. Ledger with aggregated share buckets and block tracking.
-3. Maturity tracking and credit calculation per mode (unit tests with synthetic block and share histories).
-4. Payout worker and its idempotency tests on regtest.
-5. UI and API: per-mode statistics and per-account views.
+1. Done: mode selection and solo direct payout (`test/step10_modes_and_solo.py`).
+2. Done: ledger, PPLNS and PPS accounting, maturity tracking (unit tests in `src/ledger.rs`).
+3. Done: payout worker with dry run, restart safety and wallet provisioning (`test/step11_ledger_and_payouts.py`, wallet-enabled node required).
+4. Next: public pool page and API, per-mode statistics in the UI.
 
 ## 8. Checklist
 
 - [x] Operator decisions from section 6 made.
 - [x] Mode selection and solo direct payout implemented and tested (`test/step10_modes_and_solo.py`).
-- [ ] Ledger and credit calculation tested with synthetic histories.
-- [ ] Payout worker tested against a regtest wallet, including restart safety.
-- [ ] PPS reserve guard tested.
+- [x] Ledger and credit calculation tested with synthetic histories.
+- [x] Payout worker tested against a regtest wallet, including the dry-run to live switch and no double payout.
+- [x] PPS reserve guard tested (refused while liabilities exceed the wallet balance, available when covered).
+- [ ] Hardware and mainnet-scale tests.
