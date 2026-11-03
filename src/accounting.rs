@@ -23,7 +23,7 @@ pub fn wallet_rpc(base_url: &str, auth: &str, name: &str) -> Result<NodeRpc> {
 }
 
 /// Makes sure the wallet is loaded (creating it if needed) and holds `count` addresses labelled for the pool.
-pub async fn provision_wallet_addresses(node: &NodeRpc, wallet: &NodeRpc, name: &str, count: usize) -> Result<Vec<String>> {
+pub async fn provision_wallet_addresses(node: &NodeRpc, wallet: &NodeRpc, name: &str, count: usize, pass_env: &str) -> Result<Vec<String>> {
     let loaded = node.call("listwallets", json!([])).await?;
     if !loaded.as_array().map(|a| a.iter().any(|w| w == name)).unwrap_or(false) {
         if node.call("loadwallet", json!([name])).await.is_err() {
@@ -35,12 +35,24 @@ pub async fn provision_wallet_addresses(node: &NodeRpc, wallet: &NodeRpc, name: 
         Err(_) => Vec::new(),
     };
     addrs.sort();
+    let mut unlocked = false;
     while addrs.len() < count {
-        let a = wallet.call("getnewaddress", json!([ADDRESS_LABEL, "bech32"])).await?;
+        let a = match wallet.call("getnewaddress", json!([ADDRESS_LABEL, "bech32"])).await {
+            Ok(a) => a,
+            Err(e) if !unlocked && e.to_string().contains("-13") => {
+                let pass = std::env::var(pass_env).unwrap_or_default();
+                wallet.call("walletpassphrase", json!([pass, 120])).await.context("the wallet is locked and cannot be unlocked")?;
+                unlocked = true;
+                wallet.call("getnewaddress", json!([ADDRESS_LABEL, "bech32"])).await?
+            }
+            Err(e) => return Err(e),
+        };
         addrs.push(a.as_str().ok_or_else(|| anyhow!("bad getnewaddress"))?.to_string());
     }
+    if unlocked {
+        let _ = wallet.call("walletlock", json!([])).await;
+    }
     addrs.sort();
-    addrs.truncate(count.max(addrs.len().min(count)));
     Ok(addrs)
 }
 

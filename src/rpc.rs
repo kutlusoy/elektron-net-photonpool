@@ -35,9 +35,10 @@ impl NodeRpc {
     }
 
     fn header(auth: &str, cookie: Option<&str>) -> Result<String> {
-        let creds = match cookie {
-            Some(path) => std::fs::read_to_string(path).with_context(|| format!("reading cookie {path}"))?.trim().to_string(),
-            None => auth.to_string(),
+        let creds = match (cookie, auth.strip_prefix("env:")) {
+            (Some(path), _) => std::fs::read_to_string(path).with_context(|| format!("reading cookie {path}"))?.trim().to_string(),
+            (None, Some(var)) => std::env::var(var).with_context(|| format!("environment variable {var} is not set"))?,
+            (None, None) => auth.to_string(),
         };
         Ok(format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(creds)))
     }

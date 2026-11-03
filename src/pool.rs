@@ -141,15 +141,14 @@ pub struct Epoch {
 
 /// Direct-payout candidate of one solo account: the coinbase pays the miner's own address.
 pub struct SoloEntry {
-    pub address: String,
     pub cand: Candidate,
     next: AtomicU64,
     pub overlap: AtomicU64,
 }
 
 impl SoloEntry {
-    pub fn new(address: String, cand: Candidate) -> Self {
-        Self { address, cand, next: AtomicU64::new(0), overlap: AtomicU64::new(0) }
+    pub fn new(cand: Candidate) -> Self {
+        Self { cand, next: AtomicU64::new(0), overlap: AtomicU64::new(0) }
     }
 
     pub fn next_unit(&self) -> (u32, u8, u32) {
@@ -278,7 +277,7 @@ impl Pool {
         let mut addresses = cfg.pool.payout_addresses.clone();
         if let (Some(w), n) = (&wallet, cfg.payout.wallet_addresses) {
             if n > 0 {
-                for a in crate::accounting::provision_wallet_addresses(&node, w, &cfg.payout.wallet, n).await.context("provisioning pool addresses from the wallet")? {
+                for a in crate::accounting::provision_wallet_addresses(&node, w, &cfg.payout.wallet, n, &cfg.payout.wallet_passphrase_env).await.context("provisioning pool addresses from the wallet")? {
                     if !addresses.contains(&a) {
                         addresses.push(a);
                     }
@@ -339,7 +338,7 @@ impl Pool {
         if let Some(r) = self.node.proposal(&c.block_hex(c.version, c.curtime, 0)).await? {
             bail!("node rejected the solo candidate: {r}");
         }
-        Ok(SoloEntry::new(address.to_string(), c))
+        Ok(SoloEntry::new(c))
     }
 
     /// Returns the direct-payout candidate of a solo account for this epoch, building it when needed.
@@ -472,7 +471,7 @@ mod tests {
 
     fn dummy(n: usize, target: u8) -> Epoch {
         let c = |i: u8| Candidate {
-            prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [target; 32], curtime: 1000, mintime: 900, height: 1, coinbase_value: 0, fees: 0,
+            prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [target; 32], curtime: 1000, mintime: 900, coinbase_value: 0, fees: 0,
             coinbase_wit: vec![], merkle_root: [i; 32],
             txs: std::sync::Arc::new(TxSet { datas: vec![], txids: vec![], branch: vec![] }),
             notify_b: String::new(), notify_c: String::new(),

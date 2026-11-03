@@ -2,7 +2,7 @@ use crate::api::{account_view, block_url, mode_name};
 use crate::config::Mode;
 use crate::diff::difficulty_from_target;
 use crate::ledger;
-use crate::pool::{get_f64, unix_now, Pool};
+use crate::pool::{unix_now, Pool};
 use anyhow::Result;
 use axum::extract::{ConnectInfo, Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};

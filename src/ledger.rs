@@ -5,6 +5,7 @@ use tokio::sync::oneshot;
 
 pub const LEPTON: i64 = 100_000_000;
 
+#[allow(dead_code)]
 pub const MODE_SOLO: i64 = 0;
 pub const MODE_PPLNS: i64 = 1;
 pub const MODE_PPS: i64 = 2;

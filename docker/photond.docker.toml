@@ -17,6 +17,21 @@ payout_addresses = [
 refresh_secs = 20
 spot_check = 4
 
+[payout]
+default_mode = "pplns"
+# Payouts stay in dry-run mode until you set this to false.
+dry_run = true
+
+[ledger]
+path = "/data/photond.db"
+
+[public]
+# Public pool page on port 8082 (put a TLS reverse proxy in front for the open internet).
+enabled = true
+listen = "0.0.0.0:8082"
+name = "Photon Pool"
+stratum_host = ""
+
 [stratum]
 enabled = true
 listen = "0.0.0.0:3333"
