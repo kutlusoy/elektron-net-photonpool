@@ -44,6 +44,40 @@ max_job_interval_ms = 30000
 # Require "<be1q address>.<worker>" as the miner user name.
 require_address = true
 
+[payout]
+# Mode of the default Stratum port (solo, pplns, pps) and the modes offered at all.
+default_mode = "pplns"
+modes = ["solo", "pplns", "pps"]
+# Solo miners are paid directly in the coinbase (no fee). The other values are the built-in defaults.
+min_payout = 0.01
+max_solo_accounts = 1000
+
+[payout.fee_pct]
+pplns = 1.0
+pps = 2.0
+
+[payout.pplns]
+window_factor = 2.0
+
+[payout.pps]
+# Offered, but refused until the pool wallet holds reserve_min above all liabilities.
+enabled = true
+reserve_min = 5.0
+max_hashrate_share = 0.25
+
+# Optional: several Stratum ports with their own default mode. Without any [[stratum.ports]]
+# block the single `listen` port above is used with default_mode.
+# [[stratum.ports]]
+# listen = "0.0.0.0:3333"
+# mode = "pplns"
+# allow_override = true      # miners may choose a mode with m=solo|pplns|pps in the password
+# [[stratum.ports]]
+# listen = "0.0.0.0:3334"
+# mode = "pps"
+# [[stratum.ports]]
+# listen = "0.0.0.0:3335"
+# mode = "solo"
+
 [api]
 # Read-only admin API and web UI. Keep this on loopback or a management network.
 listen = "127.0.0.1:8081"

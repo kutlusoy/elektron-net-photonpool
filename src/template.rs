@@ -24,6 +24,8 @@ pub struct Gbt {
 pub struct GbtTx {
     pub data: String,
     pub txid: String,
+    #[serde(default)]
+    pub fee: i64,
 }
 
 #[derive(Deserialize)]
@@ -48,6 +50,9 @@ pub struct Candidate {
     pub target: [u8; 32],
     pub curtime: u32,
     pub mintime: u32,
+    pub height: u32,
+    pub coinbase_value: i64,
+    pub fees: i64,
     pub coinbase_wit: Vec<u8>,
     pub merkle_root: [u8; 32],
     pub txs: Arc<TxSet>,
@@ -109,6 +114,9 @@ impl Candidate {
             target,
             curtime: g.curtime,
             mintime: g.mintime,
+            height: g.height,
+            coinbase_value: g.coinbasevalue,
+            fees: g.transactions.iter().map(|t| t.fee).sum(),
             coinbase_wit: cb.wit,
             merkle_root: merkle_root(&cb.txid, &txs.branch),
             txs,
@@ -120,6 +128,10 @@ impl Candidate {
     /// Appends a complete mining.notify line; the candidate-specific parts are pre-rendered.
     pub fn write_notify(&self, out: &mut String, job_id: u64, version: u32, ntime: u32, clean: bool) {
         let _ = write!(out, "{{\"id\":null,\"method\":\"mining.notify\",\"params\":[\"{job_id:x}{}{version:08x}{}{ntime:08x}\",{clean}]}}\n", self.notify_b, self.notify_c);
+    }
+
+    pub fn subsidy(&self) -> i64 {
+        self.coinbase_value - self.fees
     }
 
     pub fn header(&self, version: u32, ntime: u32, nonce: u32) -> [u8; 80] {

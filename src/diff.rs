@@ -17,6 +17,15 @@ pub fn target_from_difficulty(d: f64) -> [u8; 32] {
     out
 }
 
+/// Network difficulty implied by a big-endian target (difficulty 1 = 0x00000000ffff << 208).
+pub fn difficulty_from_target(target: &[u8; 32]) -> f64 {
+    let t = target.iter().fold(0.0f64, |acc, b| acc * 256.0 + *b as f64);
+    if t <= 0.0 {
+        return f64::INFINITY;
+    }
+    65535.0 * 2f64.powi(208) / t
+}
+
 pub fn hashes_per_share(difficulty: f64) -> f64 {
     difficulty * 4_294_967_296.0
 }
@@ -43,6 +52,14 @@ mod tests {
         expect[6] = 0xff;
         expect[7] = 0xff;
         assert_eq!(t, expect);
+    }
+
+    #[test]
+    fn difficulty_roundtrip() {
+        for d in [1.0, 16.0, 1234.5, 1.0e6] {
+            let back = difficulty_from_target(&target_from_difficulty(d));
+            assert!((back / d - 1.0).abs() < 1e-3, "{d} -> {back}");
+        }
     }
 
     #[test]

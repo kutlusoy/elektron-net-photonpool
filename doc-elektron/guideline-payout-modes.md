@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Payout Modes Guideline
 
-- **Version:** 0.1 (design draft, not implemented)
+- **Version:** 0.2 (draft; mode selection and solo direct payout implemented, ledger and payouts in progress)
 - **Date:** November 3, 2026
 - **Audience:** Pool developers and operators
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/node/miner.cpp` (coinbase construction), `src/consensus/consensus.h` (`COINBASE_MATURITY`) - treat as ground truth for anything the doc references
@@ -28,15 +28,20 @@ Disabled modes are refused with a clear error (Stratum code 20, "mode not offere
 ```toml
 [payout]
 default_mode = "pplns"
-min_payout = 0.01              # in coins, per account
-fee_pct = { solo = 1.0, pplns = 1.0, pps = 2.0 }   # operator decision
+modes = ["solo", "pplns", "pps"]
+min_payout = 0.01              # in coins, per account (default)
+max_solo_accounts = 1000
+
+[payout.fee_pct]               # solo is paid directly in the coinbase and has no fee
+pplns = 1.0                    # default
+pps = 2.0                      # default
 
 [payout.pplns]
-window_factor = 2.0            # window = factor * network difficulty, in difficulty-weighted shares
+window_factor = 2.0            # default: window = factor * network difficulty
 
 [payout.pps]
-enabled = false                # off until the reserve is funded
-reserve_min = 5.0              # coins the treasury must hold; PPS pauses below it
+enabled = true                 # offered, but paused until the reserve is funded
+reserve_min = 5.0              # coins the pool wallet must hold above all liabilities
 max_hashrate_share = 0.25      # cap of the pool hashrate that may mine PPS
 
 [[stratum.ports]]
@@ -51,17 +56,19 @@ listen = "0.0.0.0:3335"
 mode = "solo"
 ```
 
-(The values above are examples. Fees and limits are operator decisions, no defaults are fixed yet.)
+All values shown are the built-in defaults and stay configurable. PPS is refused with a clear message (`PPS is paused until the pool reserve is funded`) until the treasury guard allows it.
 
 ## 3. Where the money goes
 
-The attestation fixes the coinbase to a single payout output, and every candidate pays a pool-owned address. Every block reward therefore lands in the pool wallet first and is paid out to miners after coinbase maturity (`COINBASE_MATURITY` = 100 blocks). Until then the pool holds the funds. The finder's mode decides how a block reward is distributed:
+**Solo: direct payout in the coinbase.** A solo connection gets its own candidate whose single payout output is the miner's own address. The attested coinbase is built for that address (one `getblocktemplate` call with `coinbaseaddress`, validated against the node with a `proposal` before it is used). The reward never touches the pool wallet. Because the coinbase has exactly one payout output, a solo block carries no pool fee. Candidates are built on demand when a solo account connects and pre-built after every tip change for recently active accounts. The number of distinct solo accounts per epoch is limited by `payout.max_solo_accounts` (default 1,000).
 
-| Finder's mode | Block reward goes to |
+**PPLNS and PPS: pool wallet.** Every pool candidate pays a pool-owned address, so the reward lands in the pool wallet first and is paid out after coinbase maturity (`COINBASE_MATURITY` = 100 blocks). The finder's mode decides how it is distributed:
+
+| Finder's mode | Block reward |
 |---|---|
-| solo | The finder, minus the solo fee, at maturity |
-| pplns | The PPLNS window: all PPLNS shares of the last `window_factor * network difficulty` of work, minus the PPLNS fee, at maturity |
-| pps | The pool treasury (PPS miners are paid per share regardless of blocks) |
+| solo | Paid directly to the finder in the coinbase, nothing to distribute |
+| pplns | Split over the PPLNS window (last `window_factor * network difficulty` of PPLNS work), minus the PPLNS fee, at maturity |
+| pps | Goes to the pool treasury (PPS miners are paid per share regardless of blocks) |
 
 A miner's shares only count in the mode they were submitted under. Hashrate of a PPS miner never dilutes the PPLNS window and vice versa.
 
@@ -72,10 +79,6 @@ Each accepted share of difficulty `d` is credited with `d / network_difficulty *
 ### PPLNS
 
 At block maturity the reward minus fee is split over the shares inside the window, proportional to share difficulty. Credits stay pending until `min_payout`.
-
-### Solo
-
-The finder receives the reward minus fee. Other solo miners get nothing for that block; this is the expected solo behaviour.
 
 ## 4. Ledger
 
@@ -95,17 +98,16 @@ Share counters are flushed in batches from memory, never per share. The ledger i
 
 A separate task: selects accounts whose confirmed balance reaches `min_payout`, builds one batched transaction with the node wallet (RPC `sendmany`), records the payout before broadcasting and keeps it idempotent so a restart can never pay twice. Orphaned blocks reverse their pending credits. The node used for payouts needs a wallet; the wallet keys are not stored in the pool process.
 
-## 6. Open decisions
+## 6. Decisions taken
 
-1. Fees per mode and the default `min_payout`.
-2. PPLNS `window_factor` (2.0 is a common choice, to be confirmed).
-3. Whether PPS is offered at launch and the size of the reserve.
-4. Whether solo miners receive the reward directly in the coinbase (one candidate per solo account, more templates) instead of through the pool wallet. The wallet route is simpler and is the proposal here.
-5. Where the payout wallet lives (the mining node or a separate node).
+1. Solo miners are paid directly in the coinbase, no pool wallet involved, no fee.
+2. Fees, PPLNS window and minimum payout use standard defaults (PPLNS 1 %, PPS 2 %, window factor 2.0, minimum 0.01) and remain configurable.
+3. PPS is offered but starts paused until the pool wallet holds the configured reserve.
+4. Payouts use a wallet on the pool's Elektron Net node (as in the existing stack), with a dry-run switch that is on by default.
 
 ## 7. Implementation plan
 
-1. Mode selection and per-mode share tagging in the Stratum server.
+1. (done) Mode selection and solo direct payout in the Stratum server.
 2. Ledger with aggregated share buckets and block tracking.
 3. Maturity tracking and credit calculation per mode (unit tests with synthetic block and share histories).
 4. Payout worker and its idempotency tests on regtest.
@@ -113,8 +115,8 @@ A separate task: selects accounts whose confirmed balance reaches `min_payout`, 
 
 ## 8. Checklist
 
-- [ ] Operator decisions from section 6 made.
-- [ ] Mode selection implemented and tested.
+- [x] Operator decisions from section 6 made.
+- [x] Mode selection and solo direct payout implemented and tested (`test/step10_modes_and_solo.py`).
 - [ ] Ledger and credit calculation tested with synthetic histories.
 - [ ] Payout worker tested against a regtest wallet, including restart safety.
 - [ ] PPS reserve guard tested.

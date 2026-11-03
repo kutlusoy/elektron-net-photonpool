@@ -9,7 +9,130 @@ pub struct Config {
     pub api: ApiCfg,
     #[serde(default)]
     pub stratum: StratumCfg,
+    #[serde(default)]
+    pub payout: PayoutCfg,
 }
+
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    Solo,
+    Pplns,
+    Pps,
+}
+
+impl Mode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Mode::Solo => "solo",
+            Mode::Pplns => "pplns",
+            Mode::Pps => "pps",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Mode> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "solo" => Some(Mode::Solo),
+            "pplns" => Some(Mode::Pplns),
+            "pps" => Some(Mode::Pps),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Deserialize, Clone)]
+pub struct PayoutCfg {
+    #[serde(default = "d_default_mode")]
+    pub default_mode: Mode,
+    /// Modes this pool offers.
+    #[serde(default = "d_modes")]
+    pub modes: Vec<Mode>,
+    /// Minimum balance before a payout is made, in coins.
+    #[serde(default = "d_min_payout")]
+    pub min_payout: f64,
+    /// Fee in percent per mode. Solo miners are paid directly in the coinbase and carry no fee.
+    #[serde(default)]
+    pub fee_pct: FeeCfg,
+    #[serde(default)]
+    pub pplns: PplnsCfg,
+    #[serde(default)]
+    pub pps: PpsCfg,
+    /// Maximum number of distinct solo accounts that get their own candidate per epoch.
+    #[serde(default = "d_max_solo")]
+    pub max_solo_accounts: usize,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct FeeCfg {
+    #[serde(default = "d_fee_pplns")]
+    pub pplns: f64,
+    #[serde(default = "d_fee_pps")]
+    pub pps: f64,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct PplnsCfg {
+    /// Window size as a multiple of the network difficulty (difficulty-weighted shares).
+    #[serde(default = "d_window")]
+    pub window_factor: f64,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct PpsCfg {
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    /// PPS is paused while the pool wallet holds less than this many coins above all liabilities.
+    #[serde(default = "d_reserve")]
+    pub reserve_min: f64,
+    /// Largest share of the pool hashrate that may mine in PPS mode.
+    #[serde(default = "d_pps_share")]
+    pub max_hashrate_share: f64,
+}
+
+impl Default for PayoutCfg {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+impl Default for FeeCfg {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+impl Default for PplnsCfg {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+impl Default for PpsCfg {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+impl PayoutCfg {
+    pub fn fee(&self, mode: Mode) -> f64 {
+        match mode {
+            Mode::Solo => 0.0,
+            Mode::Pplns => self.fee_pct.pplns,
+            Mode::Pps => self.fee_pct.pps,
+        }
+    }
+
+    pub fn offers(&self, mode: Mode) -> bool {
+        self.modes.contains(&mode) && (mode != Mode::Pps || self.pps.enabled)
+    }
+}
+
+fn d_default_mode() -> Mode { Mode::Pplns }
+fn d_modes() -> Vec<Mode> { vec![Mode::Solo, Mode::Pplns, Mode::Pps] }
+fn d_min_payout() -> f64 { 0.01 }
+fn d_fee_pplns() -> f64 { 1.0 }
+fn d_fee_pps() -> f64 { 2.0 }
+fn d_window() -> f64 { 2.0 }
+fn d_reserve() -> f64 { 5.0 }
+fn d_pps_share() -> f64 { 0.25 }
+fn d_max_solo() -> usize { 1000 }
 
 #[derive(Deserialize)]
 pub struct NodeCfg {
@@ -70,6 +193,18 @@ pub struct StratumCfg {
     pub max_job_interval_ms: u64,
     #[serde(default = "d_true")]
     pub require_address: bool,
+    /// Extra listeners with their own default mode. When empty, `listen` is used with the global default mode.
+    #[serde(default)]
+    pub ports: Vec<PortCfg>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct PortCfg {
+    pub listen: String,
+    pub mode: Mode,
+    /// Whether the miner may choose another mode with `m=<mode>` in the password field.
+    #[serde(default)]
+    pub allow_override: bool,
 }
 
 impl Default for StratumCfg {
@@ -116,6 +251,15 @@ pub struct Network {
 }
 
 impl Config {
+    /// Effective listeners: the configured ports, or `listen` with the default mode.
+    pub fn stratum_ports(&self) -> Vec<PortCfg> {
+        if self.stratum.ports.is_empty() {
+            vec![PortCfg { listen: self.stratum.listen.clone(), mode: self.payout.default_mode, allow_override: true }]
+        } else {
+            self.stratum.ports.clone()
+        }
+    }
+
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let mut cfg: Config = toml::from_str(&std::fs::read_to_string(path)?)?;
         if cfg.pool.payout_addresses.is_empty() {
@@ -123,6 +267,25 @@ impl Config {
         }
         cfg.network()?;
         cfg.api.normalize_explorer()?;
+        if cfg.payout.modes.is_empty() {
+            bail!("payout.modes must offer at least one mode");
+        }
+        if !cfg.payout.offers(cfg.payout.default_mode) {
+            bail!("payout.default_mode {} is not offered", cfg.payout.default_mode.as_str());
+        }
+        for p in cfg.stratum_ports() {
+            if !cfg.payout.offers(p.mode) {
+                bail!("stratum port {} uses mode {} which is not offered", p.listen, p.mode.as_str());
+            }
+        }
+        for f in [cfg.payout.fee_pct.pplns, cfg.payout.fee_pct.pps] {
+            if !(0.0..=50.0).contains(&f) {
+                bail!("payout.fee_pct values must be between 0 and 50");
+            }
+        }
+        if cfg.payout.pplns.window_factor <= 0.0 {
+            bail!("payout.pplns.window_factor must be positive");
+        }
         Ok(cfg)
     }
 

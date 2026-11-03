@@ -1,5 +1,5 @@
 use crate::addr::script_for_address;
-use crate::config::Config;
+use crate::config::{Config, Mode};
 use crate::rpc::NodeRpc;
 use crate::template::{header_hash, meets_target, Candidate, Gbt, TxSet};
 use anyhow::{bail, Context, Result};
@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, watch};
+use std::sync::RwLock;
 
 pub const NTIME_SLOTS: u64 = 60;
 pub const SLICES: u64 = 16;
@@ -37,6 +38,7 @@ pub struct FoundBlock {
     pub hash: String,
     pub time: f64,
     pub worker: String,
+    pub mode: &'static str,
     pub status: &'static str,
 }
 
@@ -72,6 +74,7 @@ pub struct SessionStats {
     pub difficulty: AtomicU64,
     pub last_seen: AtomicU64,
     pub unit: AtomicU64,
+    pub mode: AtomicU64,
 }
 
 impl SessionStats {
@@ -80,7 +83,7 @@ impl SessionStats {
         set_f64(&now, unix_now());
         Self {
             name: Mutex::new(String::new()), ok: AtomicU64::new(0), stale: AtomicU64::new(0), dup: AtomicU64::new(0), inv: AtomicU64::new(0),
-            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0),
+            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1),
         }
     }
 }
@@ -130,11 +133,41 @@ pub struct Epoch {
     next_unit: AtomicU64,
     pub overlap: AtomicU64,
     seen: Mutex<HashSet<u128>>,
+    solo: RwLock<HashMap<String, Arc<SoloEntry>>>,
+    solo_build: tokio::sync::Mutex<()>,
+}
+
+/// Direct-payout candidate of one solo account: the coinbase pays the miner's own address.
+pub struct SoloEntry {
+    pub address: String,
+    pub cand: Candidate,
+    next: AtomicU64,
+    pub overlap: AtomicU64,
+}
+
+impl SoloEntry {
+    pub fn new(address: String, cand: Candidate) -> Self {
+        Self { address, cand, next: AtomicU64::new(0), overlap: AtomicU64::new(0) }
+    }
+
+    pub fn next_unit(&self) -> (u32, u8, u32) {
+        let n = self.next.fetch_add(1, Ordering::Relaxed);
+        if n >= SLICES * NTIME_SLOTS {
+            self.overlap.fetch_add(1, Ordering::Relaxed);
+        }
+        let (slice, off) = Self::unit_from_n(n as u32);
+        (n as u32, slice, off)
+    }
+
+    pub fn unit_from_n(n: u32) -> (u8, u32) {
+        let u = n as u64 % (SLICES * NTIME_SLOTS);
+        ((u % SLICES) as u8, (u / SLICES) as u32)
+    }
 }
 
 impl Epoch {
     pub fn new(id: u64, tip_hex: String, height: u32, candidates: Vec<Candidate>) -> Self {
-        Self { id, tip_hex, height, candidates, started_unix: unix_now(), next_unit: AtomicU64::new(0), overlap: AtomicU64::new(0), seen: Mutex::new(HashSet::new()) }
+        Self { id, tip_hex, height, candidates, started_unix: unix_now(), next_unit: AtomicU64::new(0), overlap: AtomicU64::new(0), seen: Mutex::new(HashSet::new()), solo: RwLock::new(HashMap::new()), solo_build: tokio::sync::Mutex::new(()) }
     }
 
     pub fn units_total(&self) -> u64 {
@@ -166,22 +199,26 @@ impl Epoch {
 
     pub fn check_share(&self, s: &Submission, share_target: &[u8; 32]) -> ShareResult {
         let Some(c) = self.candidates.get(s.cand) else { return ShareResult::Invalid("unknown candidate") };
-        if s.slice as u64 >= SLICES {
+        self.check(c, s.slice, s.ntime, s.version, s.nonce, share_target)
+    }
+
+    pub fn check(&self, c: &Candidate, slice: u8, ntime: u32, version: u32, nonce: u32, share_target: &[u8; 32]) -> ShareResult {
+        if slice as u64 >= SLICES {
             return ShareResult::Invalid("bad slice");
         }
-        let expected = c.version | ((s.slice as u32) << POOL_VERSION_SHIFT);
-        if (s.version & !MINER_VERSION_MASK) != expected {
+        let expected = c.version | ((slice as u32) << POOL_VERSION_SHIFT);
+        if (version & !MINER_VERSION_MASK) != expected {
             return ShareResult::Invalid("version bits outside the miner mask");
         }
-        if s.ntime < c.mintime || s.ntime > c.curtime.saturating_add(NTIME_SLOTS as u32 + 60) {
+        if ntime < c.mintime || ntime > c.curtime.saturating_add(NTIME_SLOTS as u32 + 60) {
             return ShareResult::Invalid("ntime out of range");
         }
-        let hash = header_hash(&c.header(s.version, s.ntime, s.nonce));
+        let hash = header_hash(&c.header(version, ntime, nonce));
         let is_block = meets_target(&hash, &c.target);
         if !is_block && !meets_target(&hash, share_target) {
             return ShareResult::LowDifficulty;
         }
-        let key = u128::from_le_bytes(hash[..16].try_into().unwrap()) ^ ((s.cand as u128) << 100);
+        let key = u128::from_le_bytes(hash[..16].try_into().unwrap());
         if !self.seen.lock().unwrap().insert(key) {
             return ShareResult::Duplicate;
         }
@@ -190,6 +227,14 @@ impl Epoch {
         } else {
             ShareResult::Valid
         }
+    }
+
+    pub fn solo_entry(&self, address: &str) -> Option<Arc<SoloEntry>> {
+        self.solo.read().unwrap().get(address).cloned()
+    }
+
+    pub fn solo_count(&self) -> usize {
+        self.solo.read().unwrap().len()
     }
 }
 
@@ -205,6 +250,8 @@ pub struct Pool {
     pub sessions: Mutex<HashMap<u64, Arc<SessionStats>>>,
     pub session_seq: AtomicU64,
     pub live: Mutex<Live>,
+    pub solo_active: Mutex<HashMap<String, Instant>>,
+    pub pps_ready: AtomicBool,
 }
 
 impl Pool {
@@ -229,7 +276,7 @@ impl Pool {
             .collect::<Result<Vec<_>>>()?;
         let (events, _) = broadcast::channel(1024);
         let (epoch, _) = watch::channel(None);
-        let pool = Arc::new(Pool { cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0), sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()) });
+        let pool = Arc::new(Pool { cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0), sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()), pps_ready: AtomicBool::new(false) });
         pool.stats.connected.store(true, Ordering::Relaxed);
         Ok(pool)
     }
@@ -241,6 +288,68 @@ impl Pool {
             _ => tracing::info!("{msg}"),
         }
         let _ = self.events.send(Event { t: unix_now(), lvl, msg });
+    }
+
+    /// Whether a connection may start in `mode` right now; the error text is shown to the miner.
+    pub fn mode_available(&self, mode: Mode) -> Result<(), &'static str> {
+        if !self.cfg.payout.offers(mode) {
+            return Err("mode not offered");
+        }
+        if mode == Mode::Pps && !self.pps_ready.load(Ordering::Relaxed) {
+            return Err("PPS is paused until the pool reserve is funded");
+        }
+        Ok(())
+    }
+
+    pub fn touch_solo(&self, address: &str) {
+        let mut m = self.solo_active.lock().unwrap();
+        m.insert(address.to_string(), Instant::now());
+        if m.len() > self.cfg.payout.max_solo_accounts * 2 {
+            m.retain(|_, t| t.elapsed() < Duration::from_secs(600));
+        }
+    }
+
+    async fn build_solo(&self, address: &str, tip: &str) -> Result<SoloEntry> {
+        let script = script_for_address(address, self.cfg.network()?.hrp)?;
+        let g: Gbt = serde_json::from_value(self.node.template(address).await?)?;
+        if g.previousblockhash != tip {
+            bail!("tip moved while building a solo candidate");
+        }
+        let c = Candidate::from_gbt(g, &script, None)?;
+        if let Some(r) = self.node.proposal(&c.block_hex(c.version, c.curtime, 0)).await? {
+            bail!("node rejected the solo candidate: {r}");
+        }
+        Ok(SoloEntry::new(address.to_string(), c))
+    }
+
+    /// Returns the direct-payout candidate of a solo account for this epoch, building it when needed.
+    pub async fn ensure_solo(&self, epoch: &Arc<Epoch>, address: &str) -> Result<Arc<SoloEntry>> {
+        if let Some(e) = epoch.solo_entry(address) {
+            return Ok(e);
+        }
+        let _guard = epoch.solo_build.lock().await;
+        if let Some(e) = epoch.solo_entry(address) {
+            return Ok(e);
+        }
+        if epoch.solo_count() >= self.cfg.payout.max_solo_accounts {
+            bail!("solo account limit reached");
+        }
+        let entry = Arc::new(self.build_solo(address, &epoch.tip_hex).await?);
+        epoch.solo.write().unwrap().insert(address.to_string(), entry.clone());
+        Ok(entry)
+    }
+
+    async fn prebuild_solo(self: Arc<Self>, epoch: Arc<Epoch>) {
+        let addrs: Vec<String> = {
+            let mut m = self.solo_active.lock().unwrap();
+            m.retain(|_, t| t.elapsed() < Duration::from_secs(600));
+            m.keys().cloned().collect()
+        };
+        for a in addrs {
+            if self.ensure_solo(&epoch, &a).await.is_err() {
+                break;
+            }
+        }
     }
 
     /// Fetches one candidate per payout address for the current tip and validates `check` of them against the node.
@@ -324,7 +433,9 @@ impl Pool {
                     self.event("info", format!("epoch {} height {} tip {}.. {} candidates ready in {:.0} ms", e.id, e.height, &e.tip_hex[..12], e.candidates.len(), ms));
                     last_tip = e.tip_hex.clone();
                     last_build = Instant::now();
-                    self.epoch.send_replace(Some(Arc::new(e)));
+                    let e = Arc::new(e);
+                    self.epoch.send_replace(Some(e.clone()));
+                    tokio::spawn(self.clone().prebuild_solo(e));
                 }
                 Err(e) => {
                     self.event("warn", format!("epoch build failed: {e}"));
@@ -341,7 +452,7 @@ mod tests {
 
     fn dummy(n: usize, target: u8) -> Epoch {
         let c = |i: u8| Candidate {
-            prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [target; 32], curtime: 1000, mintime: 900,
+            prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [target; 32], curtime: 1000, mintime: 900, height: 1, coinbase_value: 0, fees: 0,
             coinbase_wit: vec![], merkle_root: [i; 32],
             txs: std::sync::Arc::new(TxSet { datas: vec![], txids: vec![], branch: vec![] }),
             notify_b: String::new(), notify_c: String::new(),

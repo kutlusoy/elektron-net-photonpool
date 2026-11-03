@@ -1,7 +1,8 @@
 use crate::addr::script_for_address;
-use crate::config::StratumCfg;
+use crate::config::{Mode, PortCfg, StratumCfg};
 use crate::diff::{hashes_per_share, target_from_difficulty};
-use crate::pool::{get_f64, set_f64, unix_now, Epoch, FoundBlock, Pool, ShareResult, SessionStats, Submission, MINER_VERSION_MASK, POOL_VERSION_SHIFT};
+use crate::pool::{get_f64, set_f64, unix_now, Epoch, FoundBlock, Pool, SessionStats, ShareResult, SoloEntry, MINER_VERSION_MASK, POOL_VERSION_SHIFT};
+use crate::template::Candidate;
 use crate::template::{header_hash, meets_target};
 use anyhow::{anyhow, bail, Result};
 use serde::Deserialize;
@@ -23,10 +24,21 @@ const PREV_TARGET_GRACE: Duration = Duration::from_secs(60);
 
 pub async fn serve(pool: Arc<Pool>) -> Result<()> {
     let cfg = Arc::new(pool.cfg.stratum.clone());
-    let listener = TcpListener::bind(&cfg.listen).await?;
-    pool.event("info", format!("stratum v1 listening on {}", cfg.listen));
-    tokio::spawn(stats_task(pool.clone()));
     let permits = Arc::new(Semaphore::new(cfg.max_connections));
+    tokio::spawn(stats_task(pool.clone()));
+    let mut listeners = Vec::new();
+    for port in pool.cfg.stratum_ports() {
+        let listener = TcpListener::bind(&port.listen).await?;
+        pool.event("info", format!("stratum v1 listening on {} (default mode {}{})", port.listen, port.mode.as_str(), if port.allow_override { ", override allowed" } else { "" }));
+        listeners.push(tokio::spawn(accept_loop(pool.clone(), cfg.clone(), permits.clone(), listener, port)));
+    }
+    for l in listeners {
+        let _ = l.await;
+    }
+    Ok(())
+}
+
+async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semaphore>, listener: TcpListener, port: PortCfg) {
     loop {
         let (stream, peer) = match listener.accept().await {
             Ok(x) => x,
@@ -37,13 +49,13 @@ pub async fn serve(pool: Arc<Pool>) -> Result<()> {
         };
         let Ok(permit) = permits.clone().try_acquire_owned() else { continue };
         let _ = stream.set_nodelay(true);
-        let (pool, cfg) = (pool.clone(), cfg.clone());
+        let (pool, cfg, port) = (pool.clone(), cfg.clone(), port.clone());
         tokio::spawn(async move {
             let _permit = permit;
             let id = pool.session_seq.fetch_add(1, Ordering::Relaxed) + 1;
             let stats = Arc::new(SessionStats::new());
             pool.sessions.lock().unwrap().insert(id, stats.clone());
-            let res = Session::new(pool.clone(), cfg, stats, id).run(stream).await;
+            let res = Session::new(pool.clone(), cfg, port, stats, id).run(stream).await;
             pool.sessions.lock().unwrap().remove(&id);
             if let Err(e) = res {
                 tracing::debug!("session {id} {peer} closed: {e}");
@@ -52,9 +64,15 @@ pub async fn serve(pool: Arc<Pool>) -> Result<()> {
     }
 }
 
+enum Src {
+    Pool,
+    Solo(Arc<SoloEntry>),
+}
+
 struct JobRef {
     id: u64,
     epoch: Arc<Epoch>,
+    src: Src,
     n: u32,
     version: u32,
 }
@@ -64,6 +82,8 @@ struct Session {
     cfg: Arc<StratumCfg>,
     stats: Arc<SessionStats>,
     id: u64,
+    port: PortCfg,
+    mode: Mode,
     epoch_rx: watch::Receiver<Option<Arc<Epoch>>>,
     subscribed: bool,
     authorized: bool,
@@ -112,12 +132,12 @@ async fn read_chunk(rd: &mut BufReader<OwnedReadHalf>, buf: &mut Vec<u8>) -> Res
 }
 
 impl Session {
-    fn new(pool: Arc<Pool>, cfg: Arc<StratumCfg>, stats: Arc<SessionStats>, id: u64) -> Self {
+    fn new(pool: Arc<Pool>, cfg: Arc<StratumCfg>, port: PortCfg, stats: Arc<SessionStats>, id: u64) -> Self {
         let now = Instant::now();
         let difficulty = cfg.initial_difficulty.clamp(cfg.min_difficulty, cfg.max_difficulty);
         let epoch_rx = pool.epoch.subscribe();
         Self {
-            pool, cfg, stats, id, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
+            pool, cfg, stats, id, mode: port.mode, port, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
             difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0, rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(),
             next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_adjust: now, shares_since_adjust: 0, bad: 0,
         }
@@ -220,7 +240,8 @@ impl Session {
     async fn authorize(&mut self, wr: &mut OwnedWriteHalf, id: &str, params: &Value) -> Result<()> {
         let user = params.get(0).and_then(Value::as_str).unwrap_or("");
         let (account, worker) = user.split_once('.').unwrap_or((user, "default"));
-        let valid = !account.is_empty() && (!self.cfg.require_address || script_for_address(account, self.pool.cfg.network()?.hrp).is_ok());
+        let hrp = self.pool.cfg.network()?.hrp;
+        let valid = !account.is_empty() && (!self.cfg.require_address || script_for_address(account, hrp).is_ok());
         if !valid || worker.len() > 64 {
             self.bad += 1;
             if self.bad > 10 {
@@ -228,9 +249,27 @@ impl Session {
             }
             return self.reply(wr, id, "false", "[24,\"Unauthorized worker\",null]").await;
         }
+        let mut mode = self.port.mode;
+        if self.port.allow_override {
+            let pw = params.get(1).and_then(Value::as_str).unwrap_or("");
+            if let Some(m) = pw.split(|c| c == ',' || c == ';' || c == ' ').find_map(|kv| kv.strip_prefix("m=")).and_then(Mode::parse) {
+                mode = m;
+            }
+        }
+        if mode == Mode::Solo && script_for_address(account, hrp).is_err() {
+            return self.reply(wr, id, "false", "[24,\"Solo mode needs a payout address as account\",null]").await;
+        }
+        if let Err(why) = self.pool.mode_available(mode) {
+            return self.reply(wr, id, "false", &format!("[20,\"{why}\",null]")).await;
+        }
+        self.mode = mode;
+        self.stats.mode.store(mode as u64, Ordering::Relaxed);
         self.account = account.to_string();
         self.worker = worker.to_string();
         *self.stats.name.lock().unwrap() = format!("{account}.{worker}");
+        if mode == Mode::Solo {
+            self.pool.touch_solo(account);
+        }
         self.authorized = true;
         self.reply(wr, id, "true", "null").await?;
         self.maybe_start(wr).await
@@ -277,19 +316,38 @@ impl Session {
             return Ok(());
         };
         let clean = force_clean || epoch.tip_hex != self.last_tip;
+        let (n, src, unit): (u32, Src, (usize, u8, u32)) = if self.mode == Mode::Solo {
+            self.pool.touch_solo(&self.account);
+            match self.pool.ensure_solo(&epoch, &self.account).await {
+                Ok(entry) => {
+                    let (n, slice, off) = entry.next_unit();
+                    (n, Src::Solo(entry), (0, slice, off))
+                }
+                Err(e) => {
+                    tracing::debug!("solo candidate for {} not ready: {e}", self.account);
+                    self.next_job = Instant::now() + Duration::from_millis(500);
+                    return Ok(());
+                }
+            }
+        } else {
+            let (n, u) = epoch.next_unit();
+            (n, Src::Pool, (u.cand, u.slice, u.ntime_off))
+        };
         if clean && epoch.tip_hex != self.last_tip {
             self.last_tip = epoch.tip_hex.clone();
         }
-        let (n, unit) = epoch.next_unit();
-        let cand = &epoch.candidates[unit.cand];
-        let version = cand.version | ((unit.slice as u32) << POOL_VERSION_SHIFT);
-        let ntime = cand.curtime.max(cand.mintime) + unit.ntime_off;
+        let cand: &Candidate = match &src {
+            Src::Pool => &epoch.candidates[unit.0],
+            Src::Solo(e) => &e.cand,
+        };
+        let version = cand.version | ((unit.1 as u32) << POOL_VERSION_SHIFT);
+        let ntime = cand.curtime.max(cand.mintime) + unit.2;
         let id = (epoch.id << 32) | n as u64;
         let mut msg = String::with_capacity(1024);
         cand.write_notify(&mut msg, id, version, ntime, clean);
         send(wr, msg.as_bytes()).await?;
-        self.stats.unit.store(((unit.cand as u64) << 16) | ((unit.ntime_off as u64) << 8) | unit.slice as u64, Ordering::Relaxed);
-        self.jobs.push_back(JobRef { id, epoch, n, version });
+        self.stats.unit.store(((unit.0 as u64) << 16) | ((unit.2 as u64) << 8) | unit.1 as u64, Ordering::Relaxed);
+        self.jobs.push_back(JobRef { id, epoch, src, n, version });
         while self.jobs.len() > MAX_JOBS {
             self.jobs.pop_front();
         }
@@ -318,28 +376,40 @@ impl Session {
             return self.error(wr, id, 20, "bad params").await;
         };
         let rolled = s(5).and_then(|b| u32::from_str_radix(b, 16).ok());
-        let Some(job) = self.jobs.iter().find(|j| j.id == job_id) else {
+        let found = self.jobs.iter().find(|j| j.id == job_id).map(|j| {
+            let solo = match &j.src {
+                Src::Solo(e) => Some(e.clone()),
+                Src::Pool => None,
+            };
+            (j.epoch.clone(), solo, j.n, j.version)
+        });
+        let Some((epoch, solo, job_n, job_version)) = found else {
             self.count_stale();
             return self.error(wr, id, 21, "Job not found").await;
         };
         let current = self.epoch_rx.borrow().clone();
-        if !current.map(|c| c.tip_matches(&job.epoch)).unwrap_or(false) {
+        if !current.map(|c| c.tip_matches(&epoch)).unwrap_or(false) {
             self.count_stale();
             return self.error(wr, id, 21, "Stale share").await;
         }
         let version = match rolled {
-            Some(b) if self.mask != 0 => (job.version & !self.mask) | (b & self.mask),
-            _ => job.version,
+            Some(b) if self.mask != 0 => (job_version & !self.mask) | (b & self.mask),
+            _ => job_version,
         };
-        let unit = job.epoch.unit_from_n(job.n);
+        let (cand_ref, slice): (&Candidate, u8) = match &solo {
+            None => {
+                let u = epoch.unit_from_n(job_n);
+                (&epoch.candidates[u.cand], u.slice)
+            }
+            Some(e) => (&e.cand, SoloEntry::unit_from_n(job_n).0),
+        };
         let (target, credit) = self.accept_target();
-        let epoch = job.epoch.clone();
-        let result = epoch.check_share(&Submission { cand: unit.cand, slice: unit.slice, ntime, version, nonce }, &target);
+        let result = epoch.check(cand_ref, slice, ntime, version, nonce, &target);
         match result {
             ShareResult::Valid | ShareResult::Block => {
                 self.count_ok(credit);
                 if result == ShareResult::Block {
-                    self.block_found(&epoch, unit.cand, version, ntime, nonce);
+                    self.block_found(&epoch, cand_ref, version, ntime, nonce);
                 }
                 self.reply(wr, id, "true", "null").await?;
                 self.vardiff(wr).await
@@ -404,18 +474,17 @@ impl Session {
         self.set_difficulty(wr, d).await
     }
 
-    fn block_found(&self, epoch: &Arc<Epoch>, cand: usize, version: u32, ntime: u32, nonce: u32) {
-        let c = &epoch.candidates[cand];
+    fn block_found(&self, epoch: &Arc<Epoch>, c: &Candidate, version: u32, ntime: u32, nonce: u32) {
         let hex = c.block_hex(version, ntime, nonce);
         let mut h = header_hash(&c.header(version, ntime, nonce));
         debug_assert!(meets_target(&h, &c.target));
         h.reverse();
-        let (pool, height, hash, worker) = (self.pool.clone(), epoch.height, hex::encode(h), format!("{}.{}", self.account, self.worker));
+        let (pool, height, hash, worker, mode) = (self.pool.clone(), epoch.height, hex::encode(h), format!("{}.{}", self.account, self.worker), self.mode.as_str());
         tokio::spawn(async move {
             match pool.node.submit_block(&hex).await {
                 Ok(None) => {
-                    pool.stats.found.lock().unwrap().push(FoundBlock { height, hash: hash.clone(), time: unix_now(), worker: worker.clone(), status: "found" });
-                    pool.event("blk", format!("BLOCK FOUND {height} {}.. by {worker} -> submitblock: accepted", &hash[..16]));
+                    pool.stats.found.lock().unwrap().push(FoundBlock { height, hash: hash.clone(), time: unix_now(), worker: worker.clone(), mode, status: "found" });
+                    pool.event("blk", format!("BLOCK FOUND {height} {}.. by {worker} [{mode}] -> submitblock: accepted", &hash[..16]));
                 }
                 Ok(Some(r)) => pool.event("err", format!("block {height} by {worker} rejected by node: {r}")),
                 Err(e) => pool.event("err", format!("submitblock failed for {height}: {e}")),
