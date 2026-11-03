@@ -12,7 +12,7 @@
 
 `photond` is a headless pool daemon: it follows your Elektron Net node, builds attested block candidates, serves Stratum V1 to miners and exposes a read-only admin API with a terminal-style web UI.
 
-**Early development:** share accounting, payouts and the solo/PPLNS/PPS modes are not implemented yet (see [`doc-elektron/guideline-payout-modes.md`](doc-elektron/guideline-payout-modes.md)). Blocks found by miners are submitted to the node and the block reward goes to your pool payout addresses, but miners are not paid by the pool yet. Do not point real miners at it expecting payouts. Real ASIC hardware has not been tested yet.
+**Status:** the pool offers solo (direct coinbase payout, no fee), PPLNS and PPS side by side, keeps a SQLite ledger, tracks block maturity and pays out through a node wallet, and serves a public pool page. All of this is tested on regtest against an unmodified node (see the `test/` directory). **Payouts start in dry-run mode** (`payout.dry_run = true`), so nothing is sent until you switch it off. Not tested yet: real ASIC hardware and firmware, and mainnet-scale load. Details: [`doc-elektron/guideline-payout-modes.md`](doc-elektron/guideline-payout-modes.md).
 
 ## 2. Requirements
 
@@ -121,9 +121,9 @@ Copy `target/release/photond` and the `ui/` folder to `/opt/photond`, then `syst
 |---|---|
 | URL | `stratum+tcp://<your-host>:3333` |
 | User | `<be1q address of the miner>.<worker name>` |
-| Password | anything (`x`) |
+| Password | `x`, or `m=solo`, `m=pplns`, `m=pps` to choose the payout mode (on ports that allow it) |
 
-Enable version rolling (BIP 310) in the miner if it has the option. The pool uses a fixed coinbase, so it advertises an empty `extranonce1` and `extranonce2_size = 0`; the search space comes from the negotiated version bits, nonce and nTime. Firmware that cannot work with this is a known open risk.
+**Payout modes:** solo pays the block reward directly to the miner's address in the coinbase (no fee). PPLNS and PPS are paid from the pool wallet. A port has a default mode; with `allow_override` a miner can pick another with `m=...`. PPS is paused until the pool wallet holds the configured reserve. Enable version rolling (BIP 310) in the miner if it has the option. The pool uses a fixed coinbase, so it advertises an empty `extranonce1` and `extranonce2_size = 0`; the search space comes from the negotiated version bits, nonce and nTime. Firmware that cannot work with this is a known open risk.
 
 ## 6. Web UI, public page and API
 
@@ -140,6 +140,8 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 |---|---|
 | `node.rpc_url`, `node.auth` | Node JSON-RPC and credentials (`user:password` or `cookie:/path`) |
 | `pool.network` | `mainnet`, `testnet` or `regtest`, must match the node |
+| `payout.wallet`, `payout.wallet_addresses` | Node wallet for payouts; the pool provisions its own payout addresses from it (then `pool.payout_addresses` can stay empty) |
+| `payout.dry_run`, `payout.min_payout`, `payout.fee_pct.*`, `payout.pplns.window_factor` | Payout switch (default dry run) and the mode parameters, all with standard defaults |
 | `pool.payout_addresses` | Pool-owned addresses; more addresses give miners more independent search space (see the sizing table in [`doc-elektron/guideline-photon-architecture.md`](doc-elektron/guideline-photon-architecture.md)) |
 | `pool.spot_check` | Candidates per epoch validated against the node |
 | `stratum.listen`, `stratum.initial_difficulty`, `stratum.share_secs` | Miner port, starting difficulty, target seconds per share |
@@ -166,3 +168,7 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 - [ ] `photond check` shows all candidates valid.
 - [ ] Port `3333` reachable from the miners, `8081` only local.
 - [ ] Payout handling decided (see the payout modes guideline) before real miners connect.
+
+## 10. Full stack with node, explorer and TLS
+
+The [`elektron-net-stack`](https://github.com/kutlusoy/elektron-net-stack) installer can install the Photon pool together with the node, the mempool explorer and Caddy (automatic HTTPS), pre-configured: set `POOL_TYPE=photon` in `elektron-stack.conf` (see the "Pool type: photon" section of that README). It builds this repository (`PHOTON_REF`), creates and encrypts the pool wallet, writes `photond.toml` and puts the public page on `POOL_DOMAIN`.

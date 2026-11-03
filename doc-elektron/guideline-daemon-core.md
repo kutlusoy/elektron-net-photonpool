@@ -23,7 +23,8 @@
 | `stratum.rs`, `diff.rs` | Stratum V1 server: subscribe, authorize, notify, submit, version rolling, vardiff, pre-rendered notify, session statistics | done, see [`guideline-stratum-v1.md`](./guideline-stratum-v1.md) |
 | Stratum V2 frontend | Noise, standard channels | not yet |
 | Batch attestation backend | Candidates for all payout scripts in one node call | not yet (needs the node-side interface) |
-| Accounting and payouts | Share ledger, payout worker | not yet |
+| `ledger.rs`, `accounting.rs` | SQLite ledger, PPLNS and PPS accounting, block maturity, payout worker, wallet address provisioning | done, see [`guideline-payout-modes.md`](./guideline-payout-modes.md) |
+| `public.rs` | Public pool page and read-only API with rate limiting | done, see [`guideline-public-page.md`](./guideline-public-page.md) |
 
 Mainnet is far beyond height 290000, so only the MuHash attestation path matters. The daemon refuses to start on a node below the intra-block attestation fix height (`170000` on mainnet).
 
@@ -91,7 +92,7 @@ The cost per address grows with mempool size and UTXO set on mainnet. This backe
 
 ## 5. Next steps
 
-1. Hardware tests of the Stratum V1 server and accounting (share ledger, payout worker, miner statistics).
+1. Hardware tests of the Stratum V1 server and payouts on real devices and mainnet.
 2. Batch attestation backend once the node interface exists, verified against the Python oracle in `test/`.
 3. Tip notifications through the node mining IPC interface instead of polling.
 4. Stratum V2 standard channels.

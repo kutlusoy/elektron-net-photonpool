@@ -2,7 +2,7 @@
 
 Headless, high-throughput mining pool for [Elektron Net](https://elektron-net.org), built for 1,000 to 10,000 ASIC miners.
 
-Status: early development. The Rust daemon (`photond`) with a Stratum V1 server and the operator UI prototype exist. Accounting, payouts, hardware tests and Stratum V2 are next. See [`doc-elektron/guideline-photon-architecture.md`](doc-elektron/guideline-photon-architecture.md).
+Status: early development. The Rust daemon (`photond`) offers solo, PPLNS and PPS with a Stratum V1 server, a SQLite ledger, payouts and a public pool page. Hardware tests and Stratum V2 are next. See [`doc-elektron/guideline-photon-architecture.md`](doc-elektron/guideline-photon-architecture.md).
 
 ## Goals
 
