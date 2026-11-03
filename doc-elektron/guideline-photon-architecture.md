@@ -60,7 +60,7 @@ Consequences:
 
 ## 4. Node side: batch attestation RPC
 
-A new, authenticated RPC (working name `getattestationbatch`) MUST be added to the node. It is an RPC only, not a consensus change.
+A new, authenticated batch interface (working name `getattestationbatch`, primarily on the existing Mining IPC interface) MUST be added to the node. It is an interface only, not a consensus change. Full specification: [`guideline-batch-attestation-rpc.md`](./guideline-batch-attestation-rpc.md). Market and tooling review: [`guideline-mining-landscape.md`](./guideline-mining-landscape.md).
 
 - Input: list of payout scripts for the current tip.
 - Work done once: transaction selection, accumulator state for tip plus block transactions.
