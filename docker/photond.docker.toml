@@ -31,6 +31,9 @@ enabled = true
 listen = "0.0.0.0:8082"
 name = "Photon Pool"
 stratum_host = ""
+# The public port is only published on 127.0.0.1 of the host, so trusting X-Forwarded-For (set by
+# the optional Caddy of the "tls" profile) is safe here and gives every visitor their own rate limit.
+trust_proxy = true
 
 [stratum]
 enabled = true

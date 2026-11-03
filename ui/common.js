@@ -45,3 +45,8 @@ function rng(seed) {
 }
 const hex = (r, n) => Array.from({ length: n }, () => '0123456789abcdef'[Math.floor(r() * 16)]).join('');
 
+const LEPTON = 1e8;
+const coins = (l) => (l / LEPTON).toFixed(8);
+const leptons = (l) => Math.round(l).toLocaleString('en-US');
+const maskAddr = (a) => (a.length > 14 ? a.slice(0, 6) + '..' + a.slice(-4) : a);
+const ago = (t) => { const a = Math.max(0, Date.now() / 1000 - t); return a < 90 ? Math.floor(a) + 's' : a < 3600 ? Math.floor(a / 60) + 'm' : a < 172800 ? (a / 3600).toFixed(1) + 'h' : Math.floor(a / 86400) + 'd'; };

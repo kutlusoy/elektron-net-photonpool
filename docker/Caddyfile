@@ -1,0 +1,5 @@
+# Used by the optional "tls" profile of docker-compose.yml.
+# Set POOL_DOMAIN to the public domain of the pool; Caddy obtains the certificate automatically.
+{$POOL_DOMAIN} {
+	reverse_proxy photond:8082
+}

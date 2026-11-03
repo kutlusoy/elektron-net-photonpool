@@ -82,6 +82,9 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/style.css", get(|State(s): State<St>| file(s, "style.css", "text/css; charset=utf-8")))
         .route("/common.js", get(|State(s): State<St>| file(s, "common.js", "text/javascript; charset=utf-8")))
         .route("/public.js", get(|State(s): State<St>| file(s, "public.js", "text/javascript; charset=utf-8")))
+        .route("/miner.html", get(|State(s): State<St>| file(s, "miner.html", "text/html; charset=utf-8")))
+        .route("/miner", get(|State(s): State<St>| file(s, "miner.html", "text/html; charset=utf-8")))
+        .route("/miner.js", get(|State(s): State<St>| file(s, "miner.js", "text/javascript; charset=utf-8")))
         .layer(middleware::from_fn_with_state(st.clone(), guard))
         .with_state(st)
 }
@@ -152,7 +155,7 @@ async fn pool_view(State(st): State<St>) -> Json<Value> {
         "name": p.cfg.public.name, "version": env!("CARGO_PKG_VERSION"), "network": p.cfg.pool.network, "explorerUrl": p.cfg.api.explorer_url,
         "uptime": p.started.elapsed().as_secs_f64(),
         "stratum": {"host": p.cfg.public.stratum_host, "ports": ports},
-        "modes": modes, "minPayout": p.cfg.payout.min_payout, "pplnsWindowFactor": p.cfg.payout.pplns.window_factor,
+        "modes": modes, "minPayoutLeptons": p.cfg.payout.min_payout_leptons, "pplnsWindowFactor": p.cfg.payout.pplns.window_factor,
         "hashrate": hashrate, "miners": {"online": online, "workers": workers},
         "found24h": found24h, "blocks": by_status.into_iter().collect::<HashMap<_, _>>(),
         "node": {"height": height, "tip": tip, "tipTime": tip_time}, "networkDifficulty": net_diff,

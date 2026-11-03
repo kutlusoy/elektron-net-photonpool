@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-const MATURITY_CONFIRMATIONS: i64 = 101;
+pub const MATURITY_CONFIRMATIONS: i64 = 101;
 const ADDRESS_LABEL: &str = "photon-pool";
 
 pub fn minute_now() -> i64 {
@@ -244,7 +244,7 @@ impl Pool {
     /// Returns true when at least one payout transaction failed and was reverted.
     async fn run_payouts(&self) -> Result<bool> {
         let Some(w) = &self.wallet else { bail!("no wallet") };
-        let min = (self.cfg.payout.min_payout * LEPTON as f64).round() as i64;
+        let min = self.cfg.payout.min_payout_leptons;
         let payable = self.ledger.call(move |c| ledger::payable(c, min.max(1))).await?;
         if payable.is_empty() {
             return Ok(false);

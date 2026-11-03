@@ -129,7 +129,7 @@ Copy `target/release/photond` and the `ui/` folder to `/opt/photond`, then `syst
 
 - UI: `http://127.0.0.1:8081/` (for a remote host use an SSH tunnel: `ssh -L 8081:127.0.0.1:8081 user@host`).
 - API (read-only): `/api/v1/summary`, `/miners`, `/blocks`, `/events`.
-- **Public page for miners:** set `[public] enabled = true` to serve a public terminal page (pool statistics, connection details, modes and fees, blocks, payouts, address lookup) on its own listener, default `127.0.0.1:8082`. Put a reverse proxy with TLS in front of it and set `trust_proxy = true`. The operator UI and API are never served there. See [`doc-elektron/guideline-public-page.md`](doc-elektron/guideline-public-page.md).
+- **Public page for miners:** set `[public] enabled = true` to serve a public terminal page (pool statistics, connection details with ports and modes, blocks, payouts, address lookup) and a personal **miner page** (`/miner.html#<address>`: balances, pending PPLNS credits with the blocks until maturity, payouts, workers, 24 h hashrate, blocks found) on its own listener, default `127.0.0.1:8082`. Put a reverse proxy with TLS in front of it and set `trust_proxy = true`. The operator UI and API are never served there. See [`doc-elektron/guideline-public-page.md`](doc-elektron/guideline-public-page.md).
 - The UI shows a `DEMO DATA` tag and simulated numbers when it cannot reach the API.
 
 ## 7. Configuration reference
@@ -141,8 +141,9 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 | `node.rpc_url`, `node.auth` | Node JSON-RPC and credentials (`user:password` or `cookie:/path`) |
 | `pool.network` | `mainnet`, `testnet` or `regtest`, must match the node |
 | `payout.wallet`, `payout.wallet_addresses` | Node wallet for payouts; the pool provisions its own payout addresses from it (then `pool.payout_addresses` can stay empty) |
-| `payout.dry_run`, `payout.min_payout`, `payout.fee_pct.*`, `payout.pplns.window_factor` | Payout switch (default dry run) and the mode parameters, all with standard defaults |
+| `payout.dry_run`, `payout.min_payout_leptons`, `payout.fee_pct.*`, `payout.pplns.window_factor` | Payout switch (default dry run) and the mode parameters, all with standard defaults |
 | `pool.payout_addresses` | Pool-owned addresses; more addresses give miners more independent search space (see the sizing table in [`doc-elektron/guideline-photon-architecture.md`](doc-elektron/guideline-photon-architecture.md)) |
+| `public.*` | Public pool page and its rate limit (see the next section) |
 | `pool.spot_check` | Candidates per epoch validated against the node |
 | `stratum.listen`, `stratum.initial_difficulty`, `stratum.share_secs` | Miner port, starting difficulty, target seconds per share |
 | `stratum.max_connections` | Upper bound for sockets |
@@ -169,6 +170,16 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 - [ ] Port `3333` reachable from the miners, `8081` only local.
 - [ ] Payout handling decided (see the payout modes guideline) before real miners connect.
 
-## 10. Full stack with node, explorer and TLS
+## 10. Standalone or as part of the full stack
 
-The [`elektron-net-stack`](https://github.com/kutlusoy/elektron-net-stack) installer can install the Photon pool together with the node, the mempool explorer and Caddy (automatic HTTPS), pre-configured: set `POOL_TYPE=photon` in `elektron-stack.conf` (see the "Pool type: photon" section of that README). It builds this repository (`PHOTON_REF`), creates and encrypts the pool wallet, writes `photond.toml` and puts the public page on `POOL_DOMAIN`.
+The pool is fully usable on its own (sections 3 and 4). For a public page with automatic HTTPS in the standalone Docker setup, point a DNS record at the server, open ports 80 and 443 and start the optional Caddy profile:
+
+```bash
+POOL_DOMAIN=pool.example.org docker compose --profile tls up -d
+```
+
+The public page is then served at `https://pool.example.org`; the admin API and the operator UI stay on `127.0.0.1:8081`.
+
+### 10.1 Full stack with node, explorer and TLS
+
+The [`elektron-net-stack`](https://github.com/kutlusoy/elektron-net-stack) installer can install the Photon pool together with the node, the mempool explorer and Caddy (automatic HTTPS), pre-configured: set `POOL_TYPE=photon` in `elektron-stack.conf` (see the "Pool type: photon" section of that README). It builds this repository (`PHOTON_REF`, default `main`), creates and encrypts the pool wallet, writes `photond.toml` and puts the public page on `POOL_DOMAIN`.

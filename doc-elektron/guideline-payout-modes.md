@@ -29,7 +29,7 @@ Disabled modes are refused with a clear error (Stratum code 20, "mode not offere
 [payout]
 default_mode = "pplns"
 modes = ["solo", "pplns", "pps"]
-min_payout = 0.01              # in coins, per account (default)
+min_payout_leptons = 100000    # per account (default, 0.001 coins)
 max_solo_accounts = 1000
 
 [payout.fee_pct]               # solo is paid directly in the coinbase and has no fee
@@ -95,7 +95,7 @@ Shares are aggregated in memory per session and flushed every few seconds in one
 
 ## 5.1 Payout worker
 
-- Runs every `payout.interval_secs` (default 600), selects accounts with at least `payout.min_payout` and pays them in batches of at most `max_outputs_per_tx` with one `sendmany` per batch. The pool wallet pays the network fee. `payout.fee_rate` (sat/vB) fixes the rate when the node cannot estimate fees.
+- Runs every `payout.interval_secs` (default 600), selects accounts with at least `payout.min_payout_leptons` and pays them in batches of at most `max_outputs_per_tx` with one `sendmany` per batch. The pool wallet pays the network fee. `payout.fee_rate` (sat/vB) fixes the rate when the node cannot estimate fees.
 - **Dry run is the default.** With `payout.dry_run = true` the worker only logs what it would pay. Set it to `false` to pay for real.
 - Safety: the balances are debited and a `pending` payout row is written before `sendmany`. A definitive RPC error reverts the balances, an unknown outcome (node unreachable) leaves the row pending. On every cycle pending rows are reconciled against the wallet through the unique comment `photon-payout-<id>`, so a crash can neither lose nor double-pay a batch. Repeated failures back off exponentially.
 - The wallet can be encrypted: the passphrase comes from the environment variable named by `payout.wallet_passphrase_env`, the wallet is unlocked only while paying.
@@ -104,7 +104,7 @@ Shares are aggregated in memory per session and flushed every few seconds in one
 ## 6. Decisions taken
 
 1. Solo miners are paid directly in the coinbase, no pool wallet involved, no fee.
-2. Fees, PPLNS window and minimum payout use standard defaults (PPLNS 1 %, PPS 2 %, window factor 2.0, minimum 0.01) and remain configurable.
+2. Fees, PPLNS window and minimum payout use standard defaults (PPLNS 1 %, PPS 2 %, window factor 2.0, minimum payout 100,000 leptons) and remain configurable.
 3. PPS is offered but starts paused until the pool wallet holds the configured reserve.
 4. Payouts use a wallet on the pool's Elektron Net node (as in the existing stack), with a dry-run switch that is on by default.
 

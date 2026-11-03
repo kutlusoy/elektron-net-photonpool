@@ -129,21 +129,37 @@ pub async fn account_view(p: &Arc<Pool>, address: &str) -> Option<Value> {
     crate::addr::script_for_address(address, p.cfg.network().ok()?.hrp).ok()?;
     let now_min = crate::accounting::minute_now();
     let addr = address.to_string();
-    let (info, day, hour, payouts) = p
+    let (info, day, hour, payouts, credits, found, history) = p
         .ledger
         .call(move |c| {
-            Ok((ledger::account_info(c, &addr)?, ledger::account_shares(c, &addr, now_min - 1440)?, ledger::account_shares(c, &addr, now_min - 60)?, ledger::account_payouts(c, &addr, 10)?))
+            Ok((
+                ledger::account_info(c, &addr)?,
+                ledger::account_shares(c, &addr, now_min - 1440)?,
+                ledger::account_shares(c, &addr, now_min - 60)?,
+                ledger::account_payouts(c, &addr, 20)?,
+                ledger::account_credits(c, &addr, 30)?,
+                ledger::account_blocks(c, &addr, 20)?,
+                ledger::account_history(c, &addr, now_min - 1440, 10)?,
+            ))
         })
         .await
         .ok()?;
+    let tip_height = p.epoch.borrow().as_ref().map(|e| e.height as i64).unwrap_or(0);
     let prefix = format!("{address}.");
-    let (mut hashrate, mut workers) = (0.0, 0u64);
+    let (mut hashrate, mut workers) = (0.0, Vec::new());
     for s in p.sessions.lock().unwrap().values() {
-        if s.name.lock().unwrap().starts_with(&prefix) {
-            hashrate += get_f64(&s.hashrate);
-            workers += 1;
+        let name = s.name.lock().unwrap().clone();
+        if let Some(w) = name.strip_prefix(&prefix) {
+            let hr = get_f64(&s.hashrate);
+            hashrate += hr;
+            workers.push(json!({
+                "name": w, "mode": mode_name(s.mode.load(Ordering::Relaxed) as i64), "hashrate": hr, "difficulty": get_f64(&s.difficulty),
+                "accepted": s.ok.load(Ordering::Relaxed), "stale": s.stale.load(Ordering::Relaxed),
+                "invalid": s.inv.load(Ordering::Relaxed) + s.dup.load(Ordering::Relaxed), "seen": (unix_now() - get_f64(&s.last_seen)).max(0.0) as u64,
+            }));
         }
     }
+    workers.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     let shares = |rows: Vec<(i64, f64, i64)>| {
         let mut m = serde_json::Map::new();
         for (mode, diff, cnt) in rows {
@@ -151,11 +167,26 @@ pub async fn account_view(p: &Arc<Pool>, address: &str) -> Option<Value> {
         }
         Value::Object(m)
     };
+    let base = &p.cfg.api.explorer_url;
+    let maturity = crate::accounting::MATURITY_CONFIRMATIONS;
     Some(json!({
-        "address": address, "hashrate": hashrate, "workers": workers,
+        "address": address, "hashrate": hashrate, "workers": workers.len(), "workerList": workers,
         "shares1h": shares(hour), "shares24h": shares(day),
         "balance": {"pending": info.pending, "confirmed": info.confirmed, "paid": info.paid},
+        "minPayoutLeptons": p.cfg.payout.min_payout_leptons,
         "payouts": payouts.into_iter().map(|r| json!({"time": r.created_at, "txid": r.txid, "amount": r.amount, "status": r.status})).collect::<Vec<_>>(),
+        "credits": credits.into_iter().map(|c| {
+            let remaining = if c.status == "pending" { (maturity - (tip_height - c.height + 1)).max(0) } else { 0 };
+            let mut v = json!({"height": c.height, "hash": c.hash, "amount": c.amount, "status": c.status, "blockStatus": c.block_status, "maturesIn": remaining});
+            if let Some(u) = block_url(base, &c.hash) { v["url"] = json!(u); }
+            v
+        }).collect::<Vec<_>>(),
+        "blocksFound": found.into_iter().map(|b| {
+            let mut v = json!({"height": b.height, "hash": b.hash, "time": b.found_at, "mode": mode_name(b.mode), "status": b.status});
+            if let Some(u) = block_url(base, &b.hash) { v["url"] = json!(u); }
+            v
+        }).collect::<Vec<_>>(),
+        "history": history.into_iter().map(|(m, d)| json!({"time": m * 60, "hashrate": d * 4_294_967_296.0 / 600.0})).collect::<Vec<_>>(),
     }))
 }
 

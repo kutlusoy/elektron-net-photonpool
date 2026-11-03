@@ -97,6 +97,10 @@ The cost per address grows with mempool size and UTXO set on mainnet. This backe
 3. Tip notifications through the node mining IPC interface instead of polling.
 4. Stratum V2 standard channels.
 
+## 5.1 Planned tests
+
+- **Load simulation with very many miners and full blocks:** thousands to tens of thousands of simulated miners together with a mempool that fills complete blocks and a mainnet-sized UTXO set, to measure candidate production time, tip-to-job latency, ledger write rate and fan-out under realistic block sizes, and to extrapolate the load of a real pool.
+
 ## 6. Checklist
 
 - [x] Candidates built and validated against an unmodified node.

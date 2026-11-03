@@ -12,6 +12,10 @@
 
 The daemon can serve a public page for miners on its own listener (`[public]`, off by default). It uses the same terminal look as the operator UI and shows pool statistics, connection instructions, payout modes with fees, recent blocks and payouts, and lets a miner look up their own address (`account <address>`, or open `/#<address>`). The operator API and UI are never served on this listener.
 
+## 1.1 The miner page
+
+`/miner.html#<address>` (also `/miner`) is the personal overview of one payout address: account and status, balance with a progress bar to the next payout (`payout.min_payout_leptons`, default 100,000), 24 h hashrate, workers, pending credits per block (`matures in N` blocks, `payable`), payout history with transaction links, and the blocks found. It is reached from the pool page (`MINER PAGE`, or the command `miner <address>`), pasted addresses are remembered in the browser only. It uses nothing but the account endpoint below.
+
 ## 2. Public API (read-only, `/public/v1`)
 
 | Endpoint | Content |
@@ -19,7 +23,7 @@ The daemon can serve a public page for miners on its own listener (`[public]`, o
 | `GET /pool` | name, network, explorer URL, uptime, stratum host and ports with their default mode, modes with fee and availability, minimum payout, PPLNS window factor, hashrate (now, 1 min, 1 h, history), miners online and workers, blocks in 24 h and by status, node height, tip and network difficulty |
 | `GET /blocks?limit=n` | height, hash, time, mode, status, **masked** finder (`be1q..abcd`), explorer link |
 | `GET /payouts?limit=n` | time, txid, total amount, status |
-| `GET /account/<address>` | hashrate and online workers, shares of the last hour and 24 h per mode, pending, payable and paid balance in leptons, last payouts. `400` for an address that is not valid for the configured network. |
+| `GET /account/<address>` | hashrate, online workers (`workerList` with mode, hashrate, difficulty, accepted, stale, invalid, last seen), shares of the last hour and 24 h per mode, pending, payable and paid balance in leptons, minimum payout, last payouts, PPLNS credits per block with the blocks until maturity (`credits`), blocks found by the address, and a 24 h hashrate history in 10 minute slots. `400` for an address that is not valid for the configured network. |
 
 No worker names, other accounts, IP addresses or operator data are exposed. The address lookup is public by design: anyone who knows an address sees its pool statistics, as on other pools.
 
@@ -28,7 +32,7 @@ No worker names, other accounts, IP addresses or operator data are exposed. The 
 - Per-client token bucket (`public.rate_per_min`, default 120). Over the limit the answer is `429` with `Retry-After: 10`.
 - `X-Forwarded-For` is only trusted when `public.trust_proxy = true`; set it only behind your own reverse proxy (Caddy in the stack). Otherwise it is ignored, so clients cannot dodge the limit by spoofing it.
 - Responses carry a strict `Content-Security-Policy` (`default-src 'none'`, scripts and styles only from the same origin), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and a short cache lifetime.
-- Only `public.html`, `style.css`, `common.js` and `public.js` are served as static files (fixed list, no directory serving). The test suite checks that `index.html`, `app.js`, the operator API and path-traversal attempts are not reachable.
+- Only `public.html`, `miner.html`, `style.css`, `common.js`, `public.js` and `miner.js` are served as static files (fixed list, no directory serving). The test suite checks that `index.html`, `app.js`, the operator API and path-traversal attempts are not reachable.
 
 ## 4. Configuration
 

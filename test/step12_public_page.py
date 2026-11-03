@@ -68,7 +68,7 @@ async def main(h):
 
     s, hd, b = http(PUB, "/")
     h.check("public listener serves the terminal page", s == 200 and b"PHOTON POOL" in b and "text/html" in hd.get("content-type", ""))
-    for path in ("/style.css", "/common.js", "/public.js"):
+    for path in ("/style.css", "/common.js", "/public.js", "/miner.html", "/miner", "/miner.js"):
         s, _, _ = http(PUB, path)
         h.check(f"static asset {path} is served", s == 200)
     for path in ("/index.html", "/app.js", "/api/v1/summary", "/api/v1/ledger", "/../Cargo.toml", "/public/v1/../../api/v1/ledger"):
@@ -94,6 +94,14 @@ async def main(h):
     s, _, b = http(PUB, f"/public/v1/account/{MINER}")
     acct = json.loads(b)
     h.check("account lookup returns shares and balances for the address", s == 200 and acct["address"] == MINER and "pplns" in acct["shares24h"] and acct["workers"] >= 1, str(acct)[:200])
+    h.check("account view lists the worker with its mode and live hashrate", any(w["name"] == "rigX" and w["mode"] == "pplns" for w in acct["workerList"]), str(acct["workerList"])[:160])
+    h.check("account view lists the pending PPLNS credit with the blocks until maturity", acct["credits"] and acct["credits"][0]["status"] == "pending" and 0 < acct["credits"][0]["maturesIn"] <= 101 and acct["credits"][0]["url"].endswith(f"/block/{bhash}"), str(acct["credits"][:1]))
+    h.check("account view lists the block found by the address", acct["blocksFound"] and acct["blocksFound"][0]["hash"] == bhash)
+    h.check("account view carries a hashrate history and the minimum payout", acct["history"] and acct["minPayoutLeptons"] == 100000, str(acct["history"][:1]))
+    other = addr(b"another-valid-miner")
+    s, _, b = http(PUB, f"/public/v1/account/{other}")
+    o = json.loads(b)
+    h.check("another address sees none of these workers, credits or blocks", s == 200 and o["workerList"] == [] and o["credits"] == [] and o["blocksFound"] == [] and "rigX" not in b.decode())
     s, _, _ = http(PUB, "/public/v1/account/not-an-address")
     h.check("an invalid address is rejected", s == 400)
     s, _, _ = http(PUB, "/public/v1/account/" + addr(b"someone-else")[:-3] + "abc")

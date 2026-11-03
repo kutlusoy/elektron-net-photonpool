@@ -29,7 +29,7 @@ wallet_addresses = 4
 dry_run = {str(dry_run).lower()}
 interval_secs = 2
 maturity_poll_secs = 1
-min_payout = 0.0001
+min_payout_leptons = 10000
 
 [payout.pplns]
 window_factor = 1.0e9

@@ -49,7 +49,7 @@ require_address = true
 default_mode = "pplns"
 modes = ["solo", "pplns", "pps"]
 # Solo miners are paid directly in the coinbase (no fee). The other values are the built-in defaults.
-min_payout = 0.01
+min_payout_leptons = 100000     # 0.001 coins
 max_solo_accounts = 1000
 
 # Payouts. dry_run = true only logs what would be paid; set it to false to pay for real.

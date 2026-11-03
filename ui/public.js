@@ -1,9 +1,7 @@
 'use strict';
 
-const LEPTON = 1e8;
-const coins = (l) => (l / LEPTON).toFixed(8);
-const maskAddr = (a) => (a.length > 14 ? a.slice(0, 6) + '..' + a.slice(-4) : a);
 const modeLabel = { solo: 'SOLO', pplns: 'PPLNS', pps: 'PPS' };
+const modeShort = { solo: 'reward straight to you', pplns: 'share of each pool block', pps: 'fixed pay per share' };
 const modeText = {
   solo: 'direct payout in the block you find, no pool fee',
   pplns: 'share of the reward of every pool block by recent work',
@@ -37,7 +35,7 @@ function demoSource() {
         name: 'Photon Demo', version: '0.1.0-demo', network: 'mainnet', explorerUrl: '', uptime: 3 * 86400 + 4000,
         stratum: { host: 'pool.example.org', ports: [{ port: 3333, mode: 'pplns', override: true }, { port: 3334, mode: 'pps', override: false }, { port: 3335, mode: 'solo', override: false }] },
         modes: [{ mode: 'solo', fee: 0, available: true }, { mode: 'pplns', fee: 1, available: true }, { mode: 'pps', fee: 2, available: false }],
-        minPayout: 0.01, pplnsWindowFactor: 2, hashrate: { now: hist[hist.length - 1], m1: 9.5e16, h1: 9.45e16, hist },
+        minPayoutLeptons: 100000, pplnsWindowFactor: 2, hashrate: { now: hist[hist.length - 1], m1: 9.5e16, h1: 9.45e16, hist },
         miners: { online: 998, workers: 1000 }, found24h: 4, blocks: { found: 0, maturing: 2, mature: 40, orphaned: 1 },
         node: { height: 132457, tip: hex(r, 64), tipTime: now() - 23 }, networkDifficulty: 1.2e9,
       };
@@ -80,16 +78,20 @@ function render() {
   ].join('\n');
   const host = p.stratum.host || location.hostname;
   $('#pane-connect').innerHTML = [
-    span('dim', 'url (pick the port of your payout mode)'),
-    ...p.stratum.ports.map((x) => `${span('c1', `stratum+tcp://${host}:${x.port}`)}  ${span('c2', modeLabel[x.mode] || x.mode)}${x.override ? span('dim', '  (+m=)') : ''}`),
+    span('dim', 'urls (the port decides the payout mode):'),
+    `${span('c3', '+m')}${span('dim', ' = password may add ')}${span('c3', 'm=solo|pplns|pps')}`,
+    ...p.stratum.ports.map((x) => `${span('c1', `stratum+tcp://${host}:${x.port}`)}  ${span('c2', modeLabel[x.mode] || x.mode)}${x.override ? span('c3', ' +m') : ''}`),
     '',
     `${span('dim', 'user      ')}${span('c3', '<your address>.<worker>')}`,
-    `${span('dim', 'password  ')}x${span('dim', '  (+m=solo|pplns|pps where marked)')}`,
+    `${span('dim', 'password  ')}x`,
     `${span('dim', 'miner     ')}enable version rolling`,
   ].join('\n');
-  $('#pane-modes').innerHTML = [span('row-h', pad('MODE', 7) + pad('FEE', 7) + 'STATE')]
-    .concat(p.modes.map((m) => `${span('c2', pad(modeLabel[m.mode] || m.mode, 7))}${pad(m.fee + '%', 7)}${m.available ? span('ok', 'open') : span('warn', 'paused')}`))
-    .concat(['', span('dim', `min payout ${p.minPayout} coins`), span('dim', `PPLNS window ${p.pplnsWindowFactor}x network difficulty`)]).join('\n');
+  const portsOf = (mode) => p.stratum.ports.filter((x) => x.mode === mode).map((x) => x.port + (x.override ? '*' : '')).join(',') || '-';
+  $('#pane-modes').innerHTML = [span('row-h', pad('MODE', 7) + pad('FEE', 6) + pad('STATE', 8) + 'PORT')]
+    .concat(p.modes.map((m) => `${span('c2', pad(modeLabel[m.mode] || m.mode, 7))}${pad(m.fee + '%', 6)}${m.available ? span('ok', pad('open', 8)) : span('warn', pad('paused', 8))}${portsOf(m.mode)}`))
+    .concat(['', span('dim', '* port also accepts m=<mode>'),
+      ...p.modes.map((m) => `${span('c2', pad((modeLabel[m.mode] || m.mode).toLowerCase(), 6))}${span('dim', modeShort[m.mode] || '')}`),
+      '', span('dim', `min payout ${leptons(p.minPayoutLeptons)} leptons`)]).join('\n');
   $('#pane-blocks').innerHTML = [span('row-h', pad('HEIGHT', 9) + pad('AGE', 8) + pad('MODE', 7) + pad('FINDER', 17) + 'STATE')]
     .concat(view.blocks.map((b) => {
       const a = Date.now() / 1000 - b.time;
@@ -135,7 +137,7 @@ const cmds = {
   help() {
     out(span('c1', 'commands'));
     [['pool', 'pool summary'], ['connect', 'how to point your miner at this pool'], ['modes', 'payout modes, fees, availability'], ['blocks', 'recent blocks'], ['payouts', 'recent payouts'],
-      ['account <address>', 'your hashrate, shares, balance and payouts'], ['theme cyan|amber|green|magenta', 'colour scheme'], ['clear', 'clear console']]
+      ['account <address>', 'your hashrate, shares, balance and payouts'], ['miner <address>', 'open your personal miner page'], ['theme cyan|amber|green|magenta', 'colour scheme'], ['clear', 'clear console']]
       .forEach(([c, d]) => out(`  ${span('c3', pad(c, 34))}${span('dim', d)}`));
   },
   pool() { const p = view.pool; out(`${fmtHash(p.hashrate.now)}, ${num(p.miners.online)} miners, ${num(p.found24h)} blocks in 24h, height ${num(p.node.height)}`); },
@@ -145,6 +147,7 @@ const cmds = {
     out(span('dim', 'user: <your address>.<worker>   password: x   (version rolling on)'));
   },
   modes() { view.pool.modes.forEach((m) => out(`${span('c2', pad(modeLabel[m.mode] || m.mode, 6))} fee ${m.fee}%  ${m.available ? span('ok', 'open') : span('warn', 'paused')}  ${span('dim', modeText[m.mode] || '')}`)); },
+  miner(a) { if (!a[0]) return out(span('warn', 'usage: miner <your address>')); location.href = 'miner.html#' + encodeURIComponent(a[0]); },
   blocks() { view.blocks.slice(0, 8).forEach((b) => out(`${linkPad(b.url, num(b.height), 9)}${pad(modeLabel[b.mode] || b.mode, 7)}${b.finder}  ${b.status}`)); },
   payouts() { view.payouts.forEach((x) => out(`${new Date(x.time * 1000).toISOString().slice(0, 16).replace('T', ' ')}  ${coins(x.amount)}  ${link(txUrl(view.pool.explorerUrl, x.txid), short(x.txid || '', 8, 6), 'c1')}`)); if (!view.payouts.length) out(span('dim', 'no payouts yet')); },
   account(a) { return accountCmd(a[0]); },

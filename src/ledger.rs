@@ -297,6 +297,40 @@ pub fn blocks_by_status(conn: &Connection) -> Result<Vec<(String, i64)>> {
     Ok(v)
 }
 
+pub struct CreditRow {
+    pub height: i64,
+    pub hash: String,
+    pub amount: i64,
+    pub status: String,
+    pub block_status: String,
+}
+
+/// PPLNS credits of an account per block, newest first.
+pub fn account_credits(conn: &Connection, account: &str, limit: i64) -> Result<Vec<CreditRow>> {
+    let mut st = conn.prepare(
+        "SELECT b.height, c.block_hash, c.amount, c.status, b.status FROM credits c JOIN blocks b ON b.hash = c.block_hash WHERE c.account = ?1 ORDER BY b.height DESC LIMIT ?2",
+    )?;
+    let v = st
+        .query_map(params![account, limit], |r| Ok(CreditRow { height: r.get(0)?, hash: r.get(1)?, amount: r.get(2)?, status: r.get(3)?, block_status: r.get(4)? }))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(v)
+}
+
+pub fn account_blocks(conn: &Connection, account: &str, limit: i64) -> Result<Vec<BlockRow>> {
+    let mut st = conn.prepare("SELECT hash, height, account, worker, mode, status, found_at FROM blocks WHERE account = ?1 ORDER BY height DESC LIMIT ?2")?;
+    let v = st
+        .query_map(params![account, limit], |r| Ok(BlockRow { hash: r.get(0)?, height: r.get(1)?, account: r.get(2)?, worker: r.get(3)?, mode: r.get(4)?, status: r.get(5)?, found_at: r.get(6)? }))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(v)
+}
+
+/// (start minute of the slot, summed difficulty) in slots of `slot_minutes`, oldest first.
+pub fn account_history(conn: &Connection, account: &str, since_minute: i64, slot_minutes: i64) -> Result<Vec<(i64, f64)>> {
+    let mut st = conn.prepare("SELECT (minute / ?3) * ?3, SUM(diff) FROM share_buckets WHERE account = ?1 AND minute >= ?2 GROUP BY 1 ORDER BY 1")?;
+    let v = st.query_map(params![account, since_minute, slot_minutes], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<_, _>>()?;
+    Ok(v)
+}
+
 pub fn blocks_since(conn: &Connection, ts: i64) -> Result<i64> {
     Ok(conn.query_row("SELECT COUNT(*) FROM blocks WHERE found_at >= ?1 AND status != 'orphaned'", params![ts], |r| r.get(0))?)
 }

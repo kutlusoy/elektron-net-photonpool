@@ -98,9 +98,9 @@ pub struct PayoutCfg {
     /// Modes this pool offers.
     #[serde(default = "d_modes")]
     pub modes: Vec<Mode>,
-    /// Minimum balance before a payout is made, in coins.
+    /// Minimum balance before a payout is made, in leptons (1 coin = 100,000,000 leptons).
     #[serde(default = "d_min_payout")]
-    pub min_payout: f64,
+    pub min_payout_leptons: i64,
     /// Fee in percent per mode. Solo miners are paid directly in the coinbase and carry no fee.
     #[serde(default)]
     pub fee_pct: FeeCfg,
@@ -198,7 +198,7 @@ impl PayoutCfg {
 
 fn d_default_mode() -> Mode { Mode::Pplns }
 fn d_modes() -> Vec<Mode> { vec![Mode::Solo, Mode::Pplns, Mode::Pps] }
-fn d_min_payout() -> f64 { 0.01 }
+fn d_min_payout() -> i64 { 100_000 }
 fn d_fee_pplns() -> f64 { 1.0 }
 fn d_fee_pps() -> f64 { 2.0 }
 fn d_window() -> f64 { 2.0 }
