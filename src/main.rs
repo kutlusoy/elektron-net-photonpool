@@ -39,11 +39,17 @@ enum Cmd {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).init();
     let cli = Cli::parse();
-    let cfg = config::Config::load(&cli.config)?;
-    let pool = Pool::connect(cfg).await?;
     match cli.cmd {
-        Cmd::Run => run(pool).await,
-        Cmd::Check { mine } => check(pool, mine).await,
+        Cmd::Run => loop {
+            match Pool::connect(config::Config::load(&cli.config)?).await {
+                Ok(pool) => return run(pool).await,
+                Err(e) => {
+                    tracing::warn!("waiting for the node: {e:#}");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+            }
+        },
+        Cmd::Check { mine } => check(Pool::connect(config::Config::load(&cli.config)?).await?, mine).await,
     }
 }
 

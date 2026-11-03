@@ -1,0 +1,36 @@
+# Elektron Net node + photond pool.
+#   cp docker/photond.docker.toml photond.toml   (then set payout_addresses)
+#   docker compose up -d --build
+services:
+  node:
+    build:
+      context: ./docker/node
+      args:
+        ELEKTRON_REF: main
+    restart: unless-stopped
+    ports:
+      - "8333:8333"          # P2P, public. RPC (8332) is never published.
+    volumes:
+      - node-data:/data
+      - ./docker/elektron.conf:/config/elektron.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "gosu elektron elektron-cli -conf=/data/elektron.conf -datadir=/data getblockchaininfo >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  photond:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - node
+    ports:
+      - "3333:3333"                  # Stratum V1, public (miners connect here)
+      - "127.0.0.1:8081:8081"        # admin API and web UI, local only
+    volumes:
+      - node-data:/node:ro
+      - ./photond.toml:/config/photond.toml:ro
+
+volumes:
+  node-data:

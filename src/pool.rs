@@ -211,9 +211,12 @@ impl Pool {
     pub async fn connect(cfg: Config) -> Result<Arc<Pool>> {
         let net = cfg.network()?;
         let node = NodeRpc::new(&cfg.node.rpc_url, &cfg.node.auth)?;
-        let (chain, height) = node.chain_info().await.context("cannot reach the node")?;
+        let (chain, height, syncing) = node.chain_info().await.context("cannot reach the node")?;
         if chain != net.chain {
             bail!("node is on chain {chain}, config says {}", cfg.pool.network);
+        }
+        if syncing {
+            bail!("node is still syncing (height {height})");
         }
         if height < net.min_height {
             bail!("node height {height} is below the attestation fix height {}", net.min_height);

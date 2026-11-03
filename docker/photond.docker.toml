@@ -1,0 +1,29 @@
+# photond configuration for the Docker setup (see docker-compose.yml).
+# Copy to photond.toml in the repository root and set your payout addresses:
+#   cp docker/photond.docker.toml photond.toml
+
+[node]
+rpc_url = "http://node:8332"
+# The node writes its RPC cookie into the shared volume mounted at /node.
+auth = "cookie:/node/.cookie"
+poll_ms = 100
+
+[pool]
+network = "mainnet"
+payout_addresses = [
+  "be1q_replace_with_your_pool_address_1",
+  "be1q_replace_with_your_pool_address_2",
+]
+refresh_secs = 20
+spot_check = 4
+
+[stratum]
+enabled = true
+listen = "0.0.0.0:3333"
+initial_difficulty = 1024
+share_secs = 10
+
+[api]
+# Reachable from the host on 127.0.0.1:8081 only (see docker-compose.yml).
+listen = "0.0.0.0:8081"
+ui_dir = "/app/ui"

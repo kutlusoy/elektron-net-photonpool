@@ -1,0 +1,28 @@
+# Elektron Net node built from source. Use a tag or commit in ELEKTRON_REF for reproducible builds.
+FROM debian:bookworm-slim AS build
+ARG ELEKTRON_REPO=https://github.com/kutlusoy/elektron-net.git
+ARG ELEKTRON_REF=main
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake pkgconf python3 git \
+        libevent-dev libboost-dev libsqlite3-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+RUN git clone --depth 1 --branch "${ELEKTRON_REF}" "${ELEKTRON_REPO}" src
+RUN cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_GUI=OFF -DBUILD_TESTS=OFF \
+        -DENABLE_WALLET=OFF -DENABLE_IPC=OFF -DWITH_ZMQ=OFF \
+    && cmake --build build -j"$(nproc)" --target elektrond elektron-cli \
+    && install -m 0755 build/bin/elektrond build/bin/elektron-cli /usr/local/bin/
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libevent-2.1-7 libevent-pthreads-2.1-7 libstdc++6 ca-certificates gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r -g 10001 elektron && useradd -r -u 10001 -g elektron -d /data -s /usr/sbin/nologin elektron \
+    && mkdir -p /data && chown elektron:elektron /data
+COPY --from=build /usr/local/bin/elektrond /usr/local/bin/elektron-cli /usr/local/bin/
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+VOLUME ["/data"]
+EXPOSE 8333
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["elektrond", "-conf=/data/elektron.conf", "-datadir=/data", "-printtoconsole"]

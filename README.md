@@ -12,6 +12,10 @@ Status: early development. The Rust daemon (`photond`) with a Stratum V1 server 
 - Minimise wasted hashes: instant tip-change propagation, unique work per miner, no duplicate shares.
 - Optional web UI served by the daemon; the pool works fully without it.
 
+## Quick start
+
+See [`Quick-Install.md`](Quick-Install.md) for Docker and bare-metal setup, node configuration and connecting miners.
+
 ## Build and run
 
 ```text

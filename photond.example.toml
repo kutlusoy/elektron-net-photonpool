@@ -1,0 +1,50 @@
+# photond configuration for a bare-metal install.
+# Copy to photond.toml and adjust: cp photond.example.toml photond.toml
+
+[node]
+# JSON-RPC of your Elektron Net node (mainnet default port 8332).
+rpc_url = "http://127.0.0.1:8332"
+# Either "user:password" or "cookie:/path/to/.cookie".
+# Default cookie location on Linux: ~/.elektron/.cookie
+auth = "cookie:/home/elektron/.elektron/.cookie"
+# How often the node tip is checked, in milliseconds.
+poll_ms = 100
+
+[pool]
+# mainnet, testnet or regtest. Must match the node.
+network = "mainnet"
+# Pool-owned addresses that receive block rewards (be1q... on mainnet).
+# More addresses give miners more independent search space; see
+# doc-elektron/guideline-photon-architecture.md for sizing.
+# One address per ~2.8e14 H/s of pool hashrate, plus ~25 % headroom.
+payout_addresses = [
+  "be1q_replace_with_your_pool_address_1",
+  "be1q_replace_with_your_pool_address_2",
+]
+# Rebuild candidates on an unchanged tip every N seconds to pick up new
+# transactions (0 = only on a new block).
+refresh_secs = 20
+# Candidates per epoch that are validated against the node (getblocktemplate
+# proposal) before they are used. Invalid ones are dropped.
+spot_check = 4
+
+[stratum]
+enabled = true
+listen = "0.0.0.0:3333"
+# Starting share difficulty; vardiff adapts it per connection.
+initial_difficulty = 1024
+min_difficulty = 0.0001
+max_difficulty = 1.0e12
+# Target seconds between shares per connection.
+share_secs = 10
+max_connections = 200000
+idle_secs = 300
+min_job_interval_ms = 200
+max_job_interval_ms = 30000
+# Require "<be1q address>.<worker>" as the miner user name.
+require_address = true
+
+[api]
+# Read-only admin API and web UI. Keep this on loopback or a management network.
+listen = "127.0.0.1:8081"
+ui_dir = "ui"
