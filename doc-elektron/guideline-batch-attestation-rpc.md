@@ -184,7 +184,7 @@ Findings:
 3. Any change to the transaction set or its order changes the witness commitment and therefore the coinbase txid and the attestation. The batch interface MUST return a fresh commitment together with the attestations and the pool MUST NOT reuse either after changing the set. Reordering independent transactions is not free.
 4. A coinbase may claim less than the full reward, with a recomputed attestation it is valid. Payout value changes are therefore consensus-valid but not useful for the pool.
 5. Dropping or reordering transactions requires adjusting the coinbase value to subsidy plus the fees of the included transactions (`bad-cb-amount` otherwise).
-6. The legacy attestation path (below `MuhashAttestationActivationHeight`) is covered only by the negative extra-output test; the oracle implements the MuHash path used on current mainnet heights.
+6. The legacy attestation path (below `MuhashAttestationActivationHeight`) is irrelevant for production: mainnet is far beyond height 290000. The batch interface returns `unsupported-height` below the activation height, the oracle implements the MuHash path.
 
 Still to do: native benchmark of the batch call on production-sized UTXO sets, pruned and snapshot-restored nodes, fuzzing of the request parser, and an end-to-end test of the batch interface itself once it exists (compare against this oracle).
 

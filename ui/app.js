@@ -20,6 +20,7 @@ function fmtHash(h) {
 function spark(vals, width) {
   const ch = '▁▂▃▄▅▆▇█';
   const v = vals.slice(-width);
+  if (!v.length) return '';
   const lo = Math.min(...v), hi = Math.max(...v), r = hi - lo || 1;
   return v.map((x) => ch[Math.min(7, Math.floor(((x - lo) / r) * 7.999))]).join('');
 }
@@ -162,13 +163,13 @@ function render() {
   const s = ui.src.summary();
   if (!s) return;
   const age = Date.now() / 1000 - s.node.tipTime;
-  const efficiency = s.shares.ok;
+  const efficiency = s.shares.total ? s.shares.ok : null;
   $('#statusline').innerHTML = [
     `<span>net <b>ELEKTRON</b></span>`,
     `<span>height <b>${num(s.node.height)}</b></span>`,
     `<span>pool <b>${fmtHash(s.hashrate.now)}</b></span>`,
     `<span>miners <b>${num(s.miners.online)}</b>/${num(s.miners.total)}</span>`,
-    `<span class="${efficiency > 0.985 ? 'ok' : 'warn'}">valid <b>${pct(efficiency)}</b></span>`,
+    `<span class="${efficiency === null || efficiency > 0.985 ? 'ok' : 'warn'}">valid <b>${efficiency === null ? 'n/a' : pct(efficiency)}</b></span>`,
     `<span class="${s.node.connected ? 'ok' : 'warn'}">node <b>${s.node.connected ? 'UP' : 'DOWN'}</b> ${esc(s.node.transport)}</span>`,
     `<span>tip age <b>${hms(age)}</b></span>`,
   ].join('');

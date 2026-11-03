@@ -2,7 +2,7 @@
 
 Headless, high-throughput mining pool for [Elektron Net](https://elektron-net.org), built for 1,000 to 10,000 ASIC miners.
 
-Status: design phase, operator UI prototype available. See [`doc-elektron/guideline-photon-architecture.md`](doc-elektron/guideline-photon-architecture.md).
+Status: early development. The Rust daemon core (`photond`) and the operator UI prototype exist, the miner-facing protocols are next. See [`doc-elektron/guideline-photon-architecture.md`](doc-elektron/guideline-photon-architecture.md).
 
 ## Goals
 
@@ -11,6 +11,16 @@ Status: design phase, operator UI prototype available. See [`doc-elektron/guidel
 - Keep the mandatory per-block UTXO attestation untouched. No consensus changes.
 - Minimise wasted hashes: instant tip-change propagation, unique work per miner, no duplicate shares.
 - Optional web UI served by the daemon; the pool works fully without it.
+
+## Build and run
+
+```text
+cargo build --release
+target/release/photond -c photond.toml check
+target/release/photond -c photond.toml run
+```
+
+See [`doc-elektron/guideline-daemon-core.md`](doc-elektron/guideline-daemon-core.md) for configuration and status.
 
 ## Operator UI
 
