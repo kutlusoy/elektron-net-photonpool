@@ -22,6 +22,9 @@ payout_addresses = {json.dumps(addrs)}
 refresh_secs = 0
 spot_check = 4
 
+[stratum]
+enabled = false
+
 [api]
 listen = "127.0.0.1:{API}"
 ui_dir = "{os.path.join(ROOT, 'ui')}"

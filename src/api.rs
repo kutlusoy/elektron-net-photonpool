@@ -1,4 +1,4 @@
-use crate::pool::{unix_now, Pool};
+use crate::pool::{get_f64, unix_now, Pool};
 use axum::extract::{Query, State};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::routing::get;
@@ -40,6 +40,7 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
     let mut lat: Vec<f64> = p.stats.tip_ready_ms.lock().unwrap().iter().copied().collect();
     lat.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let s = &p.stats;
+    let live = p.live.lock().unwrap();
     let (ok, stale, dup, inv) = (s.ok.load(Ordering::Relaxed), s.stale.load(Ordering::Relaxed), s.dup.load(Ordering::Relaxed), s.inv.load(Ordering::Relaxed));
     let total = ok + stale + dup + inv;
     let frac = |n: u64| if total == 0 { 0.0 } else { n as f64 / total as f64 };
@@ -55,16 +56,35 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
             "p50": quantile(&lat, 0.5), "p95": quantile(&lat, 0.95), "samples": lat.len(),
             "batchMs": s.last_fetch_ms.load(Ordering::Relaxed),
         },
-        "hashrate": {"now": 0, "m1": 0, "h1": 0, "hist": [0]},
-        "miners": {"online": 0, "total": 0, "v1": 0, "v2": 0, "edge": 0},
-        "shares": {"perSec": 0, "ok": frac(ok), "stale": frac(stale), "dup": frac(dup), "inv": frac(inv), "total": total},
-        "alloc": {"candidates": cands, "unitsPerSec": 0, "epochUse": used as f64 / total_units as f64, "overlap": overlap},
+        "hashrate": {"now": live.hashrate, "m1": live.m1, "h1": live.h1, "hist": if live.hist.is_empty() { vec![0.0] } else { live.hist.iter().copied().collect() }},
+        "miners": {"online": live.online, "total": live.total, "v1": live.total, "v2": 0, "edge": 0},
+        "shares": {"perSec": live.shares_per_sec, "ok": frac(ok), "stale": frac(stale), "dup": frac(dup), "inv": frac(inv), "total": total},
+        "alloc": {"candidates": cands, "unitsPerSec": live.units_per_sec, "epochUse": used as f64 / total_units as f64, "overlap": overlap},
         "found": s.found.lock().unwrap().len(),
     }))
 }
 
-async fn miners() -> Json<Value> {
-    Json(json!([]))
+async fn miners(State(p): State<Arc<Pool>>, Query(q): Query<Limit>) -> Json<Value> {
+    let now = unix_now();
+    let mut rows: Vec<Value> = p
+        .sessions
+        .lock()
+        .unwrap()
+        .values()
+        .map(|s| {
+            let unit = s.unit.load(Ordering::Relaxed);
+            json!({
+                "name": s.name.lock().unwrap().clone(), "proto": "V1", "hashrate": get_f64(&s.hashrate), "diff": get_f64(&s.difficulty),
+                "ok": s.ok.load(Ordering::Relaxed), "stale": s.stale.load(Ordering::Relaxed),
+                "dup": s.dup.load(Ordering::Relaxed) + s.inv.load(Ordering::Relaxed),
+                "seen": (now - get_f64(&s.last_seen)).max(0.0) as u64,
+                "unit": format!("c{:03}/t{:02}/s{:02}", unit >> 16, (unit >> 8) & 0xff, unit & 0xff),
+            })
+        })
+        .collect();
+    rows.sort_by(|a, b| b["hashrate"].as_f64().partial_cmp(&a["hashrate"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
+    rows.truncate(q.limit.unwrap_or(100).min(1000));
+    Json(Value::Array(rows))
 }
 
 async fn blocks(State(p): State<Arc<Pool>>, Query(q): Query<Limit>) -> Json<Value> {

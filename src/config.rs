@@ -7,6 +7,8 @@ pub struct Config {
     pub pool: PoolCfg,
     #[serde(default)]
     pub api: ApiCfg,
+    #[serde(default)]
+    pub stratum: StratumCfg,
 }
 
 #[derive(Deserialize)]
@@ -40,6 +42,49 @@ impl Default for ApiCfg {
         Self { listen: d_listen(), ui_dir: d_ui() }
     }
 }
+
+#[derive(Deserialize, Clone)]
+pub struct StratumCfg {
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    #[serde(default = "d_s_listen")]
+    pub listen: String,
+    #[serde(default = "d_s_diff")]
+    pub initial_difficulty: f64,
+    #[serde(default = "d_s_min_diff")]
+    pub min_difficulty: f64,
+    #[serde(default = "d_s_max_diff")]
+    pub max_difficulty: f64,
+    #[serde(default = "d_s_share_secs")]
+    pub share_secs: f64,
+    #[serde(default = "d_s_max_conn")]
+    pub max_connections: usize,
+    #[serde(default = "d_s_idle")]
+    pub idle_secs: u64,
+    #[serde(default = "d_s_min_job")]
+    pub min_job_interval_ms: u64,
+    #[serde(default = "d_s_max_job")]
+    pub max_job_interval_ms: u64,
+    #[serde(default = "d_true")]
+    pub require_address: bool,
+}
+
+impl Default for StratumCfg {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+fn d_true() -> bool { true }
+fn d_s_listen() -> String { "0.0.0.0:3333".into() }
+fn d_s_diff() -> f64 { 1024.0 }
+fn d_s_min_diff() -> f64 { 0.0001 }
+fn d_s_max_diff() -> f64 { 1.0e12 }
+fn d_s_share_secs() -> f64 { 10.0 }
+fn d_s_max_conn() -> usize { 200_000 }
+fn d_s_idle() -> u64 { 300 }
+fn d_s_min_job() -> u64 { 200 }
+fn d_s_max_job() -> u64 { 30_000 }
 
 fn d_poll() -> u64 { 100 }
 fn d_refresh() -> u64 { 20 }

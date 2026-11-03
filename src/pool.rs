@@ -1,10 +1,10 @@
 use crate::addr::script_for_address;
 use crate::config::Config;
 use crate::rpc::NodeRpc;
-use crate::template::{header_hash, meets_target, Candidate, Gbt};
+use crate::template::{header_hash, meets_target, Candidate, Gbt, TxSet};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -51,6 +51,50 @@ pub struct Stats {
     pub connected: AtomicBool,
     pub tip_ready_ms: Mutex<VecDeque<f64>>,
     pub found: Mutex<Vec<FoundBlock>>,
+}
+
+pub fn set_f64(a: &AtomicU64, v: f64) {
+    a.store(v.to_bits(), Ordering::Relaxed);
+}
+
+pub fn get_f64(a: &AtomicU64) -> f64 {
+    f64::from_bits(a.load(Ordering::Relaxed))
+}
+
+/// Counters of one miner connection, read lock-free by the admin API.
+pub struct SessionStats {
+    pub name: Mutex<String>,
+    pub ok: AtomicU64,
+    pub stale: AtomicU64,
+    pub dup: AtomicU64,
+    pub inv: AtomicU64,
+    pub hashrate: AtomicU64,
+    pub difficulty: AtomicU64,
+    pub last_seen: AtomicU64,
+    pub unit: AtomicU64,
+}
+
+impl SessionStats {
+    pub fn new() -> Self {
+        let now = AtomicU64::new(0);
+        set_f64(&now, unix_now());
+        Self {
+            name: Mutex::new(String::new()), ok: AtomicU64::new(0), stale: AtomicU64::new(0), dup: AtomicU64::new(0), inv: AtomicU64::new(0),
+            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Live {
+    pub hashrate: f64,
+    pub m1: f64,
+    pub h1: f64,
+    pub hist: VecDeque<f64>,
+    pub shares_per_sec: f64,
+    pub units_per_sec: f64,
+    pub online: u64,
+    pub total: u64,
 }
 
 pub struct Unit {
@@ -102,15 +146,22 @@ impl Epoch {
     }
 
     /// Hands out each (candidate, slice, ntime offset) once per epoch; wrapping is counted as overlap.
-    pub fn next_unit(&self) -> Unit {
+    pub fn next_unit(&self) -> (u32, Unit) {
         let n = self.next_unit.fetch_add(1, Ordering::Relaxed);
-        let total = self.units_total();
-        if n >= total {
+        if n >= self.units_total() {
             self.overlap.fetch_add(1, Ordering::Relaxed);
         }
+        (n as u32, self.unit_from_n(n as u32))
+    }
+
+    pub fn unit_from_n(&self, n: u32) -> Unit {
         let c = self.candidates.len() as u64;
-        let u = n % total;
+        let u = n as u64 % self.units_total();
         Unit { cand: (u % c) as usize, slice: ((u / c) % SLICES) as u8, ntime_off: (u / (c * SLICES)) as u32 }
+    }
+
+    pub fn tip_matches(&self, other: &Epoch) -> bool {
+        self.tip_hex == other.tip_hex
     }
 
     pub fn check_share(&self, s: &Submission, share_target: &[u8; 32]) -> ShareResult {
@@ -126,14 +177,15 @@ impl Epoch {
             return ShareResult::Invalid("ntime out of range");
         }
         let hash = header_hash(&c.header(s.version, s.ntime, s.nonce));
-        if !meets_target(&hash, share_target) {
+        let is_block = meets_target(&hash, &c.target);
+        if !is_block && !meets_target(&hash, share_target) {
             return ShareResult::LowDifficulty;
         }
         let key = u128::from_le_bytes(hash[..16].try_into().unwrap()) ^ ((s.cand as u128) << 100);
         if !self.seen.lock().unwrap().insert(key) {
             return ShareResult::Duplicate;
         }
-        if meets_target(&hash, &c.target) {
+        if is_block {
             ShareResult::Block
         } else {
             ShareResult::Valid
@@ -150,6 +202,9 @@ pub struct Pool {
     pub events: broadcast::Sender<Event>,
     pub started: Instant,
     epoch_seq: AtomicU64,
+    pub sessions: Mutex<HashMap<u64, Arc<SessionStats>>>,
+    pub session_seq: AtomicU64,
+    pub live: Mutex<Live>,
 }
 
 impl Pool {
@@ -171,7 +226,7 @@ impl Pool {
             .collect::<Result<Vec<_>>>()?;
         let (events, _) = broadcast::channel(1024);
         let (epoch, _) = watch::channel(None);
-        let pool = Arc::new(Pool { cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0) });
+        let pool = Arc::new(Pool { cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0), sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()) });
         pool.stats.connected.store(true, Ordering::Relaxed);
         Ok(pool)
     }
@@ -189,7 +244,7 @@ impl Pool {
     pub async fn build_epoch(&self, check: usize) -> Result<Epoch> {
         let t0 = Instant::now();
         let best = self.node.best_block_hash().await?;
-        let mut candidates = Vec::with_capacity(self.payouts.len());
+        let mut candidates: Vec<Candidate> = Vec::with_capacity(self.payouts.len());
         let mut height = 0;
         for p in &self.payouts {
             let g: Gbt = serde_json::from_value(self.node.template(&p.address).await?)?;
@@ -197,7 +252,8 @@ impl Pool {
                 bail!("tip moved while building candidates");
             }
             height = g.height;
-            candidates.push(Candidate::from_gbt(g, &p.script)?);
+            let reuse: Option<std::sync::Arc<TxSet>> = candidates.last().map(|c| c.txs.clone());
+            candidates.push(Candidate::from_gbt(g, &p.script, reuse.as_ref())?);
         }
         self.stats.last_fetch_ms.store(t0.elapsed().as_millis() as u64, Ordering::Relaxed);
 
@@ -280,21 +336,23 @@ impl Pool {
 mod tests {
     use super::*;
 
-    fn dummy(n: usize) -> Epoch {
+    fn dummy(n: usize, target: u8) -> Epoch {
         let c = |i: u8| Candidate {
-            prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [0xff; 32], curtime: 1000, mintime: 900,
-            coinbase_wit: vec![], merkle_root: [i; 32], tx_datas: vec![],
+            prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [target; 32], curtime: 1000, mintime: 900,
+            coinbase_wit: vec![], merkle_root: [i; 32],
+            txs: std::sync::Arc::new(TxSet { datas: vec![], txids: vec![], branch: vec![] }),
+            notify_b: String::new(), notify_c: String::new(),
         };
         Epoch::new(1, "00".repeat(32), 1, (0..n as u8).map(c).collect())
     }
 
     #[test]
     fn units_are_unique_until_the_space_is_exhausted() {
-        let e = dummy(3);
+        let e = dummy(3, 0);
         let total = e.units_total();
         let mut seen = HashSet::new();
         for _ in 0..total {
-            let u = e.next_unit();
+            let (_, u) = e.next_unit();
             assert!(seen.insert((u.cand, u.slice, u.ntime_off)));
         }
         assert_eq!(e.overlap.load(Ordering::Relaxed), 0);
@@ -304,15 +362,23 @@ mod tests {
 
     #[test]
     fn share_checks() {
-        let e = dummy(2);
-        let ok = |slice: u8, version: u32, ntime: u32, nonce: u32| Submission { cand: 0, slice, ntime, version, nonce };
+        let e = dummy(2, 0);
+        let sub = |slice: u8, version: u32, ntime: u32, nonce: u32| Submission { cand: 0, slice, ntime, version, nonce };
         let v = 0x2000_0000 | (3 << POOL_VERSION_SHIFT) | 0x0020_0000;
         let easy = [0xff; 32];
-        assert_eq!(e.check_share(&ok(3, v, 1000, 7), &easy), ShareResult::Block);
-        assert_eq!(e.check_share(&ok(3, v, 1000, 7), &easy), ShareResult::Duplicate);
-        assert!(matches!(e.check_share(&ok(4, v, 1000, 8), &easy), ShareResult::Invalid(_)));
-        assert!(matches!(e.check_share(&ok(3, v, 800, 9), &easy), ShareResult::Invalid(_)));
-        assert!(matches!(e.check_share(&ok(3, v | 1, 1000, 10), &easy), ShareResult::Invalid(_)));
-        assert_eq!(e.check_share(&ok(3, v, 1000, 11), &[0u8; 32]), ShareResult::LowDifficulty);
+        assert_eq!(e.check_share(&sub(3, v, 1000, 7), &easy), ShareResult::Valid);
+        assert_eq!(e.check_share(&sub(3, v, 1000, 7), &easy), ShareResult::Duplicate);
+        assert!(matches!(e.check_share(&sub(4, v, 1000, 8), &easy), ShareResult::Invalid(_)));
+        assert!(matches!(e.check_share(&sub(3, v, 800, 9), &easy), ShareResult::Invalid(_)));
+        assert!(matches!(e.check_share(&sub(3, v | 1, 1000, 10), &easy), ShareResult::Invalid(_)));
+        assert_eq!(e.check_share(&sub(3, v, 1000, 11), &[0u8; 32]), ShareResult::LowDifficulty);
+    }
+
+    #[test]
+    fn a_hash_meeting_the_network_target_is_a_block_even_below_the_share_target() {
+        let e = dummy(1, 0xff);
+        let v = 0x2000_0000 | (1 << POOL_VERSION_SHIFT);
+        let sub = Submission { cand: 0, slice: 1, ntime: 1000, version: v, nonce: 1 };
+        assert_eq!(e.check_share(&sub, &[0u8; 32]), ShareResult::Block);
     }
 }

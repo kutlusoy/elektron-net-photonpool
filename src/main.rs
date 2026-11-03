@@ -1,8 +1,10 @@
 mod addr;
 mod api;
 mod config;
+mod diff;
 mod pool;
 mod rpc;
+mod stratum;
 mod template;
 mod tx;
 
@@ -49,6 +51,9 @@ async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&pool.cfg.api.listen).await?;
     pool.event("info", format!("photond {} listening on {}", env!("CARGO_PKG_VERSION"), pool.cfg.api.listen));
     tokio::spawn(pool.clone().run_tip_loop());
+    if pool.cfg.stratum.enabled {
+        tokio::spawn(stratum::serve(pool.clone()));
+    }
     axum::serve(listener, api::router(pool)).with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await?;
     Ok(())
 }
@@ -65,7 +70,7 @@ async fn check(pool: std::sync::Arc<Pool>, mine: bool) -> Result<()> {
         bail!("some candidates were rejected by the node");
     }
     if mine {
-        let unit = epoch.next_unit();
+        let (_, unit) = epoch.next_unit();
         let c = &epoch.candidates[unit.cand];
         let version = c.version | ((unit.slice as u32) << POOL_VERSION_SHIFT);
         let ntime = c.curtime.max(c.mintime) + unit.ntime_off;

@@ -22,6 +22,14 @@ pub fn put_varint(out: &mut Vec<u8>, n: u64) {
     }
 }
 
+pub fn varint_len(n: usize) -> usize {
+    match n {
+        0..=0xfc => 1,
+        0xfd..=0xffff => 3,
+        _ => 5,
+    }
+}
+
 #[derive(Clone)]
 pub struct TxOutput {
     pub value: i64,
@@ -29,6 +37,7 @@ pub struct TxOutput {
 }
 
 pub struct Coinbase {
+    pub nowit: Vec<u8>,
     pub wit: Vec<u8>,
     pub txid: [u8; 32],
 }
@@ -64,7 +73,7 @@ pub fn build_coinbase(script_sig: &[u8], height: u32, outputs: &[TxOutput]) -> C
     wit.extend_from_slice(&lock);
 
     let txid = sha256d(&nowit);
-    Coinbase { wit, txid }
+    Coinbase { nowit, wit, txid }
 }
 
 fn hash_pair(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {

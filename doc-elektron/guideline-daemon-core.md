@@ -20,7 +20,7 @@
 | `template.rs` | Immutable candidate from `getblocktemplate`, header, block assembly, nonce search with midstate | done, unit tested |
 | `pool.rs` | Epoch per tip, lock-free unit allocator, share validation with duplicate filter, tip loop | done, unit tested |
 | `api.rs` | Read-only `/api/v1` (summary, miners, blocks, events) and static UI | done |
-| Stratum V1 frontend | Subscribe, authorize, notify, submit, version rolling, vardiff | not yet |
+| `stratum.rs`, `diff.rs` | Stratum V1 server: subscribe, authorize, notify, submit, version rolling, vardiff, pre-rendered notify, session statistics | done, see [`guideline-stratum-v1.md`](./guideline-stratum-v1.md) |
 | Stratum V2 frontend | Noise, standard channels | not yet |
 | Batch attestation backend | Candidates for all payout scripts in one node call | not yet (needs the node-side interface) |
 | Accounting and payouts | Share ledger, payout worker | not yet |
@@ -57,10 +57,18 @@ payout_addresses = ["be1q..."]
 refresh_secs = 20             # 0 disables periodic rebuilds on an unchanged tip
 spot_check = 4                # candidates validated via proposal per epoch
 
+[stratum]
+listen = "0.0.0.0:3333"
+initial_difficulty = 1024
+share_secs = 10
+max_connections = 200000
+
 [api]
 listen = "127.0.0.1:8081"
 ui_dir = "ui"
 ```
+
+The `[stratum]` options are described in [`guideline-stratum-v1.md`](./guideline-stratum-v1.md).
 
 ## 4. Tests and measurements
 
@@ -83,11 +91,10 @@ The cost per address grows with mempool size and UTXO set on mainnet. This backe
 
 ## 5. Next steps
 
-1. Stratum V1 frontend (job table per connection, vardiff, version rolling negotiation, pre-serialised broadcast).
+1. Hardware tests of the Stratum V1 server and accounting (share ledger, payout worker, miner statistics).
 2. Batch attestation backend once the node interface exists, verified against the Python oracle in `test/`.
 3. Tip notifications through the node mining IPC interface instead of polling.
-4. Share ledger, payout worker and miner statistics for the UI.
-5. Stratum V2 standard channels.
+4. Stratum V2 standard channels.
 
 ## 6. Checklist
 
@@ -95,7 +102,8 @@ The cost per address grows with mempool size and UTXO set on mainnet. This backe
 - [x] Blocks solved from candidates accepted on regtest.
 - [x] Unit allocator uniqueness test.
 - [ ] Mainnet-sized benchmark of candidate production.
-- [ ] Stratum V1 frontend and hardware tests.
+- [x] Stratum V1 frontend.
+- [ ] Hardware tests.
 
 ## 7. Open Questions
 

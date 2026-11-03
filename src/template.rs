@@ -1,7 +1,9 @@
-use crate::tx::{build_coinbase, merkle_branch, merkle_root, put_varint, TxOutput};
+use crate::tx::{build_coinbase, merkle_branch, merkle_root, put_varint, varint_len, TxOutput};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::fmt::Write;
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct Gbt {
@@ -31,6 +33,13 @@ pub struct GbtOut {
     pub script_pub_key: String,
 }
 
+/// Transactions shared by all candidates built on the same mempool snapshot.
+pub struct TxSet {
+    pub datas: Vec<Vec<u8>>,
+    pub txids: Vec<[u8; 32]>,
+    pub branch: Vec<[u8; 32]>,
+}
+
 /// One immutable block candidate: exact coinbase, exact transaction set, fixed attestation.
 pub struct Candidate {
     pub prev: [u8; 32],
@@ -41,7 +50,9 @@ pub struct Candidate {
     pub mintime: u32,
     pub coinbase_wit: Vec<u8>,
     pub merkle_root: [u8; 32],
-    pub tx_datas: Vec<Vec<u8>>,
+    pub txs: Arc<TxSet>,
+    pub(crate) notify_b: String,
+    pub(crate) notify_c: String,
 }
 
 fn rev32(hexstr: &str) -> Result<[u8; 32]> {
@@ -50,33 +61,65 @@ fn rev32(hexstr: &str) -> Result<[u8; 32]> {
     Ok(b)
 }
 
+/// Stratum prevhash: internal byte order with every 4-byte word reversed.
+fn stratum_prevhash(prev: &[u8; 32]) -> String {
+    let mut out = [0u8; 32];
+    for (i, w) in prev.chunks(4).enumerate() {
+        for (j, b) in w.iter().rev().enumerate() {
+            out[i * 4 + j] = *b;
+        }
+    }
+    hex::encode(out)
+}
+
 impl Candidate {
-    pub fn from_gbt(g: Gbt, payout_script: &[u8]) -> Result<Self> {
+    pub fn from_gbt(g: Gbt, payout_script: &[u8], reuse: Option<&Arc<TxSet>>) -> Result<Self> {
+        if g.coinbase_required_outputs.len() != 2 {
+            bail!("expected 2 required coinbase outputs, node sent {}", g.coinbase_required_outputs.len());
+        }
         let sig = hex::decode(&g.coinbase_script_sig_prefix)?;
         let mut outputs = vec![TxOutput { value: g.coinbasevalue, script: payout_script.to_vec() }];
         for o in &g.coinbase_required_outputs {
             outputs.push(TxOutput { value: o.value, script: hex::decode(&o.script_pub_key)? });
         }
-        if g.coinbase_required_outputs.len() != 2 {
-            bail!("expected 2 required coinbase outputs, node sent {}", g.coinbase_required_outputs.len());
-        }
         let cb = build_coinbase(&sig, g.height, &outputs);
+
         let txids = g.transactions.iter().map(|t| rev32(&t.txid)).collect::<Result<Vec<_>>>()?;
-        let root = merkle_root(&cb.txid, &merkle_branch(&txids));
-        let tx_datas = g.transactions.iter().map(|t| hex::decode(&t.data)).collect::<Result<Vec<_>, _>>()?;
+        let txs = match reuse {
+            Some(r) if r.txids == txids => r.clone(),
+            _ => Arc::new(TxSet {
+                datas: g.transactions.iter().map(|t| hex::decode(&t.data)).collect::<Result<Vec<_>, _>>()?,
+                branch: merkle_branch(&txids),
+                txids,
+            }),
+        };
+
+        let prev = rev32(&g.previousblockhash)?;
+        let bits = u32::from_str_radix(&g.bits, 16).context("bad bits")?;
+        let split = 4 + 1 + 36 + varint_len(sig.len()) + sig.len();
+        let branch = txs.branch.iter().map(|h| format!("\"{}\"", hex::encode(h))).collect::<Vec<_>>().join(",");
+        let notify_b = format!("\",\"{}\",\"{}\",\"{}\",[{}],\"", stratum_prevhash(&prev), hex::encode(&cb.nowit[..split]), hex::encode(&cb.nowit[split..]), branch);
+        let notify_c = format!("\",\"{bits:08x}\",\"");
         let mut target = [0u8; 32];
         target.copy_from_slice(&hex::decode(&g.target)?);
         Ok(Self {
-            prev: rev32(&g.previousblockhash)?,
+            prev,
             version: g.version as u32,
-            bits: u32::from_str_radix(&g.bits, 16).context("bad bits")?,
+            bits,
             target,
             curtime: g.curtime,
             mintime: g.mintime,
             coinbase_wit: cb.wit,
-            merkle_root: root,
-            tx_datas,
+            merkle_root: merkle_root(&cb.txid, &txs.branch),
+            txs,
+            notify_b,
+            notify_c,
         })
+    }
+
+    /// Appends a complete mining.notify line; the candidate-specific parts are pre-rendered.
+    pub fn write_notify(&self, out: &mut String, job_id: u64, version: u32, ntime: u32, clean: bool) {
+        let _ = write!(out, "{{\"id\":null,\"method\":\"mining.notify\",\"params\":[\"{job_id:x}{}{version:08x}{}{ntime:08x}\",{clean}]}}\n", self.notify_b, self.notify_c);
     }
 
     pub fn header(&self, version: u32, ntime: u32, nonce: u32) -> [u8; 80] {
@@ -91,11 +134,11 @@ impl Candidate {
     }
 
     pub fn block_hex(&self, version: u32, ntime: u32, nonce: u32) -> String {
-        let mut b = Vec::with_capacity(80 + self.coinbase_wit.len() + self.tx_datas.iter().map(Vec::len).sum::<usize>() + 9);
+        let mut b = Vec::with_capacity(80 + self.coinbase_wit.len() + self.txs.datas.iter().map(Vec::len).sum::<usize>() + 9);
         b.extend_from_slice(&self.header(version, ntime, nonce));
-        put_varint(&mut b, 1 + self.tx_datas.len() as u64);
+        put_varint(&mut b, 1 + self.txs.datas.len() as u64);
         b.extend_from_slice(&self.coinbase_wit);
-        for t in &self.tx_datas {
+        for t in &self.txs.datas {
             b.extend_from_slice(t);
         }
         hex::encode(b)
@@ -151,5 +194,12 @@ mod tests {
         let mut equal = [0u8; 32];
         equal[31] = 0x01;
         assert!(meets_target(&equal, &target));
+    }
+
+    #[test]
+    fn prevhash_words_match_the_stratum_convention() {
+        let mut internal: [u8; 32] = hex::decode("00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048").unwrap().try_into().unwrap();
+        internal.reverse();
+        assert_eq!(stratum_prevhash(&internal), "18eb604820161bbf90947ee375428afcd76f411486ab5951839a8e6800000000");
     }
 }
