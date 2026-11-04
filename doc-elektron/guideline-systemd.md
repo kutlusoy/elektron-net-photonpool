@@ -50,11 +50,14 @@ The pool serves its public page (statistics, connection instructions with ports 
 pool.example.org {
 	encode zstd gzip
 	reverse_proxy 127.0.0.1:8082
-	header { Strict-Transport-Security "max-age=31536000"; -Server }
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
 }
 ```
 
-Set in `photond.toml` `[public] enabled = true`, `stratum_host = "pool.example.org"` (the host that miners connect to) and `trust_proxy = true` (the client address comes from `X-Forwarded-For`, which Caddy sets and which a client cannot forge through it). Open ports 80 and 443 for Caddy. Only `8082` is proxied: the operator UI and the admin API (`8081`) stay on loopback. Miners connect to the Stratum ports (default 3333) and gateways to the Photon port (3340) directly, because they are not HTTP; Stratum has no TLS of its own (use `stunnel` in front if you need it). The Docker setups write their own Caddyfile (`docker/Caddyfile`, and `stack/install.sh` for the complete stack). The example was not run against a Caddy binary on the development machine; check it with `caddy validate --config /etc/caddy/Caddyfile`.
+Set in `photond.toml` `[public] enabled = true`, `stratum_host = "pool.example.org"` (the host that miners connect to) and `trust_proxy = true` (the client address comes from `X-Forwarded-For`; current Caddy versions replace one sent by an untrusted client, which you should confirm for your version, because the pool's rate limit trusts that header). Open ports 80 and 443 for Caddy. Only `8082` is proxied: the operator UI and the admin API (`8081`) stay on loopback. Miners connect to the Stratum ports (default 3333) and gateways to the Photon port (3340) directly, because they are not HTTP; Stratum has no TLS of its own (use `stunnel` in front if you need it). The Docker setups write their own Caddyfile (`docker/Caddyfile`, and `stack/install.sh` for the complete stack). The example was not run against a Caddy binary on the development machine; check it with `caddy validate --config /etc/caddy/Caddyfile`.
 
 ## 5. Node unit
 

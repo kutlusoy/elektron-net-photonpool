@@ -20,7 +20,8 @@
 pool.example.org {
 	encode zstd gzip
 
-	# Caddy adds X-Forwarded-For with the real client address and drops one that a client sends itself.
+	# Caddy adds X-Forwarded-For with the real client address. By default current Caddy versions replace an X-Forwarded-For that comes from an
+	# untrusted client (confirm this for your version: the pool's rate limit trusts the header when trust_proxy is set).
 	reverse_proxy 127.0.0.1:8082
 
 	header {
