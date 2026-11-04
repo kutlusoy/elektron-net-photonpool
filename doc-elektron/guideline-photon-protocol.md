@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.14 (UTXO growth explained; full 16-bit version roll for ASICs, automatic variant count, measured Stratum traffic; everybody is paid, no minimum, parts per billion, turn-taking above the output limit, capacity limits; prior art, placement of the commitment; automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
+- **Version:** 0.15 (attestation cost measured against the set size; UTXO growth explained; full 16-bit version roll for ASICs, automatic variant count, measured Stratum traffic; everybody is paid, no minimum, parts per billion, turn-taking above the output limit, capacity limits; prior art, placement of the commitment; automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -164,7 +164,15 @@ If every miner consolidates about as fast as payouts arrive, the set does not gr
 
 **What the plan does to the number of outputs.** Payouts to the same script are separate outputs (one per block and script), so one address per farm creates far fewer outputs than one address per machine, and a farm with several addresses (several channels of a gateway) creates one set of outputs per address. For credits beyond `N_max` the turn-taking of 6.1 pays a small miner one output per cycle instead of one per block: with 22 groups that is 22 times fewer outputs for the same sum.
 
-**Cost of a large set (not measured here).** Every node has to keep the set (chainstate on disk and the cache in memory); a rough figure is on the order of 100 bytes per entry, which would put the worst case at around 10 GB of additional chainstate per year if nothing were ever spent. The attestation is an incremental accumulator over the set, so each block costs time in proportion to the outputs it creates and spends, not to the size of the set; the size matters for disk, memory and the time to sync, not for the per-block attestation.
+**Cost of a large set.** Every node has to keep the set (chainstate on disk and the cache in memory); a rough figure is on the order of 100 bytes per entry, which would put the worst case at around 10 GB of additional chainstate per year if nothing were ever spent (an estimate, not measured). The attestation is an incremental accumulator over the set, so each block costs time in proportion to the outputs it creates and spends, not to the size of the set. This was **measured at the node** (`test/step23_attestation_scaling.py`, regtest, node with the Photon patch, medians of 5 blocks of 200 transactions that each spend one output and create two):
+
+| Outputs in the set | `getattestationbatch` (template and attestation) | `submitblock` (validation including the attestation) | `gettxoutsetinfo muhash` (a full pass over the set) |
+|---|---|---|---|
+| 2,346 | 17.5 ms | 13.3 ms | 30.2 ms |
+| 23,152 | 17.2 ms | 13.2 ms | 155.4 ms |
+| 73,658 (31 times more) | 14.2 ms | 13.2 ms | 512.4 ms |
+
+The cost of a block of the same shape stays the same while the set grows 31-fold; a pass over the whole set grows 17-fold. A block that recomputed the accumulator over the set would have cost about as much as the last column. The cost does follow what the block does: blocks of 50, 200 and 800 transactions took 4.8, 15.1 and 42.4 ms at the largest size (about 0.05 to 0.1 ms per transaction), and a coinbase costs about 0.014 ms per payout output (section 6.3). Limits of the test: the whole set fits in the cache (a real chainstate also pays for disk reads when it looks up the outputs a block spends, which is a cost of validation in general and not of the attestation), the time of `submitblock` contains more than the attestation (script checks, writing the block), and the sets are small compared to a mature mainnet. The size of the set therefore matters for disk, memory and the time to sync, not for the per-block attestation.
 
 **What we can and cannot do.**
 

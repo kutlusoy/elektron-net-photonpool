@@ -40,5 +40,7 @@ Review and operation
 
 - Protocol guideline: section 7.2 explains UTXO set growth (created minus spent outputs), when it shrinks (merging payouts), what the plan does to it and what operators can monitor.
 
+- Test at the node: the cost of validating and attesting a block stays the same while the UTXO set grows 31-fold, and follows the number of transactions (`step23`).
+
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.

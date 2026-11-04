@@ -18,6 +18,8 @@ if [ -n "$ELEKTROND_BATCH" ]; then
   ELEKTROND="$ELEKTROND_BATCH" python3 step18_gateway_stratum.py || rc=1     # gateway Stratum front end
   ELEKTROND="$ELEKTROND_BATCH" python3 step19_multi_channel.py || rc=1        # several channels per gateway
   ELEKTROND="$ELEKTROND_BATCH" python3 step20_gateway_reconnect.py || rc=1     # pool outage and reconnect
+  ELEKTROND="$ELEKTROND_BATCH" python3 step22_coinbase_weight.py || rc=1       # block weight with large coinbases
+  ELEKTROND="$ELEKTROND_BATCH" python3 step23_attestation_scaling.py || rc=1    # attestation cost against the set size
 else
   echo "[step14] skipped (set ELEKTROND_BATCH to an elektrond built with the Photon node patch)"
 fi
