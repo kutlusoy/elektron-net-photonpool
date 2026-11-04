@@ -1,47 +1,85 @@
 # Photon gateway: runs next to your own Elektron Net node (built with the Photon node patch, see
 # doc-elektron/guideline-batch-attestation-rpc.md) and connects your ASICs to a Photon pool.
 #   photond gateway --gateway-config gateway.toml
-node_rpc_url = "http://127.0.0.1:19332"
-node_auth = "cookie:/path/to/.cookie"      # or "user:password"
-network = "mainnet"                          # mainnet, testnet or regtest
+#
+# Every option is listed with its default and the values it accepts ("Options"). Lines without a default are required.
+# Apply a change with `systemctl restart photon-gateway`.
 
-# Pool: address of its Photon listener and its Noise public key (pinned; shown in the pool log and /api/v1/summary).
+# JSON-RPC of YOUR node (it must have the Photon patch: getattestationbatch). Options: any http URL.
+node_rpc_url = "http://127.0.0.1:19332"
+# How to log in to the node.
+# Options: "user:password" | "cookie:/path/to/.cookie" | "env:VARIABLE" (the variable holds "user:password")
+node_auth = "cookie:/path/to/.cookie"
+# Options: "mainnet" | "testnet" | "regtest".
+network = "mainnet"
+
+# Pool: address of its Photon listener and its Noise public key (pinned; shown in the pool log and in /api/v1/summary).
+# Options: pool_addr = "host:port"; pool_key = 64 hex characters (32 bytes). A different key makes the gateway stop (never retried).
 pool_addr = "pool.example.org:3340"
 pool_key = "0000000000000000000000000000000000000000000000000000000000000000"
 
 # Default payout address. Workers whose user name is `<payout address>.<worker>` get their own pool channel and are credited
 # (and paid in the coinbase) under that address, so one gateway can serve several customers or sub-farms. Workers with any
 # other user name mine for this default address.
+# Options: a bech32 address of the network (be1q... on mainnet).
 payout_address = "be1q..."
 
-# Terms you agreed with the pool. A plan with other terms is refused.
+# Terms you agreed with the pool. A plan with other terms is refused (and this gateway cannot mine).
+# fee_address: the pool's fee address (bech32). fee_pct: number from 0 to 100, default 1.0.
 fee_address = "be1q..."
 fee_pct = 1.0
-# Largest plan this gateway accepts (outputs of the coinbase); keep it at or below 200 if ESP32 based miners (Bitaxe) are attached.
+# Largest plan this gateway accepts (outputs of the coinbase). Options: whole number from 4 to 256, default 200.
+# Keep it at or below 200 if ESP32 based miners (Bitaxe) are attached: a job with more outputs is longer than their 16 KB line limit.
 max_outputs = 200
 
 # A lost pool connection is re-established with backoff (1 s, 2 s, 4 s ... up to max_reconnect_secs). While it is down the ASICs keep
 # working on the current template and, while the plans last, the next one; shares of the outage are lost. A wrong pool key, a ban or a
 # protocol mismatch is never retried.
+# reconnect: true (default) | false (the first lost connection ends the gateway). max_reconnect_secs: whole number, default 30.
 reconnect = true
 max_reconnect_secs = 30
 
-# Number of extranonce variants per template (each one is attested by your node in a single call).
-# Rule of thumb: one per 2.8e14 H/s of farm hashrate and second of nTime use, more is harmless.
+# Number of coinbase variants per template (each one is attested by your node in a single call). This is the MINIMUM: the gateway adds up
+# the hash rate of its ASICs and raises the number so that the work space of an epoch is not exhausted
+# (variants = 1.5 x hash rate x 60 s / 1.65e16: 16 cover 4.5 PH/s, about 1,100 are needed for 200 PH/s).
+# Options: whole numbers, variants <= max_variants. Defaults 16 and 2048 (attestation takes about 3 ms per variant at 200 outputs).
 variants = 16
-# Upper limit of the automatic number of variants: the gateway raises it with the hash rate of its ASICs (about 1,100 variants for 200 PH/s).
 max_variants = 2048
-# Share difficulty requested from the pool (it adjusts it with its own vardiff).
+# Share difficulty requested from the pool for a new channel (the pool adjusts it with its own vardiff). Options: number > 0. Default 0.001.
 share_difficulty = 1024
 
+# ---- TEST ONLY options (regtest, development; the gateway logs a warning when one is set) ----
+# CPU mining without ASICs. Options: true | false (default).
+# software_miner = false
+# Stop after this many blocks found by this gateway. Options: whole number, default unset.
+# stop_after_blocks = 6
+# Announce coinbases with a corrupted attestation (the pool's spot check will catch it and ban the payout address). Options: true | false (default).
+# corrupt_attestation = false
+# Announce another compact difficulty than the node's (the pool refuses it). Options: number (compact bits, e.g. 0x1f00ffff), default unset.
+# announce_bits_override = 0x1f00ffff
+
 # Stratum V1 front end for ASICs. Point the miners at this address; user name and password are free-form
-# (the worker name only appears in the log). Empty `listen` disables it.
+# (the worker name only appears in the log). There is no authentication: keep the port on the farm network.
 [stratum]
-# Users must be <payout address>.<worker> (otherwise they mine for the default address above).
-require_address = false
+# Options: "ip:port" | "" (empty disables the front end, default "").
 listen = "0.0.0.0:3333"
+# Users must be <payout address>.<worker>; otherwise they mine for the default address above.
+# Options: true (refuse other user names) | false (default).
+require_address = false
+# Starting difficulty of an ASIC and its bounds (vardiff per ASIC). Options: numbers > 0. Defaults 1024, 0.0001, 1.0e12.
 initial_difficulty = 1024
+min_difficulty = 0.0001
+max_difficulty = 1.0e12
+# Target seconds between shares per ASIC. Options: number > 0. Default 10.
 share_secs = 10
+# Most ASIC connections, idle timeout in seconds. Options: whole numbers. Defaults 20000 and 600.
+max_connections = 20000
+idle_secs = 600
+# Shortest and longest time between two jobs for one ASIC, in milliseconds. Options: whole numbers. Defaults 200 and 30000.
+min_job_interval_ms = 200
+max_job_interval_ms = 30000
 # Every unit of work gets all 16 BIP 320 version bits, so ASICs ask for new jobs 16 times less often (a job carries the whole coinbase).
-# Set false only for firmware that cannot roll the bits 13-16.
+# Options: true (default) | false (only for firmware that cannot roll the bits 13-16; the ASIC then gets the mask 1ffe0000).
 full_version_roll = true
+# TEST ONLY, do not set on a farm: pretend every ASIC hashes at this many hashes per second. Options: number > 0, default unset.
+# fixed_hashrate = 2.0e14

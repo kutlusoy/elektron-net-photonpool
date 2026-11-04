@@ -1,49 +1,73 @@
 # photond configuration for the Docker setup (see docker-compose.yml).
 # Copy to photond.toml in the repository root and set your payout addresses:
 #   cp docker/photond.docker.toml photond.toml
+# Only the options that the Docker setup needs are listed. Every other option, with its default and accepted values, is described in
+# photond.example.toml (add the line to this file to change it).
 
 [node]
+# Options: http URL of the node; in this setup the node container is called "node".
 rpc_url = "http://node:8332"
 # The node writes its RPC cookie into the shared volume mounted at /node.
+# Options: "cookie:/path" | "user:password" | "env:VARIABLE"
 auth = "cookie:/node/.cookie"
+# Options: whole number of milliseconds >= 1. Default 100.
 poll_ms = 100
 
 [pool]
+# Options: "mainnet" | "testnet" | "regtest". Must match the node.
 network = "mainnet"
+# Options: list of bech32 addresses of the network (be1q... on mainnet).
 payout_addresses = [
   "be1q_replace_with_your_pool_address_1",
   "be1q_replace_with_your_pool_address_2",
 ]
+# Options: whole seconds, 0 = only on a new block. Default 20.
 refresh_secs = 20
+# Options: whole number of candidates validated per epoch, 0 = none. Default 4.
 spot_check = 4
+# Options: "auto" (default) | "batch" | "gbt". "auto" uses the Photon node patch when the node has it (PHOTON_NODE_PATCHES=true at build time).
+# backend = "auto"
 
 [payout]
+# Mode of the default Stratum port.
+# Options: "solo" (direct coinbase payout, no fee, no custody) | "pplns" (default) | "pps" (needs a funded wallet reserve).
 default_mode = "pplns"
-# Payouts stay in dry-run mode until you set this to false.
+# Payouts stay in dry-run mode until you set this to false. Options: true (default) | false.
 dry_run = true
 
 [ledger]
+# Options: file path inside the container; /data is the persistent volume.
 path = "/data/photond.db"
 
 [public]
-# Public pool page on port 8082 (put a TLS reverse proxy in front for the open internet).
+# Public pool page on port 8082 (put a TLS reverse proxy in front for the open internet). Options: true | false (default false).
 enabled = true
+# Options: "ip:port".
 listen = "0.0.0.0:8082"
+# Name shown on the page. Options: any text.
 name = "Photon Pool"
+# Host name shown in the connection instructions. Options: host name or IP; "" shows none.
 stratum_host = ""
 # The public port is only published on 127.0.0.1 of the host, so trusting X-Forwarded-For (set by
 # the optional Caddy of the "tls" profile) is safe here and gives every visitor their own rate limit.
+# Options: true | false (default false).
 trust_proxy = true
 
 [stratum]
+# Options: true (default) | false.
 enabled = true
+# Options: "ip:port". Default "0.0.0.0:3333".
 listen = "0.0.0.0:3333"
+# Options: number > 0. Default 1024. Vardiff adapts it per connection.
 initial_difficulty = 1024
+# Target seconds between shares per connection. Options: number > 0. Default 10.
 share_secs = 10
 
 [api]
-# Reachable from the host on 127.0.0.1:8081 only (see docker-compose.yml).
+# Reachable from the host on 127.0.0.1:8081 only (see docker-compose.yml). Options: "ip:port".
 listen = "0.0.0.0:8081"
+# Options: directory path inside the container.
 ui_dir = "/app/ui"
 # Optional: block explorer for links to found blocks (<explorer_url>/block/<hash>).
+# Options: "http://..." | "https://..." | "" (no links).
 explorer_url = "https://mempool.elektron-net.org"

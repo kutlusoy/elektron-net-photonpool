@@ -5,51 +5,73 @@
 # --- Public page and HTTPS (Caddy) ---
 # Domain of the pool (its DNS A/AAAA record must point at this server). Leave empty to run without
 # Caddy: the public page is then only available on 127.0.0.1:8082.
+# Options: a host name such as pool.example.org, or empty.
 DOMAIN=
 # Optional e-mail for Let's Encrypt notices.
+# Options: an e-mail address, or empty.
 CADDY_EMAIL=
 # Name shown on the public page.
+# Options: any text. Default "Photon Pool".
 POOL_NAME=Photon Pool
 # Optional block explorer, used for links to blocks and transactions (<url>/block/<hash>, <url>/tx/<txid>).
+# Options: a URL starting with http:// or https://, or empty (no links).
 EXPLORER_URL=
 
 # --- Node ---
+# Options: an https git URL. Default https://github.com/kutlusoy/elektron-net.git
 ELEKTRON_REPO=https://github.com/kutlusoy/elektron-net.git
 # Branch, tag or commit of the node to build.
+# Options: letters, digits and . _ / - (a branch such as main, a tag, or a commit). Default main.
 ELEKTRON_REF=main
 # Apply the Photon node patch (getattestationbatch: one call attests many payout addresses, no consensus code path
 # is changed). false (default) builds the unmodified node; the pool then needs one getblocktemplate call per address,
 # which is fine for a few miners. Set true for large pools once the patch review is complete (see doc-elektron/guideline-release-and-bitaxe-test.md).
+# Options: true | false (default false).
 NODE_PATCHES=false
 
 # --- Pool wallet (on the node) ---
+# Options: letters, digits, - and _. Default pool.
 WALLET_NAME=pool
 # Pool payout addresses provisioned from the wallet.
+# Options: whole number >= 1. Default 64.
 WALLET_ADDRESSES=64
 # Leave empty to generate a strong passphrase; the wallet is encrypted with it.
+# Options: any text without spaces at the ends, or empty (a strong passphrase is generated and kept in the stack files).
 WALLET_PASSPHRASE=
 
 # --- Stratum ---
+# Options: port number 1-65535. Default 3333 (default mode PPLNS; miners can pick another mode with m=solo|pplns|pps in the password).
 STRATUM_PORT=3333
 # Optional extra ports whose default payout mode is PPS or solo (empty = off).
+# Options: port number, or empty (off).
 PORT_PPS=
+# Options: port number, or empty (off).
 PORT_SOLO=
 
 # --- Payout modes ---
 # DRY_RUN=true only logs what would be paid. Set it to false after you have seen plausible payouts in the log.
+# Options: true (default) | false.
 DRY_RUN=true
+# Fees in percent. Options: number from 0 to 50 (the pool refuses larger values). Defaults 1.0 and 2.0. Solo has no fee.
 FEE_PPLNS=1.0
 FEE_PPS=2.0
 # PPLNS window as a multiple of the network difficulty.
+# Options: number > 0. Default 2.0.
 PPLNS_WINDOW_FACTOR=2.0
 # PPS is offered but stays paused until the wallet holds PPS_RESERVE coins above all liabilities.
+# Options: true (default) | false.
 PPS_ENABLED=true
+# Options: number of coins >= 0. Default 5.0.
 PPS_RESERVE=5.0
+# Options: whole number of leptons (1 coin = 100,000,000). Default 100000 = 0.001 coin.
 MIN_PAYOUT_LEPTONS=100000
+# Options: whole number of minutes >= 1. Default 60.
 PAYOUT_INTERVAL_MINUTES=60
 # Fixed payout fee rate in sat/vB if the node cannot estimate fees (empty = node estimate).
+# Options: number > 0, or empty.
 PAYOUT_FEE_RATE=
 
 # --- Host ---
 # true = open the needed ports with ufw (22 is left alone, check your SSH port first).
+# Options: true | false (default).
 FIREWALL=false

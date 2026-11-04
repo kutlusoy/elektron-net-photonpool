@@ -456,3 +456,88 @@ fn d_ph_check_bytes() -> usize { 8 * 1024 * 1024 }
 fn d_ph_idle() -> u64 { 300 }
 fn d_ph_budget() -> u32 { 8 }
 fn d_ph_conc() -> usize { 2 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn root(p: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(p)
+    }
+
+    /// Field names of `pub struct <name> { ... }` in a source file.
+    fn fields(src: &str, name: &str) -> Vec<String> {
+        let start = src.find(&format!("pub struct {name} {{")).unwrap_or_else(|| panic!("struct {name} not found"));
+        src[start..]
+            .lines()
+            .skip(1)
+            .take_while(|l| *l != "}")
+            .filter_map(|l| l.trim().strip_prefix("pub ").and_then(|r| r.split(':').next()).map(str::to_string))
+            .collect()
+    }
+
+    /// True when the file has the option as `name = ...`, commented out or not, or as a `[name]` section.
+    fn documents(text: &str, name: &str) -> bool {
+        text.lines().any(|l| {
+            let l = l.trim().trim_start_matches('#').trim();
+            l.starts_with(&format!("{name} =")) || l.starts_with(&format!("{name}=")) || l.starts_with(&format!("[{name}]")) || l.starts_with(&format!("[[stratum.{name}]]")) || l.contains(&format!("[payout.{name}]"))
+        })
+    }
+
+    #[test]
+    fn the_example_configs_load() {
+        Config::load(&root("photond.example.toml")).unwrap();
+        Config::load(&root("docker/photond.docker.toml")).unwrap();
+        let gw: crate::photon::gateway::GatewayCfg = toml::from_str(&std::fs::read_to_string(root("gateway.example.toml")).unwrap()).unwrap();
+        assert_eq!(gw.max_outputs, 200);
+    }
+
+    #[test]
+    fn every_pool_option_is_documented_in_the_example() {
+        let text = std::fs::read_to_string(root("photond.example.toml")).unwrap();
+        let src = include_str!("config.rs");
+        let mut missing = Vec::new();
+        for s in ["NodeCfg", "PoolCfg", "ApiCfg", "StratumCfg", "PortCfg", "PayoutCfg", "FeeCfg", "PplnsCfg", "PpsCfg", "PublicCfg", "LedgerCfg", "PhotonCfg"] {
+            for f in fields(src, s) {
+                if !documents(&text, &f) {
+                    missing.push(format!("{s}.{f}"));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "options missing in photond.example.toml: {missing:?}");
+    }
+
+    #[test]
+    fn every_gateway_option_is_documented_in_the_example() {
+        let text = std::fs::read_to_string(root("gateway.example.toml")).unwrap();
+        let mut missing = Vec::new();
+        for f in fields(include_str!("photon/gateway.rs"), "GatewayCfg") {
+            if !documents(&text, &f) {
+                missing.push(format!("GatewayCfg.{f}"));
+            }
+        }
+        for f in fields(include_str!("photon/gateway_stratum.rs"), "StratumGwCfg") {
+            if !documents(&text, &f) {
+                missing.push(format!("stratum.{f}"));
+            }
+        }
+        assert!(missing.is_empty(), "options missing in gateway.example.toml: {missing:?}");
+    }
+
+    #[test]
+    fn the_defaults_written_in_the_example_are_the_real_defaults() {
+        let example = Config::load(&root("photond.example.toml")).unwrap();
+        let d: Config = toml::from_str("[node]\nrpc_url = \"x\"\nauth = \"y\"\n[pool]\nnetwork = \"mainnet\"\n").unwrap();
+        macro_rules! same {
+            ($($($a:ident).+),+ $(,)?) => { $( assert_eq!(format!("{:?}", example.$($a).+), format!("{:?}", d.$($a).+), stringify!($($a).+)); )+ };
+        }
+        same!(node.poll_ms, pool.refresh_secs, pool.spot_check, pool.backend);
+        same!(stratum.enabled, stratum.listen, stratum.initial_difficulty, stratum.min_difficulty, stratum.max_difficulty, stratum.share_secs, stratum.max_connections, stratum.idle_secs, stratum.min_job_interval_ms, stratum.max_job_interval_ms, stratum.require_address);
+        same!(payout.default_mode, payout.modes, payout.min_payout_leptons, payout.max_solo_accounts, payout.dry_run, payout.interval_secs, payout.wallet, payout.wallet_addresses, payout.wallet_passphrase_env, payout.maturity_poll_secs, payout.max_outputs_per_tx, payout.fee_rate);
+        same!(payout.fee_pct.pplns, payout.fee_pct.pps, payout.pplns.window_factor, payout.pps.enabled, payout.pps.reserve_min, payout.pps.max_hashrate_share);
+        same!(public.enabled, public.listen, public.name, public.stratum_host, public.trust_proxy, public.rate_per_min);
+        same!(ledger.path, ledger.keep_days, api.listen, api.ui_dir);
+        same!(photon.enabled, photon.listen, photon.key_file, photon.fee_pct, photon.max_outputs, photon.window_factor, photon.initial_difficulty, photon.min_difficulty, photon.max_difficulty, photon.share_secs, photon.max_connections, photon.max_connections_per_ip, photon.max_channels_per_connection, photon.max_reward_over_subsidy_pct, photon.max_check_bytes, photon.idle_secs, photon.max_checks_per_tip, photon.max_concurrent_checks);
+    }
+}

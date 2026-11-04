@@ -44,5 +44,7 @@ Review and operation
 
 - `systemd/Caddyfile.example`: Caddy with automatic HTTPS in front of the public pool page for installations without Docker, documented with the matching `[public]` settings.
 
+- All configuration files list every option with its default and the accepted values in comments (`photond.example.toml`, `gateway.example.toml`, `docker/photond.docker.toml`, `docker/elektron.conf`, `stack/stack.conf.example`, the systemd environment templates). Tests check that the examples load, that every option of the code is documented in them and that the defaults they show are the real ones. Fixed in the pool example: the spot check budget had been written under `[payout.pplns]` instead of `[photon]`.
+
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.
