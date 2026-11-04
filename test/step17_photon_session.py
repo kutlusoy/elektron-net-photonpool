@@ -42,7 +42,7 @@ initial_difficulty = 0.0001
 min_difficulty = 0.00001
 ''')
 
-def gateway_cfg(path, key, miner, blocks=None, corrupt=False):
+def gateway_cfg(path, key, miner, blocks=None, corrupt=False, bits=None):
     open(path, "w").write(f'''node_rpc_url = "http://127.0.0.1:{RPCPORT}"
 node_auth = "t:t"
 pool_addr = "127.0.0.1:{PHOTON}"
@@ -56,6 +56,7 @@ share_difficulty = 0.0001
 software_miner = true
 {f"stop_after_blocks = {blocks}" if blocks else ""}
 corrupt_attestation = {"true" if corrupt else "false"}
+{f"announce_bits_override = {bits}" if bits else ""}
 ''')
 
 def coinbase_outputs(n, height):
@@ -104,6 +105,16 @@ with Harness("step17", extra=["-acceptnonstdtxn=1"]) as h:
         h.check("every block carries the accounting commitment", commit_ok)
         last, _ = coinbase_outputs(n, n.rpc("getblockcount"))
         h.check("the miner receives about the whole reward minus the fee in a late block", last.get(script(5).hex(), 0) >= int(sum(last.values()) * 0.9), str(last))
+
+        # a gateway that announces another difficulty than the node's (it would turn every hash into a block and bypass the share target)
+        gateway_cfg(base + ".gw5.toml", key, 8, bits=0x1f00ffff)
+        before = summary()["photon"]
+        liar = subprocess.Popen([PHOTOND, "gateway", "--gateway-config", base + ".gw5.toml"], stdout=subprocess.DEVNULL, stderr=open(base + ".gw5.log", "w"))
+        gws.append(liar)
+        time.sleep(5)
+        after = summary()["photon"]
+        h.check("an announce with the wrong difficulty is refused and earns no shares", after["announces"] == before["announces"] and after["sharesOk"] == before["sharesOk"] and "bits differ" in open(base + ".gw5.log").read(), str(after))
+        liar.terminate()
 
         # an honest gateway that does not find blocks: spot checks run on a stable tip and pass
         gateway_cfg(base + ".gw3.toml", key, 7)

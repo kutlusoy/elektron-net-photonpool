@@ -65,6 +65,9 @@ pub struct GatewayCfg {
     /// Stratum V1 front end for ASICs (`[stratum] listen = "0.0.0.0:3333"`).
     #[serde(default)]
     pub stratum: StratumGwCfg,
+    /// Test only: announce (and mine with) another compact target than the node's.
+    #[serde(default)]
+    pub announce_bits_override: Option<u32>,
     /// Test only: announce coinbases with a corrupted attestation to exercise the pool's spot check.
     #[serde(default)]
     pub corrupt_attestation: bool,
@@ -180,6 +183,15 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script: script_for_address(&cfg.fee_address, net)? };
     let pin: [u8; 32] = hex::decode(&cfg.pool_key)?.try_into().map_err(|_| anyhow!("pool_key must be 32 bytes of hex"))?;
 
+    if cfg.corrupt_attestation {
+        tracing::warn!("gateway: corrupt_attestation is set - TEST ONLY, the announced coinbases are invalid and the pool will ban this payout address");
+    }
+    if cfg.announce_bits_override.is_some() {
+        tracing::warn!("gateway: announce_bits_override is set - TEST ONLY, the pool will refuse the announces");
+    }
+    if cfg.software_miner {
+        tracing::warn!("gateway: software_miner is set - CPU mining for tests only");
+    }
     let (epoch_tx, epoch_rx) = watch::channel::<Option<Arc<Epoch>>>(None);
     let targets: Arc<RwLock<HashMap<u32, [u8; 32]>>> = Arc::new(RwLock::new(HashMap::new()));
     let (fwd_tx, fwd_rx) = mpsc::unbounded_channel::<Fwd>();
@@ -517,6 +529,12 @@ async fn build_template(node: &Arc<NodeRpc>, cfg: &GatewayCfg, plan: &PayoutPlan
         id, height, tip: rev(bt["tip"].as_str().ok_or_else(|| anyhow!("tip"))?)?, version: bt["version"].as_i64().unwrap_or(0) as u32,
         bits: u32::from_str_radix(bt["bits"].as_str().ok_or_else(|| anyhow!("bits"))?, 16)?, curtime: bt["curtime"].as_u64().unwrap_or(0) as u32,
         branch, coinbases, txids_root, tx_data,
+    })
+    .map(|mut t| {
+        if let Some(b) = cfg.announce_bits_override {
+            t.bits = b;
+        }
+        t
     })
 }
 

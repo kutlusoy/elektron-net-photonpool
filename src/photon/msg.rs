@@ -437,6 +437,37 @@ mod tests {
         assert!(Msg::decode(&Frame { ext: 0, ty: 0x07, payload: w.buf }).is_err());
     }
 
+    /// Whatever arrives on the wire must never panic the decoder (a panic kills a session task).
+    #[test]
+    fn random_and_mutated_frames_never_panic() {
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for _ in 0..50_000 {
+            let len = (next() % 300) as usize;
+            let payload: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            let _ = Msg::decode(&Frame { ext: 0, ty: (next() % 24) as u8, payload });
+        }
+        for m in samples() {
+            let f = m.encode();
+            for _ in 0..2_000 {
+                let mut p = f.payload.clone();
+                for _ in 0..1 + next() % 4 {
+                    if p.is_empty() {
+                        break;
+                    }
+                    let i = (next() as usize) % p.len();
+                    p[i] = next() as u8;
+                }
+                let _ = Msg::decode(&Frame { payload: p, ..f.clone() });
+            }
+        }
+    }
+
     /// Frozen wire vectors: a change here is a protocol change and needs a new version.
     #[test]
     fn frozen_test_vectors() {

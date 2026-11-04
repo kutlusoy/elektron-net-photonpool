@@ -120,7 +120,7 @@ impl Trust {
     /// Probability that the next announced variant is validated by the node: starts at 0.5, decays with clean checks, jumps after failures.
     pub fn probability(&self) -> f64 {
         let base = (0.5 / (1.0 + self.passes as f64 / 4.0)).max(0.02);
-        (base * 4f64.powi(self.fails as i32)).min(1.0)
+        (base * 4f64.powi(self.fails.min(16) as i32)).min(1.0)
     }
 
     pub fn should_check(&self, roll: f64) -> bool {
@@ -129,9 +129,9 @@ impl Trust {
 
     pub fn record(&mut self, passed: bool) {
         if passed {
-            self.passes += 1;
+            self.passes = self.passes.saturating_add(1);
         } else {
-            self.fails += 1;
+            self.fails = self.fails.saturating_add(1);
         }
     }
 

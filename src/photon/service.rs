@@ -60,6 +60,8 @@ pub struct PlanBook {
     pub tip_height: u32,
     pub plans: BTreeMap<u32, Arc<PlanEntry>>,
     pub max_reward: u64,
+    /// Compact target of the pool's own template for this tip; announces must carry the same value.
+    pub bits: u32,
 }
 
 impl PlanBook {
@@ -105,6 +107,7 @@ pub struct PhotonService {
     pub trust: Mutex<TrustBook>,
     /// Sum of the spot check probabilities of all connected gateways, in millionths.
     total_p_micro: AtomicI64,
+    ips: Mutex<HashMap<std::net::IpAddr, usize>>,
 }
 
 fn rand64() -> u64 {
@@ -136,9 +139,36 @@ pub fn load_or_create_key(path: &str) -> Result<Keypair> {
     Ok(kp)
 }
 
+/// Trust key of a network address: IPv4 as is, IPv6 by its /64 prefix (a host controls its whole /64).
+pub fn ip_key(ip: std::net::IpAddr) -> String {
+    match ip {
+        std::net::IpAddr::V4(v) => format!("ip:{v}"),
+        std::net::IpAddr::V6(v) => {
+            let s = v.segments();
+            format!("ip:{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
+        }
+    }
+}
+
 pub fn valid_payout_script(s: &[u8]) -> bool {
     // witness v0 keyhash (22 bytes), v0 scripthash and v1 taproot (34 bytes)
     (s.len() == 22 && s[0] == 0x00 && s[1] == 0x14) || (s.len() == 34 && ((s[0] == 0x00 && s[1] == 0x20) || (s[0] == 0x51 && s[1] == 0x20)))
+}
+
+/// The announced compact target must equal the pool's own view of the network target for this tip.
+pub fn check_announce_terms(announced_bits: u32, network_bits: u32) -> std::result::Result<(), &'static str> {
+    if network_bits == 0 || announced_bits != network_bits {
+        return Err("bits differ from the network's difficulty");
+    }
+    Ok(())
+}
+
+/// Memory limits of one session: variants per template and bytes of announced coinbases kept.
+pub const MAX_VARIANTS_PER_TEMPLATE: usize = 4096;
+pub const MAX_TEMPLATE_BYTES: usize = 48 * 1024 * 1024;
+
+fn template_bytes(chunks: &[Announced]) -> usize {
+    chunks.iter().map(|a| a.ann.coinbases.iter().map(Vec::len).sum::<usize>() + a.txids.len() * 32).sum()
 }
 
 /// Divisor for all spot check probabilities: 1 while their sum fits into the per-tip budget, otherwise sum / budget.
@@ -172,9 +202,9 @@ impl PhotonService {
         let cfg_conc = cfg.max_concurrent_checks.max(1);
         let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script };
         rules.validate()?;
-        let empty = Arc::new(PlanBook { epoch_id: 0, tip: [0; 32], tip_hex: String::new(), tip_height: 0, plans: BTreeMap::new(), max_reward: 0 });
+        let empty = Arc::new(PlanBook { epoch_id: 0, tip: [0; 32], tip_hex: String::new(), tip_height: 0, plans: BTreeMap::new(), max_reward: 0, bits: 0 });
         let (book, _) = watch::channel(empty);
-        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new((HashSet::new(), HashSet::new())), recent: Mutex::new(VecDeque::new()), check_used: std::sync::atomic::AtomicU32::new(0), check_slots: Semaphore::new(cfg_conc), trust: Mutex::new(TrustBook::default()), total_p_micro: AtomicI64::new(0) }))
+        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new((HashSet::new(), HashSet::new())), recent: Mutex::new(VecDeque::new()), check_used: std::sync::atomic::AtomicU32::new(0), check_slots: Semaphore::new(cfg_conc), trust: Mutex::new(TrustBook::default()), total_p_micro: AtomicI64::new(0), ips: Mutex::new(HashMap::new()) }))
     }
 
     pub fn now() -> i64 {
@@ -244,6 +274,18 @@ impl PhotonService {
             let Ok(permit) = slots.clone().try_acquire_owned() else {
                 continue;
             };
+            let key = match peer.ip() {
+                std::net::IpAddr::V6(v) => { let s = v.segments(); std::net::IpAddr::V6(std::net::Ipv6Addr::new(s[0], s[1], s[2], s[3], 0, 0, 0, 0)) }
+                v4 => v4,
+            };
+            {
+                let mut ips = self.ips.lock().unwrap();
+                let n = ips.entry(key).or_insert(0);
+                if *n >= self.cfg.max_connections_per_ip {
+                    continue;
+                }
+                *n += 1;
+            }
             let svc = self.clone();
             tokio::spawn(async move {
                 svc.stats.connections.fetch_add(1, Ordering::Relaxed);
@@ -251,6 +293,13 @@ impl PhotonService {
                     tracing::debug!("photon session {peer}: {e:#}");
                 }
                 svc.stats.connections.fetch_sub(1, Ordering::Relaxed);
+                {
+                    let mut ips = svc.ips.lock().unwrap();
+                    if let Some(n) = ips.get_mut(&key) {
+                        *n = n.saturating_sub(1);
+                        if *n == 0 { ips.remove(&key); }
+                    }
+                }
                 drop(permit);
             });
         }
@@ -326,7 +375,7 @@ impl PhotonService {
         }
         let subsidy = cand.subsidy().max(0) as f64;
         let max_reward = ((subsidy * (1.0 + self.cfg.max_reward_over_subsidy_pct / 100.0)) as u64).max(cand.coinbase_value.max(0) as u64);
-        Ok(PlanBook { epoch_id: e.id, tip, tip_hex: e.tip_hex.clone(), tip_height, plans, max_reward })
+        Ok(PlanBook { epoch_id: e.id, tip, tip_hex: e.tip_hex.clone(), tip_height, plans, max_reward, bits: cand.bits })
     }
 
     /// Takes one unit of the per-tip spot check budget.
@@ -386,6 +435,8 @@ struct Session {
     order: VecDeque<u32>,
     keys: Vec<String>,
     contrib: i64,
+    tpl_bytes: usize,
+    proofs: u32,
     seen: Seen,
     check: Option<PendingCheck>,
     held: HashMap<(u32, u32), Vec<(String, f64)>>,
@@ -406,7 +457,7 @@ impl Session {
         let mut book_rx = svc.book.subscribe();
         let book = book_rx.borrow_and_update().clone();
         Self {
-            svc, conn, peer, book, book_rx, stale_since: HashMap::new(), sent: HashSet::new(), channels: HashMap::new(), next_chan: 1, templates: HashMap::new(), order: VecDeque::new(), keys: vec![format!("ip:{}", peer.ip())], contrib: 0, seen: Seen::default(), check: None,
+            svc, conn, peer, book, book_rx, stale_since: HashMap::new(), sent: HashSet::new(), channels: HashMap::new(), next_chan: 1, templates: HashMap::new(), order: VecDeque::new(), keys: vec![ip_key(peer.ip())], contrib: 0, tpl_bytes: 0, proofs: 0, seen: Seen::default(), check: None,
             held: HashMap::new(), strikes: 0, last_rx: Instant::now(),
         }
     }
@@ -491,6 +542,7 @@ impl Session {
         for id in self.templates.keys() {
             self.stale_since.entry(*id).or_insert(now);
         }
+        self.proofs = 0;
         self.sent.retain(|h| self.book.plans.contains_key(h));
         if let Some(c) = self.check.take() {
             self.svc.stats.checks_inconclusive.fetch_add(1, Ordering::Relaxed);
@@ -511,10 +563,15 @@ impl Session {
             }
         }
         let expired: Vec<u32> = self.stale_since.iter().filter(|(_, t)| t.elapsed() > STALE_GRACE).map(|(id, _)| *id).collect();
+        let any_expired = !expired.is_empty();
         for id in expired {
             self.stale_since.remove(&id);
-            self.templates.remove(&id);
+            self.drop_template(id);
             self.order.retain(|x| *x != id);
+        }
+        if any_expired && self.stale_since.is_empty() {
+            // the duplicate filter of the old tip is no longer needed; the pool-wide filter still covers the current one
+            self.seen.clear();
         }
         let (min, max, goal) = (self.svc.cfg.min_difficulty, self.svc.cfg.max_difficulty, self.svc.cfg.share_secs);
         let mut updates = vec![];
@@ -611,6 +668,11 @@ impl Session {
             return self.send(reject(code::NO_PLAN, "no plan for that height")).await;
         };
         let template_id = a.template_id;
+        // the network target decides which hashes count as blocks and bypass the share target: it must be the node's, not the gateway's
+        if let Err(why) = check_announce_terms(a.bits, self.book.bits) {
+            self.strikes += 1;
+            return self.send(reject(code::BAD_ANNOUNCE, why)).await;
+        }
         let announced = match Announced::new(a, &self.book.tip, &entry.plan, self.book.max_reward) {
             Ok(x) => x,
             Err(e) => {
@@ -623,6 +685,12 @@ impl Session {
             self.strikes += 1;
             return self.send(reject(code::BAD_ANNOUNCE, "curtime is too far from the pool's clock")).await;
         }
+        let new_bytes = template_bytes(std::slice::from_ref(&announced));
+        let have_variants: usize = self.templates.get(&template_id).map_or(0, |p| p.iter().map(|a| a.ann.coinbases.len()).sum());
+        if have_variants + announced.ann.coinbases.len() > MAX_VARIANTS_PER_TEMPLATE || new_bytes > MAX_TEMPLATE_BYTES {
+            self.strikes += 1;
+            return self.send(reject(code::BAD_ANNOUNCE, "too many variants for one template")).await;
+        }
         if let Some(prev) = self.templates.get(&template_id) {
             let f = &prev[0].ann;
             let (n, lo, hi) = (&announced.ann, announced.ann.first_variant as u64, announced.ann.first_variant as u64 + announced.ann.coinbases.len() as u64);
@@ -632,15 +700,15 @@ impl Session {
                 return self.send(reject(code::BAD_ANNOUNCE, "chunks of one template disagree or overlap")).await;
             }
         } else {
-            if self.templates.len() >= MAX_TEMPLATES {
-                if let Some(old) = self.order.pop_front() {
-                    self.templates.remove(&old);
-                }
+            while self.templates.len() >= MAX_TEMPLATES || (self.tpl_bytes + new_bytes > MAX_TEMPLATE_BYTES && !self.order.is_empty()) {
+                let Some(old) = self.order.pop_front() else { break };
+                self.drop_template(old);
             }
             self.order.push_back(template_id);
         }
         self.svc.stats.announces.fetch_add(1, Ordering::Relaxed);
         let (first, n) = (announced.ann.first_variant, announced.ann.coinbases.len() as u64);
+        self.tpl_bytes += new_bytes;
         self.templates.entry(template_id).or_default().push(announced);
         let roll = (rand64() >> 11) as f64 / (1u64 << 53) as f64;
         let p = self.svc.trust.lock().unwrap().probability(&self.keys, PhotonService::now()) / self.svc.p_scale();
@@ -651,6 +719,13 @@ impl Session {
             self.send(Msg::GetTransactions(GetTransactions { template_id, variant })).await?;
         }
         Ok(())
+    }
+
+    fn drop_template(&mut self, id: u32) {
+        if let Some(chunks) = self.templates.remove(&id) {
+            self.tpl_bytes = self.tpl_bytes.saturating_sub(template_bytes(&chunks));
+        }
+        self.stale_since.remove(&id);
     }
 
     fn find(&self, template_id: u32, variant: u32) -> Option<&Announced> {
@@ -823,6 +898,11 @@ impl Session {
     }
 
     async fn proof(&mut self, g: GetProof) -> Result<()> {
+        self.proofs += 1;
+        if self.proofs > 8 * (self.channels.len() as u32 + 1) {
+            self.strikes += 1;
+            return self.send(reject(code::PROTOCOL, "too many proof requests")).await;
+        }
         let entry = { self.svc.recent.lock().unwrap().iter().rev().find(|e| e.plan.height == g.height).cloned() };
         let Some(e) = entry else {
             return self.send(reject(code::NOT_FOUND, "no accounting state for that height")).await;
@@ -839,6 +919,23 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn announced_difficulty_must_equal_the_nodes() {
+        assert!(check_announce_terms(0x1d00ffff, 0x1d00ffff).is_ok());
+        assert!(check_announce_terms(0x207fffff, 0x1d00ffff).is_err(), "an easier target would turn every hash into a block and bypass the share target");
+        assert!(check_announce_terms(0x1d00ffff, 0).is_err(), "no network target known yet");
+    }
+
+    #[test]
+    fn address_keys_group_ipv6_by_64_bits() {
+        let a: std::net::IpAddr = "2001:db8:1:2:aaaa:bbbb:cccc:dddd".parse().unwrap();
+        let b: std::net::IpAddr = "2001:db8:1:2::1".parse().unwrap();
+        let c: std::net::IpAddr = "2001:db8:1:3::1".parse().unwrap();
+        assert_eq!(ip_key(a), ip_key(b));
+        assert_ne!(ip_key(a), ip_key(c));
+        assert_eq!(ip_key("192.0.2.7".parse().unwrap()), "ip:192.0.2.7");
+    }
 
     #[test]
     fn payout_scripts_are_limited_to_witness_programs() {

@@ -419,6 +419,9 @@ pub struct PhotonCfg {
     pub share_secs: f64,
     #[serde(default = "d_ph_conn")]
     pub max_connections: usize,
+    /// Connections from one address (IPv6: one /64).
+    #[serde(default = "d_ph_conn_ip")]
+    pub max_connections_per_ip: usize,
     #[serde(default = "d_ph_chan")]
     pub max_channels_per_connection: usize,
     /// Announced coinbase value may exceed the subsidy by this many percent (fees).
@@ -450,6 +453,7 @@ fn d_ph_nmax() -> u16 { 128 }
 fn d_ph_minppm() -> u32 { 100 }
 fn d_ph_window() -> f64 { 2.0 }
 fn d_ph_conn() -> usize { 1000 }
+fn d_ph_conn_ip() -> usize { 32 }
 fn d_ph_chan() -> usize { 64 }
 fn d_ph_bound() -> f64 { 100.0 }
 fn d_ph_check_bytes() -> usize { 8 * 1024 * 1024 }

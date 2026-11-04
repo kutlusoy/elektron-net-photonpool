@@ -298,6 +298,37 @@ mod tests {
     }
 
     #[test]
+    fn random_and_mutated_coinbases_never_panic() {
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        let ok = make(&plan(), 5_000_000_000, |_| {});
+        let raw = build_coinbase(&ok.script_sig, 1001, &[TxOutput { value: 1, script: vec![0x51] }]).nowit;
+        for _ in 0..30_000 {
+            let mut r = raw.clone();
+            for _ in 0..1 + next() % 5 {
+                let i = (next() as usize) % r.len();
+                r[i] = next() as u8;
+            }
+            if next() % 4 == 0 {
+                r.truncate((next() as usize) % r.len());
+            }
+            if let Ok(cb) = parse(&r) {
+                let _ = check_announced(&plan(), &cb, 10_000_000_000);
+            }
+        }
+        for _ in 0..30_000 {
+            let len = (next() % 200) as usize;
+            let r: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            let _ = parse(&r);
+        }
+    }
+
+    #[test]
     fn garbage_is_rejected_by_the_parser() {
         let ok = make(&plan(), 5_000_000_000, |_| {});
         let raw = build_coinbase(&ok.script_sig, 1001, &[TxOutput { value: 1, script: vec![0x51] }]).nowit;

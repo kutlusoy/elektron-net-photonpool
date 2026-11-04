@@ -1,0 +1,57 @@
+# photond: Elektron Net mining pool (Stratum V1, Photon protocol, public page, admin API)
+# Install: see systemd/install.sh and doc-elektron/guideline-systemd.md
+[Unit]
+Description=photond Elektron Net mining pool
+Documentation=https://github.com/kutlusoy/elektron-net-photonpool
+After=network-online.target elektrond.service
+Wants=network-online.target
+# The pool waits for a synchronized node by itself and retries every 5 seconds, so the node is ordered before it but not required.
+
+[Service]
+Type=simple
+User=photon
+Group=photon
+ExecStart=/opt/photond/photond -c /etc/photond/photond.toml run
+# SIGINT is the graceful stop: pending share totals and the remembered gateway trust are written to the ledger first.
+KillSignal=SIGINT
+TimeoutStopSec=30
+Restart=always
+RestartSec=5
+# Secrets such as PHOTON_WALLET_PASSPHRASE (mode 0600, owned by root); optional.
+EnvironmentFile=-/etc/photond/photond.env
+Environment=RUST_LOG=info
+WorkingDirectory=/var/lib/photond
+StateDirectory=photond
+StateDirectoryMode=0750
+ConfigurationDirectory=photond
+# One file descriptor per miner connection.
+LimitNOFILE=1048576
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+# read-only so that "cookie:/home/<user>/.elektron/.cookie" works; use auth = "user:password" or "env:VAR" and set ProtectHome=true to close it
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+ReadWritePaths=/var/lib/photond
+
+[Install]
+WantedBy=multi-user.target

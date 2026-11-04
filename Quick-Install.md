@@ -93,27 +93,17 @@ target/release/photond -c photond.toml run
 
 `check` builds all candidates once, validates every one against the node (`getblocktemplate` proposal) and prints a JSON report. All configured addresses must show up as valid candidates.
 
-### 4.3 systemd unit
+### 4.3 systemd
 
-```ini
-# /etc/systemd/system/photond.service
-[Unit]
-Description=photond Elektron Net pool
-After=network-online.target
+`systemd/` contains hardened units for the pool and the gateway, an example node unit and an installer:
 
-[Service]
-User=photon
-WorkingDirectory=/opt/photond
-ExecStart=/opt/photond/photond -c /opt/photond/photond.toml run
-Restart=always
-RestartSec=3
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
+```bash
+sudo systemd/install.sh pool                 # or: gateway, both
+sudoedit /etc/photond/photond.toml
+sudo systemctl enable --now photond
 ```
 
-Copy `target/release/photond` and the `ui/` folder to `/opt/photond`, then `systemctl enable --now photond`. The high `LimitNOFILE` matters: every miner connection uses one file descriptor.
+Files go to `/opt/photond`, `/etc/photond` and `/var/lib/photond`; the pool stops with `SIGINT` so that pending share totals reach the ledger. Details: [`doc-elektron/guideline-systemd.md`](doc-elektron/guideline-systemd.md).
 
 ## 5. Connect miners
 
@@ -201,4 +191,4 @@ Instead of mining on the pool's Stratum port, a farm can run its own node (built
 photond gateway --gateway-config gateway.toml
 ```
 
-The gateway reconnects to the pool by itself after an outage (see `gateway.example.toml`); run it under a supervisor such as systemd so that it also comes back after a crash or reboot. Status: tested end to end on regtest with a simulated ASIC, not yet with real hardware. Details: [`doc-elektron/guideline-photon-protocol.md`](doc-elektron/guideline-photon-protocol.md).
+The gateway reconnects to the pool by itself after an outage (see `gateway.example.toml`); run it under systemd (`systemd/photon-gateway.service`) so that it also comes back after a crash or reboot. Status: tested end to end on regtest with a simulated ASIC, not yet with real hardware. Details: [`doc-elektron/guideline-photon-protocol.md`](doc-elektron/guideline-photon-protocol.md).

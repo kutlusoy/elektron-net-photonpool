@@ -100,10 +100,12 @@ impl TrustBook {
     pub fn prune(&mut self, now: i64) -> Vec<String> {
         let mut gone: Vec<String> = self.map.iter().filter(|(_, e)| now - e.updated > MAX_AGE_SECS && e.banned_until <= now).map(|(k, _)| k.clone()).collect();
         if self.map.len() - gone.len().min(self.map.len()) > MAX_ENTRIES {
-            let mut rest: Vec<(&String, i64)> = self.map.iter().filter(|(k, _)| !gone.contains(k)).map(|(k, e)| (k, e.updated)).collect();
+            let gone_set: HashSet<&String> = gone.iter().collect();
+            let mut rest: Vec<(&String, i64)> = self.map.iter().filter(|(k, _)| !gone_set.contains(k)).map(|(k, e)| (k, e.updated)).collect();
             rest.sort_by_key(|(_, u)| *u);
             let excess = rest.len() - MAX_ENTRIES;
-            gone.extend(rest.into_iter().take(excess).map(|(k, _)| k.clone()));
+            let extra: Vec<String> = rest.into_iter().take(excess).map(|(k, _)| k.clone()).collect();
+            gone.extend(extra);
         }
         for k in &gone {
             self.map.remove(k);

@@ -1,0 +1,49 @@
+# photond gateway: runs next to the farm's own (Photon-patched) Elektron Net node and serves the ASICs over Stratum V1.
+# Install: see systemd/install.sh and doc-elektron/guideline-systemd.md
+[Unit]
+Description=Photon gateway for Elektron Net (ASIC front end of a farm with its own node)
+Documentation=https://github.com/kutlusoy/elektron-net-photonpool
+After=network-online.target elektrond.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=photon
+Group=photon
+ExecStart=/opt/photond/photond gateway --gateway-config /etc/photond/gateway.toml
+# The gateway keeps no state; it reconnects to the pool by itself and this unit restarts it after a crash or a fatal configuration error.
+# A wrong pool key or a ban ends the process on purpose: the restart delay keeps it from hammering the pool.
+Restart=always
+RestartSec=15
+EnvironmentFile=-/etc/photond/gateway.env
+Environment=RUST_LOG=info
+ConfigurationDirectory=photond
+# ASICs of a farm: far fewer than a pool, but leave room.
+LimitNOFILE=65536
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
