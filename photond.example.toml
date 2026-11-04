@@ -66,6 +66,11 @@ idle_secs = 300
 # Shortest and longest time between two jobs sent to one miner, in milliseconds. Options: whole numbers. Defaults 200 and 30000.
 min_job_interval_ms = 200
 max_job_interval_ms = 30000
+# How many of the granted version bits a miner's hardware really sweeps per job, so one job keeps it busy for 2^(32+n) hashes. The pool sends fresh
+# work about that often (never faster than min_job_interval_ms). Measured on a Bitaxe (BM1370): about 2^37 hashes per job, so 5. Raise it (up to 12)
+# only for miners that really roll all granted bits. A duplicate share is treated as a sign that the miner has swept its space and triggers fresh work at once.
+# Options: whole number 0 to 16. Default 5.
+version_space_bits = 5
 # Miner user name must be "<address>.<worker>" with a valid address of the network.
 # Options: true (default) | false (any user name is accepted; solo mode always needs an address).
 require_address = true

@@ -276,6 +276,9 @@ pub struct StratumCfg {
     pub min_job_interval_ms: u64,
     #[serde(default = "d_s_max_job")]
     pub max_job_interval_ms: u64,
+    /// How many of the granted version bits a miner really sweeps per job (2^(32+n) hashes). Sets how often fresh work is sent.
+    #[serde(default = "d_s_space")]
+    pub version_space_bits: u32,
     #[serde(default = "d_true")]
     pub require_address: bool,
     /// Extra listeners with their own default mode. When empty, `listen` is used with the global default mode.
@@ -308,6 +311,7 @@ fn d_s_max_conn() -> usize { 200_000 }
 fn d_s_idle() -> u64 { 300 }
 fn d_s_min_job() -> u64 { 200 }
 fn d_s_max_job() -> u64 { 30_000 }
+fn d_s_space() -> u32 { 5 }
 
 fn d_poll() -> u64 { 100 }
 fn d_refresh() -> u64 { 20 }
@@ -539,7 +543,7 @@ mod tests {
             ($($($a:ident).+),+ $(,)?) => { $( assert_eq!(format!("{:?}", example.$($a).+), format!("{:?}", d.$($a).+), stringify!($($a).+)); )+ };
         }
         same!(node.poll_ms, pool.refresh_secs, pool.spot_check, pool.backend);
-        same!(stratum.enabled, stratum.listen, stratum.initial_difficulty, stratum.min_difficulty, stratum.max_difficulty, stratum.share_secs, stratum.max_connections, stratum.idle_secs, stratum.min_job_interval_ms, stratum.max_job_interval_ms, stratum.require_address);
+        same!(stratum.enabled, stratum.listen, stratum.initial_difficulty, stratum.min_difficulty, stratum.max_difficulty, stratum.share_secs, stratum.max_connections, stratum.idle_secs, stratum.min_job_interval_ms, stratum.max_job_interval_ms, stratum.version_space_bits, stratum.require_address);
         same!(payout.default_mode, payout.modes, payout.min_payout_leptons, payout.max_solo_accounts, payout.dry_run, payout.interval_secs, payout.wallet, payout.wallet_addresses, payout.wallet_passphrase_env, payout.maturity_poll_secs, payout.max_outputs_per_tx, payout.fee_rate);
         same!(payout.fee_pct.pplns, payout.fee_pct.pps, payout.pplns.window_factor, payout.pps.enabled, payout.pps.reserve_min, payout.pps.max_hashrate_share);
         same!(public.enabled, public.listen, public.name, public.stratum_host, public.trust_proxy, public.rate_per_min);

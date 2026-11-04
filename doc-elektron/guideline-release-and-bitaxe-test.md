@@ -74,6 +74,18 @@ Firmware version, pool settings, the first 30 lines of the Bitaxe log after conn
 - Docker images are not built in CI; the first image build happens on your server.
 - Mainnet-scale benchmarks are missing (a regtest simulation of 11,000 transactions per block and 10,000 miners is documented in [`guideline-daemon-core.md`](./guideline-daemon-core.md)).
 
+## 8a. First hardware result (one Bitaxe, BM1370)
+
+The first run showed 98.8 % duplicate shares (326 duplicates against 4 accepted) and a hash rate estimate of 1.4 GH/s for a device that reports 6 TH/s itself.
+The log shows the same result (job, ntime, version bits, nonce) submitted again about every 163 ms, so the chip sweeps the same space of one job again and again.
+What the code of ESP-Miner says: with `extranonce2_size = 0` the job counts as not rollable (`miner_job_is_rollable`), the firmware then sends each job once and does not create new headers
+by itself, whereas a normal pool gets a new header every 500 ms through `extranonce_2++`. One header seems to cover only about 2^37 hashes of this chip (a pass of about 163 ms at roughly 1 TH/s), not the 2^44 that the
+pool assumed for 12 granted version bits. The conclusion is not proven (no chip documentation was used): it is the explanation that fits the log and the firmware source.
+
+Change made: `[stratum] version_space_bits` (default 5) tells the pool how much space one job gives a miner, so it sends fresh work about that often (at least every `min_job_interval_ms`),
+and a duplicate share now triggers fresh work at once (for 30 s at the shortest interval). To confirm: duplicates should drop sharply and the pool's hash rate estimate should approach what the device reports.
+Open question for the Photon design: a miner that needs a new header every few hundred milliseconds needs a new unit (candidate, nTime step or slice) at that rate; the work space and traffic figures of the protocol guideline have to be re-checked against this.
+
 ## 9. Checklist
 
 - [ ] Pre-flight (section 3) done.

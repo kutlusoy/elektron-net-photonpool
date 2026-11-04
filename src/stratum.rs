@@ -22,6 +22,17 @@ const MAX_LINE: usize = 8192;
 const MAX_JOBS: usize = 16;
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const PREV_TARGET_GRACE: Duration = Duration::from_secs(60);
+/// After a duplicate share the miner gets fresh work at the shortest interval for this long.
+const DUP_BOOST: Duration = Duration::from_secs(30);
+
+/// Time until the next job for a miner: the time its hardware needs to sweep the space of one job (a bit less, to stay ahead), within the configured limits.
+/// Without a hash rate estimate the pool sends a job per second; after a duplicate share it sends them as fast as allowed.
+fn job_delay_ms(cfg: &crate::config::StratumCfg, rolling_bits: u32, hash_est: f64, boost: bool) -> u64 {
+    let bits = rolling_bits.min(cfg.version_space_bits);
+    let unit_hashes = 2f64.powi(32 + bits as i32);
+    let secs = if boost { 0.0 } else if hash_est > 0.0 { unit_hashes / hash_est * 0.8 } else { 1.0 };
+    (secs * 1000.0).clamp(cfg.min_job_interval_ms as f64, cfg.max_job_interval_ms as f64) as u64
+}
 
 pub async fn serve(pool: Arc<Pool>) -> Result<()> {
     let cfg = Arc::new(pool.cfg.stratum.clone());
@@ -102,6 +113,8 @@ struct Session {
     window_start: Instant,
     window_diff: f64,
     hash_est: f64,
+    last_job: Instant,
+    dup_until: Instant,
     last_adjust: Instant,
     shares_since_adjust: u32,
     bad: u32,
@@ -144,7 +157,7 @@ impl Session {
         Self {
             pool, cfg, stats, id, mode: port.mode, port, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
             difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0, rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(),
-            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_adjust: now, shares_since_adjust: 0, bad: 0,
+            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_job: now, dup_until: now, last_adjust: now, shares_since_adjust: 0, bad: 0,
             acc_minute: 0, acc_diff: 0.0, acc_cnt: 0, acc_last: now,
         }
     }
@@ -316,10 +329,9 @@ impl Session {
     }
 
     fn schedule_next(&mut self) {
-        let unit_hashes = 2f64.powi(32 + self.rolling_bits as i32);
-        let secs = if self.hash_est > 0.0 { unit_hashes / self.hash_est * 0.8 } else { 1.0 };
-        let ms = (secs * 1000.0).clamp(self.cfg.min_job_interval_ms as f64, self.cfg.max_job_interval_ms as f64);
-        self.next_job = Instant::now() + Duration::from_millis(ms as u64);
+        let boost = Instant::now() < self.dup_until;
+        let ms = job_delay_ms(&self.cfg, self.rolling_bits, self.hash_est, boost);
+        self.next_job = Instant::now() + Duration::from_millis(ms);
     }
 
     async fn send_job(&mut self, wr: &mut OwnedWriteHalf, force_clean: bool) -> Result<()> {
@@ -361,6 +373,7 @@ impl Session {
         let mut msg = String::with_capacity(1024);
         cand.write_notify(&mut msg, id, version, ntime, clean);
         send(wr, msg.as_bytes()).await?;
+        self.last_job = Instant::now();
         self.stats.unit.store(((unit.0 as u64) << 16) | ((unit.2 as u64) << 8) | unit.1 as u64, Ordering::Relaxed);
         self.jobs.push_back(JobRef { id, epoch, src, n, version });
         while self.jobs.len() > MAX_JOBS {
@@ -432,6 +445,9 @@ impl Session {
             ShareResult::Duplicate => {
                 self.stats.dup.fetch_add(1, Ordering::Relaxed);
                 self.pool.stats.dup.fetch_add(1, Ordering::Relaxed);
+                // The same share again means the miner has swept the space of its job and starts over: give it fresh work, but not faster than min_job_interval_ms.
+                self.dup_until = Instant::now() + DUP_BOOST;
+                self.next_job = self.next_job.min((self.last_job + Duration::from_millis(self.cfg.min_job_interval_ms)).max(Instant::now()));
                 self.error(wr, id, 22, "Duplicate share").await
             }
             ShareResult::LowDifficulty => {
@@ -570,5 +586,35 @@ async fn stats_task(pool: Arc<Pool>) {
         live.online = online;
         live.total = sessions.len() as u64;
         (prev_shares, prev_units, prev_epoch) = (shares, used, eid);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> crate::config::StratumCfg {
+        toml::from_str("").unwrap()
+    }
+
+    #[test]
+    fn job_cadence_follows_the_space_a_miner_really_sweeps() {
+        let c = cfg();
+        // a Bitaxe at 1 TH/s sweeps 2^37 hashes per job in about 0.14 s: fresh work at the shortest interval
+        assert_eq!(job_delay_ms(&c, 12, 1.0e12, false), c.min_job_interval_ms);
+        // a 10 GH/s miner can keep one job for about 11 s, a very slow one never longer than the maximum
+        assert_eq!(job_delay_ms(&c, 12, 1.0e10, false), (2f64.powi(37) / 1.0e10 * 0.8 * 1000.0) as u64);
+        assert_eq!(job_delay_ms(&c, 12, 1.0e9, false), c.max_job_interval_ms);
+        assert_eq!(job_delay_ms(&c, 12, 1.0e3, false), c.max_job_interval_ms);
+        // miners that granted fewer bits, or a configured smaller space, are not given more than they have
+        assert_eq!(job_delay_ms(&c, 2, 1.0e10, false), (2f64.powi(34) / 1.0e10 * 0.8 * 1000.0) as u64);
+    }
+
+    #[test]
+    fn unknown_speed_gets_a_job_per_second_and_a_duplicate_makes_it_fast() {
+        let c = cfg();
+        assert_eq!(job_delay_ms(&c, 12, 0.0, false), 1000);
+        assert_eq!(job_delay_ms(&c, 12, 1.0e9, true), c.min_job_interval_ms);
+        assert_eq!(job_delay_ms(&c, 12, 0.0, true), c.min_job_interval_ms);
     }
 }
