@@ -81,6 +81,7 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
         .route("/style.css", get(|State(s): State<St>| file(s, "style.css", "text/css; charset=utf-8")))
         .route("/common.js", get(|State(s): State<St>| file(s, "common.js", "text/javascript; charset=utf-8")))
+        .route("/depth.js", get(|State(s): State<St>| file(s, "depth.js", "text/javascript; charset=utf-8")))
         .route("/public.js", get(|State(s): State<St>| file(s, "public.js", "text/javascript; charset=utf-8")))
         .route("/miner.html", get(|State(s): State<St>| file(s, "miner.html", "text/html; charset=utf-8")))
         .route("/miner", get(|State(s): State<St>| file(s, "miner.html", "text/html; charset=utf-8")))
