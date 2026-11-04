@@ -18,13 +18,13 @@ A binary, Noise-encrypted protocol for miner-built templates, non-custodial coin
 
 ### What is a gateway
 
-A gateway is a small program (`photond gateway`) that a mining farm runs next to its own Elektron Net node. The ASICs connect to the gateway with normal Stratum V1; the gateway builds the block template with the node, has the node attest the coinbase, and talks to the pool over the encrypted Photon protocol. Because the farm's own node builds the block and submits a found block itself, the pool cannot censor transactions or hold back a block, and the block reward is split in the coinbase between all Photon miners, so the pool never holds their money. The pool only keeps the accounting, publishes the payout plan and checks the gateways with spot checks. Miners without their own node keep using the pool's normal Stratum port.
+A gateway is a small program (`photond gateway`) that a mining farm runs next to its own Elektron Net node. The ASICs connect to the gateway with normal Stratum V1; the gateway builds the block template with the node, has the node attest the coinbase, and talks to the pool over the encrypted Photon protocol. Because the farm's own node builds the block and submits a found block itself, the pool cannot censor transactions or hold back a block, and the block reward is split in the coinbase between all Photon miners, so the pool never holds their money. The pool only keeps the accounting, publishes the payout plan and checks the gateways with spot checks. One gateway can serve several customers: a worker named `<payout address>.<worker>` is credited to that address. Miners without their own node keep using the pool's normal Stratum port.
 
 ## Tests
 
 ```text
 cargo test                                  # 61 unit tests
-ELEKTROND=... test/run_all.sh               # integration steps 1-18 against regtest nodes (see the header of run_all.sh)
+ELEKTROND=... test/run_all.sh               # integration steps 1-19 against regtest nodes (see the header of run_all.sh)
 ```
 
 The integration tests recompute every attestation independently in Python and validate candidates with the node itself. Load figures (10,000 miners, full blocks) are in [`doc-elektron/guideline-daemon-core.md`](doc-elektron/guideline-daemon-core.md).

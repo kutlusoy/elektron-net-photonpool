@@ -450,7 +450,7 @@ fn d_ph_nmax() -> u16 { 128 }
 fn d_ph_minppm() -> u32 { 100 }
 fn d_ph_window() -> f64 { 2.0 }
 fn d_ph_conn() -> usize { 1000 }
-fn d_ph_chan() -> usize { 8 }
+fn d_ph_chan() -> usize { 64 }
 fn d_ph_bound() -> f64 { 100.0 }
 fn d_ph_check_bytes() -> usize { 8 * 1024 * 1024 }
 fn d_ph_idle() -> u64 { 300 }

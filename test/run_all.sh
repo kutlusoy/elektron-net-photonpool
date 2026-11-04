@@ -16,6 +16,7 @@ if [ -n "$ELEKTROND_BATCH" ]; then
   ELEKTROND="$ELEKTROND_BATCH" python3 step16_photon_plan_coinbase.py || rc=1   # needs target/release/photond or PHOTOND
   ELEKTROND="$ELEKTROND_BATCH" python3 step17_photon_session.py || rc=1       # pool session, gateway, spot checks
   ELEKTROND="$ELEKTROND_BATCH" python3 step18_gateway_stratum.py || rc=1     # gateway Stratum front end
+  ELEKTROND="$ELEKTROND_BATCH" python3 step19_multi_channel.py || rc=1        # several channels per gateway
 else
   echo "[step14] skipped (set ELEKTROND_BATCH to an elektrond built with the Photon node patch)"
 fi

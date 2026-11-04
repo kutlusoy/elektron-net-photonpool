@@ -9,7 +9,9 @@ network = "mainnet"                          # mainnet, testnet or regtest
 pool_addr = "pool.example.org:3340"
 pool_key = "0000000000000000000000000000000000000000000000000000000000000000"
 
-# Your payout address: the pool pays it directly in the coinbase of every block this gateway finds.
+# Default payout address. Workers whose user name is `<payout address>.<worker>` get their own pool channel and are credited
+# (and paid in the coinbase) under that address, so one gateway can serve several customers or sub-farms. Workers with any
+# other user name mine for this default address.
 payout_address = "be1q..."
 
 # Terms you agreed with the pool. A plan with other terms is refused.
@@ -27,6 +29,8 @@ share_difficulty = 1024
 # Stratum V1 front end for ASICs. Point the miners at this address; user name and password are free-form
 # (the worker name only appears in the log). Empty `listen` disables it.
 [stratum]
+# Users must be <payout address>.<worker> (otherwise they mine for the default address above).
+require_address = false
 listen = "0.0.0.0:3333"
 initial_difficulty = 1024
 share_secs = 10

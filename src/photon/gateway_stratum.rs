@@ -4,6 +4,7 @@
 //! (empty extranonce1, extranonce2_size 0). Shares that meet the pool channel's target are forwarded to the pool,
 //! blocks are submitted to the gateway's own node.
 use super::msg::ShareItem;
+use crate::addr::script_for_address;
 use super::verify::VERSION_MASK;
 use crate::diff::{hashes_per_share, target_from_difficulty};
 use crate::pool::{Epoch, ShareResult, MINER_VERSION_MASK, POOL_VERSION_SHIFT};
@@ -14,12 +15,13 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, watch, Semaphore};
+use tokio::sync::{mpsc, oneshot, watch, Semaphore};
 use tokio::time::{sleep_until, timeout, Instant as TokioInstant};
 
 const MAX_LINE: usize = 8192;
@@ -49,6 +51,9 @@ pub struct StratumGwCfg {
     pub min_job_interval_ms: u64,
     #[serde(default = "d_maxjob")]
     pub max_job_interval_ms: u64,
+    /// Refuse users that are not `<payout address>.<worker>`. Otherwise they mine for the gateway's default payout address.
+    #[serde(default)]
+    pub require_address: bool,
 }
 
 impl Default for StratumGwCfg {
@@ -68,7 +73,9 @@ fn d_maxjob() -> u64 { 30_000 }
 
 /// What the front end hands to the gateway's pool connection.
 pub enum Fwd {
-    Share { template_id: u32, item: ShareItem },
+    /// A worker needs a channel for this payout script; the gateway opens it at the pool (or answers from its cache).
+    Open { script: Vec<u8>, reply: oneshot::Sender<std::result::Result<u32, String>> },
+    Share { channel: u32, template_id: u32, item: ShareItem },
     Block { template_id: u32, variant: u32, height: u32, hash: [u8; 32] },
 }
 
@@ -85,8 +92,12 @@ pub struct GwStats {
 
 pub struct Shared {
     pub epoch: watch::Receiver<Option<Arc<Epoch>>>,
-    /// Share target of the pool channel; shares meeting it are forwarded.
-    pub pool_target: watch::Receiver<[u8; 32]>,
+    /// Share target of every open pool channel; shares meeting their channel's target are forwarded.
+    pub targets: Arc<RwLock<HashMap<u32, [u8; 32]>>>,
+    /// Address prefix of the network, for parsing `<address>.<worker>` users.
+    pub hrp: String,
+    /// Payout script of users that do not name an address.
+    pub default_script: Vec<u8>,
     pub fwd: mpsc::UnboundedSender<Fwd>,
     pub node: Arc<NodeRpc>,
     pub stats: GwStats,
@@ -144,6 +155,7 @@ struct Session {
     authorized: bool,
     started: bool,
     worker: String,
+    channel: u32,
     difficulty: f64,
     target: [u8; 32],
     prev: Option<(f64, [u8; 32], Instant)>,
@@ -191,7 +203,7 @@ impl Session {
         let difficulty = cfg.initial_difficulty.clamp(cfg.min_difficulty, cfg.max_difficulty);
         let epoch_rx = sh.epoch.clone();
         Self {
-            cfg, sh, id, epoch_rx, subscribed: false, authorized: false, started: false, worker: String::new(), difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0,
+            cfg, sh, id, epoch_rx, subscribed: false, authorized: false, started: false, worker: String::new(), channel: 0, difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0,
             rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(), next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_adjust: now,
             shares_since_adjust: 0, bad: 0,
         }
@@ -252,12 +264,7 @@ impl Session {
                 self.maybe_start(wr).await
             }
             "mining.configure" => self.configure(wr, &id, &req.params).await,
-            "mining.authorize" => {
-                self.worker = req.params.get(0).and_then(Value::as_str).unwrap_or("worker").chars().take(64).collect();
-                self.authorized = true;
-                self.reply(wr, &id, "true", "null").await?;
-                self.maybe_start(wr).await
-            }
+            "mining.authorize" => self.authorize(wr, &id, &req.params).await,
             "mining.suggest_difficulty" => {
                 if let Some(d) = req.params.get(0).and_then(Value::as_f64) {
                     self.set_difficulty(wr, d).await?;
@@ -291,6 +298,38 @@ impl Session {
             }
         }
         self.reply(wr, id, &Value::Object(result).to_string(), "null").await
+    }
+
+    /// User `<payout address>.<worker>`: the address selects the pool channel (and therefore who is credited), anything else uses the default one.
+    async fn authorize(&mut self, wr: &mut OwnedWriteHalf, id: &str, params: &Value) -> Result<()> {
+        let user: String = params.get(0).and_then(Value::as_str).unwrap_or("worker").chars().take(128).collect();
+        let (account, worker) = user.split_once('.').unwrap_or((user.as_str(), "default"));
+        let script = match script_for_address(account, &self.sh.hrp) {
+            Ok(s) => s,
+            Err(_) if !self.cfg.require_address => self.sh.default_script.clone(),
+            Err(_) => {
+                self.bad += 1;
+                if self.bad > 10 {
+                    bail!("too many failed authorizations");
+                }
+                return self.reply(wr, id, "false", "[24,\"User must be <payout address>.<worker>\",null]").await;
+            }
+        };
+        let (tx, rx) = oneshot::channel();
+        if self.sh.fwd.send(Fwd::Open { script, reply: tx }).is_err() {
+            bail!("gateway is shutting down");
+        }
+        match timeout(Duration::from_secs(5), rx).await {
+            Ok(Ok(Ok(ch))) => {
+                self.channel = ch;
+                self.worker = worker.chars().take(64).collect();
+                self.authorized = true;
+                self.reply(wr, id, "true", "null").await?;
+                self.maybe_start(wr).await
+            }
+            Ok(Ok(Err(why))) => self.reply(wr, id, "false", &format!("[20,{},null]", json!(why))).await,
+            _ => self.reply(wr, id, "false", "[20,\"Pool did not open a channel\",null]").await,
+        }
     }
 
     async fn maybe_start(&mut self, wr: &mut OwnedWriteHalf) -> Result<()> {
@@ -395,10 +434,11 @@ impl Session {
                 self.count_ok(credit);
                 let hash = header_hash(&cand.header(version, ntime, nonce));
                 let template_id = epoch.id as u32;
-                if result == ShareResult::Block || meets_target(&hash, &self.sh.pool_target.borrow()) {
+                let channel_target = self.sh.targets.read().unwrap().get(&self.channel).copied().unwrap_or([0u8; 32]);
+                if result == ShareResult::Block || meets_target(&hash, &channel_target) {
                     let item = ShareItem { variant: cand_idx as u32, nonce, ntime_delta: ntime.saturating_sub(cand.curtime), version_bits: version & VERSION_MASK };
                     self.sh.stats.forwarded.fetch_add(1, Ordering::Relaxed);
-                    let _ = self.sh.fwd.send(Fwd::Share { template_id, item });
+                    let _ = self.sh.fwd.send(Fwd::Share { channel: self.channel, template_id, item });
                 }
                 if result == ShareResult::Block {
                     self.sh.stats.blocks.fetch_add(1, Ordering::Relaxed);

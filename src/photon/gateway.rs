@@ -20,11 +20,11 @@ use crate::tx::{merkle_branch, merkle_root, put_varint, sha256d};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 
 #[derive(Deserialize, Clone)]
 pub struct GatewayCfg {
@@ -133,10 +133,10 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
 
     let node = Arc::new(node);
     let (epoch_tx, epoch_rx) = watch::channel::<Option<Arc<Epoch>>>(None);
-    let (target_tx, target_rx) = watch::channel(target_from_difficulty(cfg.share_difficulty));
+    let targets: Arc<RwLock<HashMap<u32, [u8; 32]>>> = Arc::new(RwLock::new(HashMap::new()));
     let (fwd_tx, mut fwd_rx) = mpsc::unbounded_channel::<Fwd>();
     if !cfg.stratum.listen.is_empty() {
-        let shared = Arc::new(Shared { epoch: epoch_rx, pool_target: target_rx, fwd: fwd_tx.clone(), node: node.clone(), stats: Default::default() });
+        let shared = Arc::new(Shared { epoch: epoch_rx, targets: targets.clone(), hrp: net.to_string(), default_script: my_script.clone(), fwd: fwd_tx.clone(), node: node.clone(), stats: Default::default() });
         let scfg = cfg.stratum.clone();
         tokio::spawn(async move {
             if let Err(e) = gateway_stratum::serve(scfg, shared).await {
@@ -144,28 +144,43 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
             }
         });
     }
+    // channels: one per payout script; the first (request 1) belongs to `payout_address` and serves users without an address and the CPU miner
     let mut channel: Option<u32> = None;
-    let mut target = target_from_difficulty(cfg.share_difficulty);
+    let mut chans: HashMap<Vec<u8>, u32> = HashMap::new();
+    let mut open_waiters: HashMap<u32, (Vec<u8>, Vec<oneshot::Sender<std::result::Result<u32, String>>>)> = HashMap::new();
+    let mut open_order: VecDeque<u32> = VecDeque::new();
+    let mut proof_queue: VecDeque<Vec<u8>> = VecDeque::new();
+    let mut next_request = 2u32;
     let mut plans: BTreeMap<u32, PayoutPlan> = BTreeMap::new();
     let mut commits: HashMap<u32, EpochCommit> = HashMap::new();
     let mut tpl: Option<Tpl> = None;
     let mut next_id = 1u32;
     let (mut nonce_cursor, mut variant_cursor) = (0u32, 0usize);
-    let mut pending: Vec<(u32, ShareItem)> = Vec::new();
+    let mut pending: Vec<(u32, u32, ShareItem)> = Vec::new();
     let mut last_tip = String::new();
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     let mut blocks_found = 0u32;
     let mut rejects_logged = 0u32;
     let mut mining = false;
-    let mut my_proof_checked: std::collections::HashSet<u32> = Default::default();
+    let mut my_proof_checked: std::collections::HashSet<(u32, Vec<u8>)> = Default::default();
 
     loop {
         tokio::select! {
             biased;
             f = conn.recv() => {
                 match Msg::decode(&f?)? {
-                    Msg::OpenChannelAck(a) => { channel = Some(a.channel); target = a.target; target_tx.send_replace(a.target); tracing::info!("gateway: channel {} open, plans from height {}", a.channel, a.plan_height); }
-                    Msg::SetTarget(t) => { target = t.target; target_tx.send_replace(t.target); }
+                    Msg::OpenChannelAck(a) => {
+                        targets.write().unwrap().insert(a.channel, a.target);
+                        open_order.retain(|r| *r != a.request);
+                        let script = if a.request == 1 { Some(my_script.clone()) } else { open_waiters.get(&a.request).map(|w| w.0.clone()) };
+                        if let Some(script) = script {
+                            chans.insert(script, a.channel);
+                        }
+                        if a.request == 1 { channel = Some(a.channel); }
+                        for w in open_waiters.remove(&a.request).map(|w| w.1).unwrap_or_default() { let _ = w.send(Ok(a.channel)); }
+                        tracing::info!("gateway: channel {} open (request {}), plans from height {}", a.channel, a.request, a.plan_height);
+                    }
+                    Msg::SetTarget(t) => { targets.write().unwrap().insert(t.channel, t.target); }
                     Msg::NewTip(_) => {}
                     Msg::PayoutPlan(p) => {
                         match check_plan(&p, &rules) {
@@ -178,14 +193,19 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                             if p.accounting_root != c.root { bail!("EpochCommit root differs from the plan"); }
                         }
                         commits.insert(c.height, c.clone());
-                        conn.send(&Msg::GetProof(GetProof { height: c.height, script: my_script.clone() }).encode()).await?;
+                        // every channel's owner can check its own credit; the pool answers each request with a Proof or a Reject(8), in order
+                        for script in chans.keys() {
+                            proof_queue.push_back(script.clone());
+                            conn.send(&Msg::GetProof(GetProof { height: c.height, script: script.clone() }).encode()).await?;
+                        }
                     }
                     Msg::Proof(pr) => {
+                        let Some(script) = proof_queue.pop_front() else { continue };
                         let root = commits.get(&pr.height).map(|c| c.root).unwrap_or(pr.root);
-                        if root != pr.root || !merkle::verify(&pr.root, pr.leaves, pr.index, &my_script, pr.credit, &pr.siblings) {
+                        if root != pr.root || !merkle::verify(&pr.root, pr.leaves, pr.index, &script, pr.credit, &pr.siblings) {
                             bail!("accounting proof for height {} does not verify", pr.height);
                         }
-                        if my_proof_checked.insert(pr.height) { tracing::info!("gateway: my credit {} verified against the committed root at height {}", pr.credit, pr.height); }
+                        if my_proof_checked.insert((pr.height, script.clone())) { tracing::info!("gateway: credit {} of {} verified against the committed root at height {}", pr.credit, hex::encode(&script), pr.height); }
                     }
                     Msg::ShareAck(a) => {
                         if !a.rejects.is_empty() && rejects_logged < 5 {
@@ -203,7 +223,14 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                             }
                         }
                     }
-                    Msg::Reject(r) if r.code == 8 => tracing::debug!("gateway: {}", r.reason),
+                    Msg::Reject(r) if r.code == 8 => { proof_queue.pop_front(); tracing::debug!("gateway: {}", r.reason); }
+                    // refusals of OpenChannel arrive in request order
+                    Msg::Reject(r) if matches!(r.code, 1 | 2 | 3) => {
+                        if let Some(req) = open_order.pop_front() {
+                            if req == 1 { bail!("pool refused the default channel: {}", r.reason); }
+                            for w in open_waiters.remove(&req).map(|w| w.1).unwrap_or_default() { let _ = w.send(Err(r.reason.clone())); }
+                        }
+                    }
                     Msg::Reject(r) => tracing::warn!("gateway: pool rejected: {} ({})", r.reason, r.code),
                     Msg::Disconnect(r) => bail!("pool disconnected us: {}", r.reason),
                     _ => {}
@@ -216,12 +243,25 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                 for ev in events {
                     match ev {
                         // shares of the previous template stay valid for the pool's grace period, so they are sent under their own template id
-                        Fwd::Share { template_id, item } => pending.push((template_id, item)),
+                        Fwd::Share { channel: ch, template_id, item } => pending.push((ch, template_id, item)),
+                        Fwd::Open { script, reply } => {
+                            if let Some(ch) = chans.get(&script) {
+                                let _ = reply.send(Ok(*ch));
+                            } else if let Some(w) = open_waiters.values_mut().find(|w| w.0 == script) {
+                                w.1.push(reply);
+                            } else {
+                                let request = next_request;
+                                next_request += 1;
+                                conn.send(&Msg::OpenChannel(OpenChannel { request, payout_script: script.clone(), target: target_from_difficulty(cfg.share_difficulty) }).encode()).await?;
+                                open_order.push_back(request);
+                                open_waiters.insert(request, (script, vec![reply]));
+                            }
+                        }
                         Fwd::Block { template_id, variant, height, hash } => blocks.push(BlockFound { template_id, variant, height, hash }),
                     }
                 }
                 // shares go out immediately: a block changes the tip and the pool drops templates of the old tip
-                if let Some(ch) = channel { send_pending(&mut conn, ch, &mut pending).await?; }
+                send_pending(&mut conn, &mut pending).await?;
                 for b in blocks {
                     blocks_found += 1;
                     conn.send(&Msg::BlockFound(b).encode()).await?;
@@ -233,8 +273,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                 if best != last_tip {
                     epoch_tx.send_replace(None);
                     let height = node.call("getblockcount", json!([])).await?.as_u64().unwrap_or(0) as u32 + 1;
-                    if let (Some(plan), Some(ch)) = (plans.get(&height).cloned(), channel) {
-                        let _ = ch;
+                    if let (Some(plan), Some(_)) = (plans.get(&height).cloned(), channel) {
                         match build_template(&node, &cfg, &plan, next_id).await {
                             Ok(t) => {
                                 announce(&mut conn, &t, &plan).await?;
@@ -250,7 +289,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                         }
                     }
                 }
-                if let Some(ch) = channel { send_pending(&mut conn, ch, &mut pending).await?; }
+                send_pending(&mut conn, &mut pending).await?;
             }
             _ = tokio::task::yield_now(), if cfg.software_miner && mining && tpl.is_some() && channel.is_some() => {
                 let t = tpl.as_ref().unwrap();
@@ -258,8 +297,9 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                 for _ in 0..20_000 {
                     let hash = header_hash(&t.header(variant_cursor, nonce_cursor));
                     let block = meets_target(&hash, &net_target);
-                    if block || meets_target(&hash, &target) {
-                        pending.push((t.id, ShareItem { variant: variant_cursor as u32, nonce: nonce_cursor, ntime_delta: 0, version_bits: t.version & VERSION_MASK }));
+                    let own_target = channel.and_then(|c| targets.read().unwrap().get(&c).copied()).unwrap_or([0u8; 32]);
+                    if block || meets_target(&hash, &own_target) {
+                        pending.push((channel.unwrap_or(0), t.id, ShareItem { variant: variant_cursor as u32, nonce: nonce_cursor, ntime_delta: 0, version_bits: t.version & VERSION_MASK }));
                     }
                     if block {
                         let hex_block = hex::encode(t.block(variant_cursor, nonce_cursor));
@@ -269,7 +309,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                             blocks_found += 1;
                             conn.send(&Msg::BlockFound(BlockFound { template_id: t.id, variant: variant_cursor as u32, height: t.height, hash }).encode()).await?;
                         }
-                        if let Some(ch) = channel { send_pending(&mut conn, ch, &mut pending).await?; }
+                        send_pending(&mut conn, &mut pending).await?;
                         mining = false;
                         if cfg.stop_after_blocks.map_or(false, |n| blocks_found >= n) { return Ok(()); }
                         break;
@@ -283,12 +323,12 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     }
 }
 
-async fn send_pending(conn: &mut NoiseConn<TcpStream>, channel: u32, pending: &mut Vec<(u32, ShareItem)>) -> Result<()> {
-    let mut by_template: BTreeMap<u32, Vec<ShareItem>> = BTreeMap::new();
-    for (id, item) in pending.drain(..) {
-        by_template.entry(id).or_default().push(item);
+async fn send_pending(conn: &mut NoiseConn<TcpStream>, pending: &mut Vec<(u32, u32, ShareItem)>) -> Result<()> {
+    let mut groups: BTreeMap<(u32, u32), Vec<ShareItem>> = BTreeMap::new();
+    for (channel, template_id, item) in pending.drain(..) {
+        groups.entry((channel, template_id)).or_default().push(item);
     }
-    for (template_id, items) in by_template {
+    for ((channel, template_id), items) in groups {
         for chunk in items.chunks(MAX_SHARES_PER_MSG) {
             conn.send(&Msg::Shares(Shares { channel, template_id, items: chunk.to_vec() }).encode()).await?;
         }

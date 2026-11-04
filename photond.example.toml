@@ -129,6 +129,8 @@ key_file = "photon.key"
 # fee_address = "be1q..."
 fee_pct = 1.0
 max_outputs = 128
+# Payout addresses (channels) one gateway connection may serve.
+max_channels_per_connection = 64
 # Smallest payout part in parts per million of the block reward; smaller credits carry over.
 min_ppm = 100
 window_factor = 2.0

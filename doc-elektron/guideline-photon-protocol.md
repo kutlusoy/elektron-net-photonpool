@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.6 (trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
+- **Version:** 0.7 (several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -256,6 +256,16 @@ Another limit found by the generator: the node's RPC body limit is 32 MB. A cand
 **Selection.** Instead of first come, first served, the probability of each announce is its own trust probability divided by `max(1, sum of the probabilities of all connected gateways / max_checks_per_tip)`. The expected number of checks per tip is then the budget, and the share of the budget a gateway receives is proportional to its own probability: new or failed gateways are checked much more often than established ones (0.5 against 0.02 is 25 times), and an established gateway never drops to zero, which a strict "least trusted first" order would allow (a cheater would only have to behave until it is trusted). The hard cap `max_checks_per_tip` stays.
 
 Status: `/api/v1/summary` reports `photon.trustEntries` and `photon.sumP`. Tests: 8 unit tests of the book (shared keys, least trusted key decides, ban and re-ban, forgiveness, pruning, address without ban) and `test/step17_photon_session.py` (trust is remembered, the banned script is refused on reconnect and after a restart of the pool, the honest gateway reconnects).
+
+## 14e. Several channels per gateway (v0.7)
+
+A farm that serves several customers or sub-farms runs one gateway and gives each of them its own payout address as the Stratum user name: `<payout address>.<worker>`. The gateway opens one pool channel per distinct address on demand (the first worker of an address triggers `OpenChannel`, later workers reuse it; the authorize reply waits for the pool, at most 5 seconds, and carries the pool's reason when it refuses). Users without an address use the default channel (`payout_address`); with `[stratum] require_address = true` they are refused.
+
+- **Credit:** every ASIC share is forwarded on its worker's channel and credited with that channel's difficulty to the account of that payout script. The block reward is not affected: the coinbase pays the plan to everybody, whichever worker finds the block.
+- **Channel targets:** the pool adjusts the share target per channel (`SetTarget`); the gateway forwards a share when it meets the target of its worker's channel.
+- **Limits:** `max_channels_per_connection` at the pool (default 64, a refused open reaches the worker as `channel limit reached`); all channels of a gateway share one connection, one set of announces and one spot check budget, and their payout scripts are all keys of the gateway's remembered trust (a banned script blocks only itself, but a failed check counts against every script of the connection).
+- **Verification:** after every `EpochCommit` the gateway requests a proof for each channel's script and checks it against the committed root; the pool answers each request with a `Proof` or a `Reject(8)` (no credit yet), in order.
+- **Test:** `test/step19_multi_channel.py`: workers of two addresses mine alternately on one gateway, a worker without an address uses the default channel, a fourth address is refused because the pool allows three channels, the latest coinbase pays each worker address 49.5 % of the reward and the pool fee 1 %, and both owners' credits verify. Passed 5 of 5 runs.
 
 ## 15. Checklist
 
