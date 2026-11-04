@@ -27,7 +27,7 @@ A gateway is a small program (`photond gateway`) that a mining farm runs next to
 ## Tests
 
 ```text
-cargo test                                  # 77 unit tests
+cargo test                                  # 83 unit tests
 ELEKTROND=... test/run_all.sh               # integration steps 1-23 against regtest nodes (see the header of run_all.sh)
 ```
 
