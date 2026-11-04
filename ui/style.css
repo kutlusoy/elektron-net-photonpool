@@ -181,12 +181,13 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .pane.front pre, .pane.front .tty { font-size: 1.08em; }
 .grid.depth { perspective: 1300px; perspective-origin: calc(50% + var(--mx, 0) * 70px) calc(50% + var(--my, 0) * 45px); }
 .grid.depth .pane.front { box-shadow: 0 0 0 1px var(--c1), 0 0 46px color-mix(in srgb, var(--c1) 30%, transparent), 0 30px 80px rgba(0, 0, 0, .7); }
-.grid.depth .pane:not(.front) {
+.grid.depth .pane:not(.front), .grid.depth .pane.leaving {
   transform: translate3d(calc(var(--dx, 0) * 300px), calc(var(--dy, 0) * 170px), -380px) rotateY(calc(var(--dx, 0) * -30deg)) rotateX(calc(var(--dy, 0) * 20deg));
   filter: blur(3px) brightness(.8) saturate(.9);
   opacity: .85; cursor: pointer;
 }
-.grid.depth .pane:not(.front) > * { pointer-events: none; }
+.grid.depth .pane:not(.front) > *, .grid.depth .pane.leaving > * { pointer-events: none; }
+.grid.depth .pane.front.leaving { z-index: 4; box-shadow: none; }
 .pane h2 .max { margin-left: 10px; padding: 0 5px; font: inherit; line-height: 1.2; color: var(--dim); background: none; border: 1px solid transparent; cursor: pointer; }
 .pane h2 .max:hover, .pane h2 .max:focus-visible { color: var(--c1); border-color: var(--c1); outline: none; }
 @media (max-width: 720px) { .pane h2 .max { display: none; } }
