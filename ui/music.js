@@ -93,8 +93,8 @@ const Music = (() => {
   /* ---- player ---- */
   // Two sources behind one set of controls: audio files from the server's music folder (streamed by an <audio> element, looped as
   // a playlist) when there are any, otherwise the generated score above.
-  const KEY = 'photon.music.volume';
-  const P = { ctx: null, b: null, master: null, timer: 0, next: 0, step: 0, t0: 0, state: 'stopped', vol: 0.35, tracks: [], idx: 0, audio: null, an: null, actx: null, onTrack: () => {} };
+  const KEY = 'photon.music.volume.v2'; // new key: older saved values (default was higher) do not apply
+  const P = { ctx: null, b: null, master: null, timer: 0, next: 0, step: 0, t0: 0, state: 'stopped', vol: 0.28, tracks: [], idx: 0, audio: null, an: null, actx: null, onTrack: () => {} };
   try { const v = parseFloat(localStorage.getItem(KEY)); if (v >= 0 && v <= 1) P.vol = v; } catch (_) { /* storage unavailable */ }
   const gainOf = (v) => v * v;
   const files = () => P.tracks.length > 0;
