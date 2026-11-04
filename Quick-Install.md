@@ -103,7 +103,7 @@ sudoedit /etc/photond/photond.toml
 sudo systemctl enable --now photond
 ```
 
-Files go to `/opt/photond`, `/etc/photond` and `/var/lib/photond`; the pool stops with `SIGINT` so that pending share totals reach the ledger. Details: [`doc-elektron/guideline-systemd.md`](doc-elektron/guideline-systemd.md).
+Files go to `/opt/photond`, `/etc/photond` and `/var/lib/photond`; the pool stops with `SIGINT` so that pending share totals reach the ledger. Details: [`doc-elektron/guideline-systemd.md`](doc-elektron/guideline-systemd.md). For the public pool page over HTTPS without Docker, use `systemd/Caddyfile.example` (section 4 of that guideline).
 
 ## 5. Connect miners
 

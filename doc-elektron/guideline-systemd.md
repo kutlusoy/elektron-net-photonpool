@@ -16,6 +16,7 @@
 | `systemd/photon-gateway.service` | a farm's gateway (`photond gateway --gateway-config /etc/photond/gateway.toml`) |
 | `systemd/elektrond.service` | example for the node; adapt the paths |
 | `systemd/photond.sysusers.conf` | creates the account `photon` |
+| `systemd/Caddyfile.example` | Caddy in front of the public pool page (HTTPS, installation without Docker) |
 | `systemd/install.sh` | installs the binary, the UI, the units and example configurations |
 
 ## 2. Installation
@@ -41,11 +42,25 @@ The installer never overwrites a configuration file, does not enable or start an
 - **Hardening:** no new privileges, read-only system, no capabilities, restricted address families and system calls, private `/tmp` and devices, write access only to `/var/lib/photond`. `ProtectHome=read-only` lets the pool read the node's cookie file under a home directory; set `ProtectHome=true` and use `auth = "user:password"` or `"env:VAR"` instead to close that. The units were checked with `systemd-analyze verify` (only the missing binary is reported on a machine without the installation).
 - **Firewall:** the pool's Stratum (default 3333), Photon (3340) and public page ports are meant to be reachable; the admin API (default `127.0.0.1:8081`) is not. The gateway's Stratum port belongs on the farm network only, because it has no authentication.
 
-## 4. Node unit
+## 4. Public pool page with Caddy
+
+The pool serves its public page (statistics, connection instructions with ports and modes, blocks, payouts, address lookup) and the personal miner page on a separate listener (`[public]`, default `127.0.0.1:8082`). Users reach it over the internet through a reverse proxy; `systemd/Caddyfile.example` is a ready block (installed as `/etc/photond/Caddyfile.example`) that gets the certificate by itself:
+
+```text
+pool.example.org {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8082
+	header { Strict-Transport-Security "max-age=31536000"; -Server }
+}
+```
+
+Set in `photond.toml` `[public] enabled = true`, `stratum_host = "pool.example.org"` (the host that miners connect to) and `trust_proxy = true` (the client address comes from `X-Forwarded-For`, which Caddy sets and which a client cannot forge through it). Open ports 80 and 443 for Caddy. Only `8082` is proxied: the operator UI and the admin API (`8081`) stay on loopback. Miners connect to the Stratum ports (default 3333) and gateways to the Photon port (3340) directly, because they are not HTTP; Stratum has no TLS of its own (use `stunnel` in front if you need it). The Docker setups write their own Caddyfile (`docker/Caddyfile`, and `stack/install.sh` for the complete stack). The example was not run against a Caddy binary on the development machine; check it with `caddy validate --config /etc/caddy/Caddyfile`.
+
+## 5. Node unit
 
 `systemd/elektrond.service` is an example only: the node's own documentation is authoritative. Points that matter for the pool: `TimeoutStopSec=600` (a clean shutdown protects the chainstate), `allowignoredconf=1` in the node configuration when `-conf` is used, and RPC bound to loopback.
 
-## 5. Checklist
+## 6. Checklist
 
 - [ ] `photon` account exists (`systemd-sysusers`), `/etc/photond/*.toml` readable by group `photon`.
 - [ ] `check` prints all candidates valid before the service is enabled.

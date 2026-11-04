@@ -42,5 +42,7 @@ Review and operation
 
 - Test at the node: the cost of validating and attesting a block stays the same while the UTXO set grows 31-fold, and follows the number of transactions (`step23`).
 
+- `systemd/Caddyfile.example`: Caddy with automatic HTTPS in front of the public pool page for installations without Docker, documented with the matching `[public]` settings.
+
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.

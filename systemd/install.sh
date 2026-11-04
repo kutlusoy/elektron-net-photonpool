@@ -24,6 +24,7 @@ if [ "$what" = pool ] || [ "$what" = both ]; then
     sed -i 's|^ui_dir = "ui"|ui_dir = "/opt/photond/ui"|' "$d/etc/photond/photond.toml"
   fi
   [ -e "$d/etc/photond/photond.env" ] || { umask 077; : > "$d/etc/photond/photond.env"; }
+  install -m 0644 "$here/systemd/Caddyfile.example" "$d/etc/photond/Caddyfile.example"
 fi
 if [ "$what" = gateway ] || [ "$what" = both ]; then
   install -m 0644 "$here/systemd/photon-gateway.service" "$d/usr/lib/systemd/system/photon-gateway.service"
@@ -46,4 +47,5 @@ Next:
   3. start it:    systemctl enable --now photond            (pool)
                   systemctl enable --now photon-gateway     (gateway)
   4. watch it:    journalctl -u photond -f
+  5. public page: see /etc/photond/Caddyfile.example (Caddy with automatic HTTPS in front of the pool page, pool only)
 MSG
