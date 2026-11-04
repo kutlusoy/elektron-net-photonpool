@@ -93,8 +93,9 @@ function render() {
     `${span('dim', 'shares 1h   ')}${esc(sh(a.shares1h))}`,
     `${span('dim', 'shares 24h  ')}${esc(sh(a.shares24h))}`,
   ].join('\n');
-  $('#pane-workers').innerHTML = [span('row-h', fit('WORKER', wide('workers') ? 40 : 16, wide('workers')) + pad('MODE', 7) + lpad('HASHRATE', 12) + lpad('DIFF', 9) + lpad('OK', 8) + lpad('STALE', 7) + lpad('BAD', 5) + '  LAST')]
-    .concat(a.workerList.map((w) => `${wide('workers') ? pad(w.name, 40) : pad(trunc(w.name, 15), 16)}${span('c2', pad(modeLabel[w.mode] || w.mode, 7))}${lpad(fmtHash(w.hashrate), 12)}${lpad(num(w.difficulty), 9)}${lpad(num(w.accepted), 8)}${span(w.stale > 0 ? 'warn' : 'dim', lpad(num(w.stale), 7))}${lpad(num(w.invalid), 5)}  ${w.seen < 120 ? span('ok', w.seen + 's') : span('dim', ago(Date.now() / 1000 - w.seen))}`))
+  const wwk = colw(a.workerList.map((w) => w.name), 6);
+  $('#pane-workers').innerHTML = [span('row-h', fit('WORKER', wide('workers') ? wwk : 16, wide('workers')) + pad('MODE', 7) + lpad('HASHRATE', 12) + lpad('DIFF', 9) + lpad('OK', 8) + lpad('STALE', 7) + lpad('BAD', 5) + '  LAST')]
+    .concat(a.workerList.map((w) => `${wide('workers') ? pad(w.name, wwk) : pad(trunc(w.name, 15), 16)}${span('c2', pad(modeLabel[w.mode] || w.mode, 7))}${lpad(fmtHash(w.hashrate), 12)}${lpad(num(w.difficulty), 9)}${lpad(num(w.accepted), 8)}${span(w.stale > 0 ? 'warn' : 'dim', lpad(num(w.stale), 7))}${lpad(num(w.invalid), 5)}  ${w.seen < 120 ? span('ok', w.seen + 's') : span('dim', ago(Date.now() / 1000 - w.seen))}`))
     .concat(a.workerList.length ? [] : [span('dim', 'no worker is connected right now')]).join('\n');
   $('#pane-pend').innerHTML = [span('row-h', pad('BLOCK', 9) + pad('AMOUNT', 14) + 'STATE')]
     .concat(a.credits.map((c) => {

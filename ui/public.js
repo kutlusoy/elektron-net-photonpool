@@ -93,11 +93,12 @@ function render() {
     .concat(['', span('dim', '* port also accepts m=<mode>'),
       ...p.modes.map((m) => `${span('c2', pad((modeLabel[m.mode] || m.mode).toLowerCase(), 6))}${span('dim', modeShort[m.mode] || '')}`),
       '', span('dim', `min payout ${leptons(p.minPayoutLeptons)} leptons`)]).join('\n');
-  $('#pane-blocks').innerHTML = [span('row-h', pad('HEIGHT', 9) + pad('AGE', 8) + pad('MODE', 7) + fit('FINDER', wide('blocks') ? 40 : 17, wide('blocks')) + 'STATE')]
+  const fwk = colw(view.blocks.map((b) => b.finder), 6);
+  $('#pane-blocks').innerHTML = [span('row-h', pad('HEIGHT', 9) + pad('AGE', 8) + pad('MODE', 7) + fit('FINDER', wide('blocks') ? fwk : 17, wide('blocks')) + 'STATE')]
     .concat(view.blocks.map((b) => {
       const a = Date.now() / 1000 - b.time;
       const cls = b.status === 'mature' ? 'dim' : b.status === 'orphaned' ? 'err' : 'c3';
-      return `${linkPad(b.url, num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 8)}${pad(modeLabel[b.mode] || b.mode, 7)}${fit(b.finder, wide('blocks') ? 40 : 17, wide('blocks'))}${span(cls, b.status)}`;
+      return `${linkPad(b.url, num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 8)}${pad(modeLabel[b.mode] || b.mode, 7)}${fit(b.finder, wide('blocks') ? fwk : 17, wide('blocks'))}${span(cls, b.status)}`;
     })).join('\n');
   $('#pane-payouts').innerHTML = [span('row-h', pad('AGE', 8) + pad('AMOUNT', 15) + 'TX')]
     .concat(view.payouts.map((x) => {

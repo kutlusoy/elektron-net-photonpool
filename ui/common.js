@@ -22,6 +22,8 @@ const workerLabel = (name) => {
 };
 // A maximized pane (depth.js) shows complete texts instead of the shortened ones.
 const wide = (id) => !!document.querySelector('.p-' + id + '.front');
+// Column width that fits the longest value (maximized panes only).
+const colw = (vals, min) => Math.max(min, ...vals.map((v) => String(v).length)) + 2;
 const fit = (s, n, w) => (w ? String(s).padEnd(n) : pad(s, n));
 const short = (h, a = 8, b = 6) => (h.length > a + b + 1 ? h.slice(0, a) + '..' + h.slice(-b) : h);
 
