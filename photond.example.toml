@@ -1,5 +1,7 @@
 # photond configuration for a bare-metal install.
 # Copy to photond.toml and adjust: cp photond.example.toml photond.toml
+# This file is for the installation WITHOUT Docker (node on the same host). With Docker use docker/photond.docker.toml instead:
+# there the node is reachable as http://node:8332 and its cookie is /node/.cookie.
 #
 # Every option is listed with its default and the values it accepts ("Options"). Values here are the defaults unless a line says otherwise.
 # Apply a change with `systemctl restart photond`. Check a file without starting the pool: `photond -c photond.toml check`.
