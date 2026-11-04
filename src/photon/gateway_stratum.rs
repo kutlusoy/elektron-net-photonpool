@@ -7,7 +7,7 @@ use super::msg::ShareItem;
 use crate::addr::script_for_address;
 use super::verify::VERSION_MASK;
 use crate::diff::{hashes_per_share, target_from_difficulty};
-use crate::pool::{Epoch, ShareResult, MINER_VERSION_MASK, POOL_VERSION_SHIFT};
+use crate::pool::{Epoch, ShareResult, MINER_VERSION_MASK, NTIME_SLOTS, POOL_VERSION_SHIFT};
 use crate::rpc::NodeRpc;
 use crate::template::{header_hash, meets_target};
 use anyhow::{anyhow, bail, Result};
@@ -28,6 +28,16 @@ const MAX_LINE: usize = 8192;
 /// Longest JSON line that ESP-Miner (Bitaxe and other ESP32 based miners) accepts: `STRATUM_V1_MAX_JSON_LINE_SIZE`.
 pub const ESP_MAX_LINE: usize = 16_384;
 static OVERSIZED_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Hashes one coinbase variant offers per epoch: 2^32 nonces, 2^16 BIP 320 version bits (as slices or as the miner's own rolling) and the nTime slots.
+pub fn variant_space() -> f64 {
+    4_294_967_296.0 * 65_536.0 * NTIME_SLOTS as f64
+}
+
+/// Number of variants a farm of `hashrate` H/s needs for one epoch of `epoch_secs` seconds, with 50 % headroom.
+pub fn variants_for(hashrate: f64, epoch_secs: f64) -> usize {
+    (1.5 * hashrate * epoch_secs / variant_space()).ceil() as usize
+}
 
 /// Size of a `mining.notify` line for a coinbase with `p2wpkh_outputs` payout outputs and a merkle branch of `branch_depth` hashes:
 /// the coinbase is sent in hex (two characters per byte), plus about 260 bytes of fixed text and 68 bytes per branch hash.
@@ -61,6 +71,13 @@ pub struct StratumGwCfg {
     pub min_job_interval_ms: u64,
     #[serde(default = "d_maxjob")]
     pub max_job_interval_ms: u64,
+    /// Let every unit of work use all 16 BIP 320 version bits (default). The pool-style split into 16 slices uses 12 bits per unit and makes the
+    /// ASICs ask for a new job 16 times as often; every job carries the whole coinbase, so this is mostly traffic.
+    #[serde(default = "d_true")]
+    pub full_version_roll: bool,
+    /// Test only: pretend every ASIC hashes at this many hashes per second (job pacing and variant sizing), to measure traffic without hardware.
+    #[serde(default)]
+    pub fixed_hashrate: Option<f64>,
     /// Refuse users that are not `<payout address>.<worker>`. Otherwise they mine for the gateway's default payout address.
     #[serde(default)]
     pub require_address: bool,
@@ -72,6 +89,7 @@ impl Default for StratumGwCfg {
     }
 }
 
+fn d_true() -> bool { true }
 fn d_diff() -> f64 { 1024.0 }
 fn d_min() -> f64 { 0.0001 }
 fn d_max() -> f64 { 1.0e12 }
@@ -98,6 +116,8 @@ pub struct GwStats {
     pub invalid: AtomicU64,
     pub forwarded: AtomicU64,
     pub blocks: AtomicU64,
+    pub jobs: AtomicU64,
+    pub bytes_out: AtomicU64,
 }
 
 pub struct Shared {
@@ -111,11 +131,16 @@ pub struct Shared {
     pub fwd: mpsc::UnboundedSender<Fwd>,
     pub node: Arc<NodeRpc>,
     pub stats: GwStats,
+    /// Sum of the estimated hash rates of all ASIC sessions in H/s; the gateway sizes the number of variants with it.
+    pub hashrate: Arc<AtomicU64>,
 }
 
 pub async fn serve(cfg: StratumGwCfg, shared: Arc<Shared>) -> Result<()> {
     let listener = TcpListener::bind(&cfg.listen).await?;
     tracing::info!("gateway stratum listening on {}", cfg.listen);
+    if let Some(h) = cfg.fixed_hashrate {
+        tracing::warn!("gateway stratum: fixed_hashrate {h} H/s per ASIC is set - TEST ONLY");
+    }
     let cfg = Arc::new(cfg);
     let permits = Arc::new(Semaphore::new(cfg.max_connections));
     tokio::spawn(report(shared.clone()));
@@ -144,7 +169,11 @@ async fn report(shared: Arc<Shared>) {
         tick.tick().await;
         let s = &shared.stats;
         let g = |a: &AtomicU64| a.load(Ordering::Relaxed);
-        tracing::info!("gateway stratum: {} ASIC sessions, shares ok {} stale {} dup {} invalid {}, forwarded to pool {}, blocks {}", g(&s.sessions), g(&s.ok), g(&s.stale), g(&s.dup), g(&s.invalid), g(&s.forwarded), g(&s.blocks));
+        let (units, overlap) = shared.epoch.borrow().as_ref().map_or((0, 0), |e| (e.units_used(), e.overlap.load(Ordering::Relaxed)));
+        if overlap > 0 {
+            tracing::warn!("gateway stratum: the work space of this template is used up ({overlap} units handed out twice); raise `variants` or `max_variants`");
+        }
+        tracing::info!("gateway stratum: {} ASIC sessions, {:.1} TH/s, shares ok {} stale {} dup {} invalid {}, forwarded to pool {}, blocks {}, jobs {} ({:.1} MB sent in total), {} work units used in this template", g(&s.sessions), g(&shared.hashrate) as f64 / 1e12, g(&s.ok), g(&s.stale), g(&s.dup), g(&s.invalid), g(&s.forwarded), g(&s.blocks), g(&s.jobs), g(&s.bytes_out) as f64 / 1e6, units);
     }
 }
 
@@ -180,6 +209,13 @@ struct Session {
     last_adjust: Instant,
     shares_since_adjust: u32,
     bad: u32,
+    contrib: u64,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.sh.hashrate.fetch_sub(self.contrib, Ordering::Relaxed);
+    }
 }
 
 #[derive(Deserialize)]
@@ -215,7 +251,7 @@ impl Session {
         Self {
             cfg, sh, id, epoch_rx, subscribed: false, authorized: false, started: false, worker: String::new(), channel: 0, difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0,
             rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(), next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_adjust: now,
-            shares_since_adjust: 0, bad: 0,
+            shares_since_adjust: 0, bad: 0, contrib: 0,
         }
     }
 
@@ -294,7 +330,7 @@ impl Session {
                 let opts = params.get(1);
                 let asked = opts.and_then(|o| o.get("version-rolling.mask")).and_then(Value::as_str).and_then(|m| u32::from_str_radix(m, 16).ok()).unwrap_or(u32::MAX);
                 let min_bits = opts.and_then(|o| o.get("version-rolling.min-bit-count")).and_then(Value::as_u64).unwrap_or(0) as u32;
-                let mask = asked & MINER_VERSION_MASK;
+                let mask = asked & if self.cfg.full_version_roll { crate::photon::verify::VERSION_MASK } else { MINER_VERSION_MASK };
                 if mask != 0 && mask.count_ones() >= min_bits {
                     self.mask = mask;
                     self.rolling_bits = mask.count_ones();
@@ -347,6 +383,12 @@ impl Session {
             return Ok(());
         }
         self.started = true;
+        if let Some(h) = self.cfg.fixed_hashrate {
+            // test knob: this ASIC counts with its pretended hash rate from the start
+            self.hash_est = h;
+            self.sh.hashrate.fetch_add(h as u64, Ordering::Relaxed);
+            self.contrib = h as u64;
+        }
         self.send_difficulty(wr).await?;
         self.send_job(wr, true).await
     }
@@ -371,7 +413,8 @@ impl Session {
 
     fn schedule_next(&mut self) {
         let unit_hashes = 2f64.powi(32 + self.rolling_bits as i32);
-        let secs = if self.hash_est > 0.0 { unit_hashes / self.hash_est * 0.8 } else { 1.0 };
+        let est = self.cfg.fixed_hashrate.unwrap_or(self.hash_est);
+        let secs = if est > 0.0 { unit_hashes / est * 0.8 } else { 1.0 };
         let ms = (secs * 1000.0).clamp(self.cfg.min_job_interval_ms as f64, self.cfg.max_job_interval_ms as f64);
         self.next_job = Instant::now() + Duration::from_millis(ms as u64);
     }
@@ -396,6 +439,8 @@ impl Session {
             tracing::warn!("gateway stratum: a job is {} bytes; ESP32 based miners (Bitaxe) read at most {ESP_MAX_LINE} bytes per line and will not see it. Lower max_outputs at the pool and in this gateway.", msg.len());
         }
         send(wr, msg.as_bytes()).await?;
+        self.sh.stats.jobs.fetch_add(1, Ordering::Relaxed);
+        self.sh.stats.bytes_out.fetch_add(msg.len() as u64, Ordering::Relaxed);
         self.jobs.push_back(JobRef { id, cand: unit.cand, slice: unit.slice, version, epoch });
         while self.jobs.len() > MAX_JOBS {
             self.jobs.pop_front();
@@ -440,7 +485,7 @@ impl Session {
         };
         let cand = &epoch.candidates[cand_idx];
         let (target, credit) = self.accept_target();
-        let result = epoch.check(cand, slice, ntime, version, nonce, &target);
+        let result = epoch.check_with_mask(cand, slice, ntime, version, nonce, &target, self.mask);
         match result {
             ShareResult::Valid | ShareResult::Block => {
                 self.sh.stats.ok.fetch_add(1, Ordering::Relaxed);
@@ -498,7 +543,14 @@ impl Session {
         self.shares_since_adjust += 1;
         self.window_diff += credit;
         let elapsed = self.window_start.elapsed().as_secs_f64();
-        self.hash_est = hashes_per_share(self.window_diff) / elapsed.max(5.0);
+        self.hash_est = self.cfg.fixed_hashrate.unwrap_or_else(|| hashes_per_share(self.window_diff) / elapsed.max(5.0));
+        let now = self.hash_est as u64;
+        if now >= self.contrib {
+            self.sh.hashrate.fetch_add(now - self.contrib, Ordering::Relaxed);
+        } else {
+            self.sh.hashrate.fetch_sub(self.contrib - now, Ordering::Relaxed);
+        }
+        self.contrib = now;
         if elapsed > 120.0 {
             self.window_diff = self.hash_est * 10.0 / 4_294_967_296.0;
             self.window_start = Instant::now() - Duration::from_secs(10);
@@ -524,6 +576,14 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variants_follow_the_hashrate_of_the_farm() {
+        // 100 PH/s for a 60 s block need about 550 variants with headroom; 4.5 PH/s are covered by 16
+        assert!((500..600).contains(&variants_for(100e15, 60.0)), "{}", variants_for(100e15, 60.0));
+        assert!(variants_for(4.5e15, 60.0) <= 25);
+        assert_eq!(variants_for(0.0, 60.0), 0);
+    }
 
     #[test]
     fn the_default_output_limit_fits_the_line_limit_of_esp_miner() {

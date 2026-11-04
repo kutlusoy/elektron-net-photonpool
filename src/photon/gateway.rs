@@ -22,6 +22,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -44,8 +45,13 @@ pub struct GatewayCfg {
     pub fee_pct: f64,
     #[serde(default = "d_nmax")]
     pub max_outputs: u16,
+    /// Coinbase variants per template; the minimum when `max_variants` is higher. The gateway raises the number with the hash rate of the
+    /// attached ASICs so that the work space of an epoch is not exhausted (about 5 PH/s per 16 variants).
     #[serde(default = "d_variants")]
     pub variants: u32,
+    /// Upper limit for the automatic number of variants (attestation takes about 3 ms per variant at 200 outputs).
+    #[serde(default = "d_maxvar")]
+    pub max_variants: u32,
     #[serde(default = "d_diff")]
     pub share_difficulty: f64,
     /// CPU search for tests and regtest. Real hardware is attached through the (not yet available) Stratum front end.
@@ -76,6 +82,7 @@ fn d_maxwait() -> u64 { 30 }
 fn d_fee() -> f64 { 1.0 }
 fn d_nmax() -> u16 { 200 }
 fn d_variants() -> u32 { 16 }
+fn d_maxvar() -> u32 { 2048 }
 fn d_diff() -> f64 { 0.001 }
 
 struct Tpl {
@@ -90,6 +97,7 @@ struct Tpl {
     txids_root: Vec<[u8; 32]>,
     tx_data: Vec<Vec<u8>>,
     epoch: Arc<Epoch>,
+    built: std::time::Instant,
 }
 
 impl Tpl {
@@ -138,6 +146,7 @@ struct Gw {
     node: Arc<NodeRpc>,
     rules: Rules,
     pin: [u8; 32],
+    hashrate: Arc<AtomicU64>,
     epoch_tx: watch::Sender<Option<Arc<Epoch>>>,
     targets: Arc<RwLock<HashMap<u32, [u8; 32]>>>,
     fwd_rx: mpsc::UnboundedReceiver<Fwd>,
@@ -189,11 +198,12 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     if cfg.software_miner {
         tracing::warn!("gateway: software_miner is set - CPU mining for tests only");
     }
+    let hashrate = Arc::new(AtomicU64::new(0));
     let (epoch_tx, epoch_rx) = watch::channel::<Option<Arc<Epoch>>>(None);
     let targets: Arc<RwLock<HashMap<u32, [u8; 32]>>> = Arc::new(RwLock::new(HashMap::new()));
     let (fwd_tx, fwd_rx) = mpsc::unbounded_channel::<Fwd>();
     if !cfg.stratum.listen.is_empty() {
-        let shared = Arc::new(Shared { epoch: epoch_rx, targets: targets.clone(), hrp: net.to_string(), default_script: my_script.clone(), fwd: fwd_tx.clone(), node: node.clone(), stats: Default::default() });
+        let shared = Arc::new(Shared { hashrate: hashrate.clone(), epoch: epoch_rx, targets: targets.clone(), hrp: net.to_string(), default_script: my_script.clone(), fwd: fwd_tx.clone(), node: node.clone(), stats: Default::default() });
         let scfg = cfg.stratum.clone();
         tokio::spawn(async move {
             if let Err(e) = gateway_stratum::serve(scfg, shared).await {
@@ -203,7 +213,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     }
     let (reconnect, max_wait) = (cfg.reconnect, cfg.max_reconnect_secs.max(1));
     let mut gw = Gw {
-        cfg, node, rules, pin, epoch_tx, targets, fwd_rx, locals: HashMap::from([(my_script.clone(), 1)]), scripts: BTreeMap::from([(1, my_script)]), next_local: 2, plans: BTreeMap::new(), tpl: None,
+        cfg, node, rules, pin, hashrate, epoch_tx, targets, fwd_rx, locals: HashMap::from([(my_script.clone(), 1)]), scripts: BTreeMap::from([(1, my_script)]), next_local: 2, plans: BTreeMap::new(), tpl: None,
         next_id: 1, last_tip: String::new(), mining: false, cursor: (0, 0), blocks_found: 0,
     };
     let mut backoff = 1u64;
@@ -257,16 +267,31 @@ impl Gw {
                 return Ok(());
             }
         };
-        if best != self.last_tip {
-            self.epoch_tx.send_replace(None);
-            let height = match self.node.call("getblockcount", json!([])).await {
-                Ok(v) => v.as_u64().unwrap_or(0) as u32 + 1,
-                Err(_) => return Ok(()),
+        let tip_changed = best != self.last_tip;
+        // ASICs that joined after the template was built need more work space: rebuild for the same tip with more variants
+        let grow = !tip_changed && self.tpl.as_ref().map_or(false, |t| {
+            let wanted = gateway_stratum::variants_for(self.hashrate.load(Ordering::Relaxed) as f64, 60.0).clamp(self.cfg.variants as usize, self.cfg.max_variants.max(self.cfg.variants) as usize);
+            wanted > t.coinbases.len() && wanted * 3 > t.coinbases.len() * 4 && t.built.elapsed() > Duration::from_secs(10)
+        });
+        if tip_changed || grow {
+            if tip_changed {
+                self.epoch_tx.send_replace(None);
+            }
+            let height = if grow {
+                self.tpl.as_ref().map_or(0, |t| t.height)
+            } else {
+                match self.node.call("getblockcount", json!([])).await {
+                    Ok(v) => v.as_u64().unwrap_or(0) as u32 + 1,
+                    Err(_) => return Ok(()),
+                }
             };
             let default_open = conn.is_none() || link.pool_of_local.contains_key(&1);
             if let (Some(plan), true) = (self.plans.get(&height).cloned(), default_open) {
-                match build_template(&self.node, &self.cfg, &plan, self.next_id).await {
+                match build_template(&self.node, &self.cfg, &plan, self.next_id, self.hashrate.load(Ordering::Relaxed) as f64).await {
                     Ok(t) => {
+                        if grow && t.tip != self.tpl.as_ref().map_or([0; 32], |o| o.tip) {
+                            return Ok(()); // the tip moved while building; the next round handles it
+                        }
                         if let Some(c) = conn.as_deref_mut() {
                             announce(c, &t).await?;
                             link.announced = Some(t.id);
@@ -275,9 +300,11 @@ impl Gw {
                         self.tpl = Some(t);
                         self.mining = true;
                         self.next_id += 1;
-                        self.last_tip = best;
-                        self.cursor = (0, 0);
-                        link.pending.clear();
+                        if !grow {
+                            self.last_tip = best;
+                            self.cursor = (0, 0);
+                            link.pending.clear();
+                        }
                     }
                     Err(e) => tracing::warn!("gateway: template failed: {e:#}"),
                 }
@@ -489,7 +516,7 @@ async fn expect_ack(conn: &mut NoiseConn<TcpStream>) -> Result<()> {
     }
 }
 
-async fn build_template(node: &Arc<NodeRpc>, cfg: &GatewayCfg, plan: &PayoutPlan, id: u32) -> Result<Tpl> {
+async fn build_template(node: &Arc<NodeRpc>, cfg: &GatewayCfg, plan: &PayoutPlan, id: u32, hashrate: f64) -> Result<Tpl> {
     // the reward is only known from the node's template; the trivial candidate costs one cheap call
     let probe = node.call("getattestationbatch", json!([{"candidates": [{"outputs": [{"scriptPubKey": hex::encode(&plan.fee_script)}]}]}])).await?;
     let reward = probe["coinbasevalue"].as_u64().ok_or_else(|| anyhow!("no coinbasevalue"))?;
@@ -497,7 +524,11 @@ async fn build_template(node: &Arc<NodeRpc>, cfg: &GatewayCfg, plan: &PayoutPlan
     if height != plan.height {
         bail!("node template is for height {height}, plan is for {}", plan.height);
     }
-    let cands: Vec<Value> = (0..cfg.variants).map(|v| node_candidate(plan, reward, &v.to_le_bytes())).collect();
+    let wanted = gateway_stratum::variants_for(hashrate, 60.0).clamp(cfg.variants as usize, cfg.max_variants.max(cfg.variants) as usize);
+    if wanted > cfg.variants as usize {
+        tracing::info!("gateway: {} variants for {:.1} TH/s of attached ASICs", wanted, hashrate / 1e12);
+    }
+    let cands: Vec<Value> = (0..wanted as u32).map(|v| node_candidate(plan, reward, &v.to_le_bytes())).collect();
     let bt = super::coinbase::attest_all(node, &cands).await?;
     if bt["coinbasevalue"].as_u64() != Some(reward) || bt["height"].as_u64() != Some(height as u64) {
         bail!("template changed between the two node calls");
@@ -520,9 +551,11 @@ async fn build_template(node: &Arc<NodeRpc>, cfg: &GatewayCfg, plan: &PayoutPlan
     let template: BatchTemplate = serde_json::from_value(bt.clone()).context("parsing the node's template")?;
     let txset = Arc::new(TxSet::from_gbt(&template.transactions)?);
     let candidates = coinbases.iter().map(|cb| Candidate::from_coinbase(&template, &txset, cb)).collect::<Result<Vec<_>>>()?;
-    let epoch = Arc::new(Epoch::new(id as u64, bt["tip"].as_str().unwrap_or_default().to_string(), height, candidates));
+    let slices = if cfg.stratum.full_version_roll { 1 } else { 16 };
+    let epoch = Arc::new(Epoch::with_slices(id as u64, bt["tip"].as_str().unwrap_or_default().to_string(), height, candidates, slices));
     Ok(Tpl {
         epoch,
+        built: std::time::Instant::now(),
         id, height, tip: rev(bt["tip"].as_str().ok_or_else(|| anyhow!("tip"))?)?, version: bt["version"].as_i64().unwrap_or(0) as u32,
         bits: u32::from_str_radix(bt["bits"].as_str().ok_or_else(|| anyhow!("bits"))?, 16)?, curtime: bt["curtime"].as_u64().unwrap_or(0) as u32,
         branch, coinbases, txids_root, tx_data,

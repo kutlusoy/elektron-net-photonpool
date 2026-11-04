@@ -29,6 +29,8 @@ max_reconnect_secs = 30
 # Number of extranonce variants per template (each one is attested by your node in a single call).
 # Rule of thumb: one per 2.8e14 H/s of farm hashrate and second of nTime use, more is harmless.
 variants = 16
+# Upper limit of the automatic number of variants: the gateway raises it with the hash rate of its ASICs (about 1,100 variants for 200 PH/s).
+max_variants = 2048
 # Share difficulty requested from the pool (it adjusts it with its own vardiff).
 share_difficulty = 1024
 
@@ -40,3 +42,6 @@ require_address = false
 listen = "0.0.0.0:3333"
 initial_difficulty = 1024
 share_secs = 10
+# Every unit of work gets all 16 BIP 320 version bits, so ASICs ask for new jobs 16 times less often (a job carries the whole coinbase).
+# Set false only for firmware that cannot roll the bits 13-16.
+full_version_roll = true

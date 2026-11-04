@@ -36,5 +36,7 @@ Review and operation
 
 - Photon payout plans (rules version 2): everybody with a credit is paid, no minimum amount, parts per billion instead of per million, at most `max_outputs` (default 200) per block with the smaller credits taking turns above that. The node patch reserves block weight for the largest coinbase of a request (a full block with a 128-output coinbase would otherwise exceed the weight limit). Capacity limits are documented in the protocol guideline (6.3); the gateway warns when a job exceeds the 16 KB line limit of ESP32 miners.
 
+- Gateway: every unit of work gets all 16 version bits (5.5 times less Stratum traffic to the ASICs with a 200-output coinbase: 94 instead of 518 Mbit/s for 1,000 ASICs of 200 TH/s, measured with simulated ASICs), and the number of coinbase variants follows the hash rate of the attached ASICs automatically (`max_variants`).
+
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.

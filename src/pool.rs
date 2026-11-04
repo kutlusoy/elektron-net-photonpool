@@ -131,6 +131,8 @@ pub struct Epoch {
     pub tip_hex: String,
     pub height: u32,
     pub candidates: Vec<Candidate>,
+    /// Version-bit slices per candidate: 16 when the pool reserves bits 13-16 to tell miners apart, 1 when every unit gets all 16 BIP 320 bits.
+    pub slices: u64,
     pub started_unix: f64,
     next_unit: AtomicU64,
     pub overlap: AtomicU64,
@@ -168,11 +170,16 @@ impl SoloEntry {
 
 impl Epoch {
     pub fn new(id: u64, tip_hex: String, height: u32, candidates: Vec<Candidate>) -> Self {
-        Self { id, tip_hex, height, candidates, started_unix: unix_now(), next_unit: AtomicU64::new(0), overlap: AtomicU64::new(0), seen: Mutex::new(HashSet::new()), solo: RwLock::new(HashMap::new()), solo_build: tokio::sync::Mutex::new(()) }
+        Self::with_slices(id, tip_hex, height, candidates, SLICES)
+    }
+
+    pub fn with_slices(id: u64, tip_hex: String, height: u32, candidates: Vec<Candidate>, slices: u64) -> Self {
+        let slices = slices.clamp(1, SLICES);
+        Self { id, tip_hex, height, candidates, slices, started_unix: unix_now(), next_unit: AtomicU64::new(0), overlap: AtomicU64::new(0), seen: Mutex::new(HashSet::new()), solo: RwLock::new(HashMap::new()), solo_build: tokio::sync::Mutex::new(()) }
     }
 
     pub fn units_total(&self) -> u64 {
-        self.candidates.len() as u64 * SLICES * NTIME_SLOTS
+        self.candidates.len() as u64 * self.slices * NTIME_SLOTS
     }
 
     pub fn units_used(&self) -> u64 {
@@ -191,7 +198,7 @@ impl Epoch {
     pub fn unit_from_n(&self, n: u32) -> Unit {
         let c = self.candidates.len() as u64;
         let u = n as u64 % self.units_total();
-        Unit { cand: (u % c) as usize, slice: ((u / c) % SLICES) as u8, ntime_off: (u / (c * SLICES)) as u32 }
+        Unit { cand: (u % c) as usize, slice: ((u / c) % self.slices) as u8, ntime_off: (u / (c * self.slices)) as u32 }
     }
 
     pub fn tip_matches(&self, other: &Epoch) -> bool {
@@ -204,11 +211,17 @@ impl Epoch {
     }
 
     pub fn check(&self, c: &Candidate, slice: u8, ntime: u32, version: u32, nonce: u32, share_target: &[u8; 32]) -> ShareResult {
-        if slice as u64 >= SLICES {
+        self.check_with_mask(c, slice, ntime, version, nonce, share_target, MINER_VERSION_MASK)
+    }
+
+    /// Like `check`, for a miner that negotiated `miner_mask` (all of BIP 320 when the epoch has one slice).
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_with_mask(&self, c: &Candidate, slice: u8, ntime: u32, version: u32, nonce: u32, share_target: &[u8; 32], miner_mask: u32) -> ShareResult {
+        if slice as u64 >= self.slices {
             return ShareResult::Invalid("bad slice");
         }
         let expected = c.version | ((slice as u32) << POOL_VERSION_SHIFT);
-        if (version & !MINER_VERSION_MASK) != expected {
+        if (version & !miner_mask) != expected {
             return ShareResult::Invalid("version bits outside the miner mask");
         }
         if ntime < c.mintime || ntime > c.curtime.saturating_add(NTIME_SLOTS as u32 + 60) {
@@ -532,6 +545,33 @@ mod tests {
             notify_b: String::new(), notify_c: String::new(),
         };
         Epoch::new(1, "00".repeat(32), 1, (0..n as u8).map(c).collect())
+    }
+
+    #[test]
+    fn one_slice_gives_every_unit_the_whole_version_space() {
+        let c = |i: u8| Candidate {
+            prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [0; 32], curtime: 1000, mintime: 900, coinbase_value: 0, fees: 0,
+            coinbase_wit: vec![], merkle_root: [i; 32],
+            txs: std::sync::Arc::new(TxSet { datas: vec![], txids: vec![], branch: vec![] }),
+            notify_b: String::new(), notify_c: String::new(),
+        };
+        let e = Epoch::with_slices(1, "00".repeat(32), 1, vec![c(1), c(2), c(3)], 1);
+        assert_eq!(e.units_total(), 3 * NTIME_SLOTS);
+        let mut seen = HashSet::new();
+        for _ in 0..e.units_total() {
+            let (_, u) = e.next_unit();
+            assert_eq!(u.slice, 0);
+            assert!(seen.insert((u.cand, u.ntime_off)));
+        }
+        assert_eq!(e.overlap.load(Ordering::Relaxed), 0);
+        // all 16 BIP 320 bits are the miner's: a share rolling bits 13-16 is valid, the same share is invalid in a 16-slice epoch
+        let full = 0x1fff_e000u32;
+        let rolled = 0x2000_0000 | 0x0000_6000 | 0x0100_0000;
+        assert_eq!(e.check_with_mask(&e.candidates[0], 0, 1000, rolled, 1, &[0xff; 32], full), ShareResult::Valid);
+        let sliced = Epoch::with_slices(2, "00".repeat(32), 1, vec![c(1)], 16);
+        assert!(matches!(sliced.check_with_mask(&sliced.candidates[0], 0, 1000, rolled, 1, &[0xff; 32], MINER_VERSION_MASK), ShareResult::Invalid(_)));
+        // bits outside the negotiated mask are refused
+        assert!(matches!(e.check_with_mask(&e.candidates[0], 0, 1000, 0x2000_0000 | 1, 2, &[0xff; 32], full), ShareResult::Invalid(_)));
     }
 
     #[test]
