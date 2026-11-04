@@ -4,7 +4,7 @@ ARG ELEKTRON_REPO=https://github.com/kutlusoy/elektron-net.git
 ARG ELEKTRON_REF=main
 # Photon node patches (getattestationbatch, no consensus code path is changed). Set to false to build the unmodified node;
 # the pool then falls back to one getblocktemplate call per payout address.
-ARG PHOTON_NODE_PATCHES=true
+ARG PHOTON_NODE_PATCHES=false
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake pkgconf python3 git \
         libevent-dev libboost-dev libsqlite3-dev ca-certificates \

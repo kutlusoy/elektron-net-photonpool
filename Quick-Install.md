@@ -12,7 +12,7 @@
 
 `photond` is a headless pool daemon: it follows your Elektron Net node, builds attested block candidates, serves Stratum V1 to miners and exposes a read-only admin API with a terminal-style web UI.
 
-**Status:** the pool offers solo (direct coinbase payout, no fee), PPLNS and PPS side by side, keeps a SQLite ledger, tracks block maturity and pays out through a node wallet, and serves a public pool page. All of this is tested on regtest against an unmodified node (see the `test/` directory). **Payouts start in dry-run mode** (`payout.dry_run = true`), so nothing is sent until you switch it off. Not tested yet: real ASIC hardware and firmware, and mainnet-scale load. Details: [`doc-elektron/guideline-payout-modes.md`](doc-elektron/guideline-payout-modes.md).
+**Status:** the pool offers solo (direct coinbase payout, no fee), PPLNS and PPS side by side, keeps a SQLite ledger, tracks block maturity and pays out through a node wallet, and serves a public pool page. All of this is tested on regtest against an unmodified node (see the `test/` directory). **Payouts start in dry-run mode** (`payout.dry_run = true`), so nothing is sent until you switch it off. Not tested yet: real ASIC hardware and firmware (the first test, a Bitaxe on mainnet, is described in [`doc-elektron/guideline-release-and-bitaxe-test.md`](doc-elektron/guideline-release-and-bitaxe-test.md)) and mainnet-scale load. The node is built unmodified by default; the optional Photon node patch (`NODE_PATCHES=true`) is only needed for pools with many payout addresses. Details: [`doc-elektron/guideline-payout-modes.md`](doc-elektron/guideline-payout-modes.md).
 
 ## 2. Requirements
 
@@ -123,7 +123,7 @@ Copy `target/release/photond` and the `ui/` folder to `/opt/photond`, then `syst
 | User | `<be1q address of the miner>.<worker name>` |
 | Password | `x`, or `m=solo`, `m=pplns`, `m=pps` to choose the payout mode (on ports that allow it) |
 
-**Payout modes:** solo pays the block reward directly to the miner's address in the coinbase (no fee). PPLNS and PPS are paid from the pool wallet. A port has a default mode; with `allow_override` a miner can pick another with `m=...`. PPS is paused until the pool wallet holds the configured reserve. Enable version rolling (BIP 310) in the miner if it has the option. The pool uses a fixed coinbase, so it advertises an empty `extranonce1` and `extranonce2_size = 0`; the search space comes from the negotiated version bits, nonce and nTime. Firmware that cannot work with this is a known open risk.
+**Payout modes:** solo pays the block reward directly to the miner's address in the coinbase (no fee). PPLNS and PPS are paid from the pool wallet. A port has a default mode; with `allow_override` a miner can pick another with `m=...`. PPS is paused until the pool wallet holds the configured reserve. Enable version rolling (BIP 310) in the miner if it has the option. The pool uses a fixed coinbase, so it advertises an empty `extranonce1` and `extranonce2_size = 0`; the search space comes from the negotiated version bits, nonce and nTime. Reading the ESP-Miner (Bitaxe) source shows that it accepts this; firmware that cannot work with it is a known open risk, see the Bitaxe test guideline.
 
 ## 6. Web UI, public page and API
 

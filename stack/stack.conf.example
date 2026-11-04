@@ -18,8 +18,9 @@ ELEKTRON_REPO=https://github.com/kutlusoy/elektron-net.git
 # Branch, tag or commit of the node to build.
 ELEKTRON_REF=main
 # Apply the Photon node patch (getattestationbatch: one call attests many payout addresses, no consensus code path
-# is changed). false builds the unmodified node; the pool then needs one getblocktemplate call per address.
-NODE_PATCHES=true
+# is changed). false (default) builds the unmodified node; the pool then needs one getblocktemplate call per address,
+# which is fine for a few miners. Set true for large pools once the patch review is complete (see doc-elektron/guideline-release-and-bitaxe-test.md).
+NODE_PATCHES=false
 
 # --- Pool wallet (on the node) ---
 WALLET_NAME=pool

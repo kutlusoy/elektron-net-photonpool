@@ -100,7 +100,7 @@ vout[3..] extra_outputs, verbatim, last
 
 ### 3.5 As built: the Photon node patch
 
-The interface exists as a patch that is applied when the node image is built (`docker/node/patches/0001-photon-getattestationbatch.patch`, `PHOTON_NODE_PATCHES=true` by default, `NODE_PATCHES` in the stack). It adds three functions and one RPC and changes no existing code path of the node:
+The interface exists as a patch that is applied when the node image is built (`docker/node/patches/0001-photon-getattestationbatch.patch`, `PHOTON_NODE_PATCHES=false` by default until the review is complete, set it to `true` to build the patched node; `NODE_PATCHES` in the stack). It adds three functions and one RPC and changes no existing code path of the node:
 
 - `ComputeAttestationBaseState` (`validation.cpp`): the tip's MuHash accumulator with all non-coinbase transactions applied, with the same rules as the incremental path of `ComputeBlockUTXOAttestationHash`, including the intra-block fix gate.
 - `AttestationForCoinbase`: the attestation of one stripped coinbase on top of that base state.
