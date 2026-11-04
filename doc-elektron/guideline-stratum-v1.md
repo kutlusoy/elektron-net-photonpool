@@ -78,6 +78,22 @@ Line length is limited to 8,192 bytes, malformed messages (more than 10), failed
 
 All connections received the job in every run. The times include block generation in the node and the rebuild of all candidates through `getblocktemplate` (about 45 ms of it for 64 addresses), not only the fan-out itself. Memory is about 7 to 8 KB per connection. Limits of the test setup: the file descriptor limit of the container (20,000) and a single client address, hardware behaviour is NOT covered.
 
+### Steady-state load with Bitaxe-style miners
+
+A Bitaxe (ESP-Miner) is given a clean job every 200 ms (see `guideline-release-and-bitaxe-test.md`, section 8a), five jobs per second and connection. `test/bench_bitaxe_profile.py`
+measures that load with synthetic miners on one 4-core machine that also runs the load generator, the node and the daemon (loopback, regtest, 64 candidates, `refresh_secs = 20`, 20 s window):
+
+| Connections | Daemon memory (before / after) | Jobs per second | To the miners | Daemon CPU | Clean job after a new tip (p50 / max) |
+|---|---|---|---|---|---|
+| 1,000 | 19 / 21 MB | 4,950 | 21 Mbit/s | 5 % of one core | 28 / 30 ms |
+| 5,000 | 58 / 68 MB | 24,749 | 105 Mbit/s | 25 % of one core | 52 / 62 ms |
+| 15,000 | 153 / 183 MB | 74,435 | 316 Mbit/s | 85 % of one core | 74 / 132 ms |
+
+The network is the limit before the CPU is. The work units are used up much faster than with the earlier one job per 15 to 30 s: one candidate offers 16 slices x 60 ntime steps = 960 units per epoch,
+so with five jobs per second per miner and a 20 s epoch one candidate serves about ten Bitaxes, and the 64 candidates of the benchmark about 600 (the allocator reported 38,560 overlapping units at 1,000 and 438,560 at 5,000 connections;
+the reading at 15,000 came right after an epoch change and says nothing). Overlapping units mean two miners get the same header, which shows up as duplicates between miners. 15,000 Bitaxes need about 1,600 candidates.
+
+
 ## 7. Known gaps
 
 - No accounting, payout or persistence yet; shares are only counted.

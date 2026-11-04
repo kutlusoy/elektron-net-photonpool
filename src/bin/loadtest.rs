@@ -22,6 +22,12 @@ struct Args {
     share_rate: f64,
     #[arg(long, default_value_t = 20)]
     wait_secs: u64,
+    /// User agent sent with mining.subscribe; a Bitaxe agent such as "bitaxe/BM1370/v2.9.0" gets a clean job every few hundred milliseconds.
+    #[arg(long, default_value = "loadtest")]
+    agent: String,
+    /// After the tip fan-out keep counting jobs and bytes for this many seconds (steady-state load).
+    #[arg(long, default_value_t = 0)]
+    steady_secs: u64,
 }
 
 #[derive(Default)]
@@ -29,6 +35,7 @@ struct Shared {
     connected: AtomicU64,
     failed: AtomicU64,
     notifies: AtomicU64,
+    bytes: AtomicU64,
     responses: AtomicU64,
     go: AtomicBool,
     t_go_ns: AtomicU64,
@@ -47,8 +54,8 @@ async fn conn(i: usize, a: Arc<Args>, sh: Arc<Shared>) {
     let _ = stream.set_nodelay(true);
     let (rd, mut wr) = stream.into_split();
     let hello = format!(
-        "{{\"id\":1,\"method\":\"mining.configure\",\"params\":[[\"version-rolling\"],{{\"version-rolling.mask\":\"ffffffff\"}}]}}\n{{\"id\":2,\"method\":\"mining.subscribe\",\"params\":[\"loadtest\"]}}\n{{\"id\":3,\"method\":\"mining.authorize\",\"params\":[\"{}.lt{i}\",\"x\"]}}\n",
-        a.account
+        "{{\"id\":1,\"method\":\"mining.configure\",\"params\":[[\"version-rolling\"],{{\"version-rolling.mask\":\"ffffffff\"}}]}}\n{{\"id\":2,\"method\":\"mining.subscribe\",\"params\":[\"{}\"]}}\n{{\"id\":3,\"method\":\"mining.authorize\",\"params\":[\"{}.lt{i}\",\"x\"]}}\n",
+        a.agent, a.account
     );
     if wr.write_all(hello.as_bytes()).await.is_err() {
         sh.failed.fetch_add(1, Ordering::Relaxed);
@@ -67,6 +74,7 @@ async fn conn(i: usize, a: Arc<Args>, sh: Arc<Shared>) {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {}
                 }
+                sh.bytes.fetch_add(line.len() as u64, Ordering::Relaxed);
                 if line.contains("\"mining.notify\"") {
                     sh.notifies.fetch_add(1, Ordering::Relaxed);
                     if let Some(s) = line.split("\"params\":[\"").nth(1) {
@@ -114,6 +122,7 @@ async fn main() {
         std::io::stdin().read_line(&mut go).ok();
     })
     .await;
+    let (n0, b0) = (sh.notifies.load(Ordering::Relaxed), sh.bytes.load(Ordering::Relaxed));
     sh.t_go_ns.store(now_ns(), Ordering::Relaxed);
     sh.go.store(true, Ordering::Relaxed);
     let want = sh.connected.load(Ordering::Relaxed) as usize;
@@ -121,6 +130,14 @@ async fn main() {
     while sh.recv_ns.lock().unwrap().len() < want && Instant::now() < end {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    let t_fan = Instant::now();
+    let (n_fan, b_fan) = (sh.notifies.load(Ordering::Relaxed), sh.bytes.load(Ordering::Relaxed));
+    if a.steady_secs > 0 {
+        tokio::time::sleep(Duration::from_secs(a.steady_secs)).await;
+    }
+    let steady = t_fan.elapsed().as_secs_f64();
+    let (n1, b1) = (sh.notifies.load(Ordering::Relaxed), sh.bytes.load(Ordering::Relaxed));
+    let _ = (n0, b0);
     let t_go = sh.t_go_ns.load(Ordering::Relaxed);
     let mut v: Vec<f64> = sh.recv_ns.lock().unwrap().iter().map(|t| (*t as f64 - t_go as f64) / 1e6).collect();
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -129,6 +146,7 @@ async fn main() {
         "{}",
         json!({"event": "result", "connected": want, "received_clean": v.len(), "t_go_unix": t_go as f64 / 1e9,
                "ms": {"min": q(0.0), "p50": q(0.5), "p90": q(0.9), "p99": q(0.99), "max": q(1.0)},
-               "notifies": sh.notifies.load(Ordering::Relaxed), "responses": sh.responses.load(Ordering::Relaxed)})
+               "notifies": sh.notifies.load(Ordering::Relaxed), "responses": sh.responses.load(Ordering::Relaxed),
+               "steady": {"secs": steady, "jobs_per_sec": (n1 - n_fan) as f64 / steady.max(0.001), "mbit_per_sec": (b1 - b_fan) as f64 * 8.0 / 1e6 / steady.max(0.001)}})
     );
 }
