@@ -267,7 +267,7 @@ Extras.add('alloc', (el) => {
     const s = ui.src.summary(); if (!s) return;
     Neon.kpis(k, [{ label: 'candidates', value: s.alloc.candidates, fmt: num }, { label: 'units / s', value: s.alloc.unitsPerSec, fmt: num, color: 'c2' }, { label: 'epoch use', value: s.alloc.epochUse * 100, fmt: (v) => v.toFixed(1) + '%', color: 'c3' },
       { label: 'overlap flagged', value: s.alloc.overlap, fmt: num, color: s.alloc.overlap ? 'err' : 'ok' }]);
-    timeLine(u, [{ name: 'units/s', data: Series.get('units'), color: 'c2' }], num);
+    timeLine(u, [{ name: 'units/s', data: Series.get('units'), color: 'c2' }], (v) => (Math.abs(v) < 10 && v % 1 ? v.toFixed(1) : num(v)));
     timeLine(e, [{ name: 'epoch use', data: Series.get('epoch'), color: 'c3' }], (v) => v.toFixed(1) + '%');
     Neon.donut(g, [{ label: 'used', value: s.alloc.epochUse, color: s.alloc.epochUse > 0.9 ? 'warn' : 'c3', text: pct(s.alloc.epochUse) }, { label: 'free', value: Math.max(0, 1 - s.alloc.epochUse), color: 'c1', text: pct(1 - s.alloc.epochUse) }], { big: pct(s.alloc.epochUse), sub: 'of the epoch' });
   };
