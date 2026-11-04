@@ -29,8 +29,6 @@ const CREDIT_SCALE: i64 = 1_000_000_000_000;
 const MAX_TEMPLATES: usize = 16;
 const CHECK_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_STRIKES: u32 = 5;
-/// Sanity limit for the minimum payout amount: 100,000,000 leptons = 1 coin = a fifth of the current subsidy.
-pub const MAX_MIN_OUTPUT_LEPTONS: u64 = 100_000_000;
 const STALE_GRACE: Duration = Duration::from_secs(10);
 const TIP_WAIT: Duration = Duration::from_millis(1500);
 
@@ -99,7 +97,7 @@ pub struct PhotonService {
     key: Keypair,
     pub book: watch::Sender<Arc<PlanBook>>,
     pub stats: PhotonStats,
-    rules: Mutex<Rules>,
+    rules: Rules,
     /// Share hashes of the current and the previous tip (old-tip shares are still accepted for a short grace period).
     seen: Mutex<(HashSet<[u8; 32]>, HashSet<[u8; 32]>)>,
     recent: Mutex<VecDeque<Arc<PlanEntry>>>,
@@ -206,7 +204,7 @@ impl PhotonService {
         rules.validate()?;
         let empty = Arc::new(PlanBook { epoch_id: 0, tip: [0; 32], tip_hex: String::new(), tip_height: 0, plans: BTreeMap::new(), max_reward: 0, bits: 0 });
         let (book, _) = watch::channel(empty);
-        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules: Mutex::new(rules), seen: Mutex::new((HashSet::new(), HashSet::new())), recent: Mutex::new(VecDeque::new()), check_used: std::sync::atomic::AtomicU32::new(0), check_slots: Semaphore::new(cfg_conc), trust: Mutex::new(TrustBook::default()), total_p_micro: AtomicI64::new(0), ips: Mutex::new(HashMap::new()) }))
+        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new((HashSet::new(), HashSet::new())), recent: Mutex::new(VecDeque::new()), check_used: std::sync::atomic::AtomicU32::new(0), check_slots: Semaphore::new(cfg_conc), trust: Mutex::new(TrustBook::default()), total_p_micro: AtomicI64::new(0), ips: Mutex::new(HashMap::new()) }))
     }
 
     pub fn now() -> i64 {
@@ -258,36 +256,6 @@ impl PhotonService {
         if let Err(e) = self.pool.ledger.call(move |c| ledger::trust_save(c, &rows, &gone)).await {
             self.pool.event("warn", format!("photon: could not save gateway trust: {e:#}"));
         }
-    }
-
-    /// Current dust policy: (min_ppm, min_output_leptons, max_outputs).
-    pub fn dust_policy(&self) -> (u32, u64, u16) {
-        let r = self.rules.lock().unwrap();
-        (r.min_ppm, r.min_output_leptons, r.n_max)
-    }
-
-    /// Applies the dust policy of a reloaded configuration (SIGHUP). Takes effect with the plans derived from the next tip on; plans already
-    /// published stay as they are. Fee, listener and key need a restart. A value that would make no sense is refused as a whole.
-    pub fn reload(&self, cfg: &PhotonCfg) -> Result<String> {
-        if cfg.min_output_leptons > MAX_MIN_OUTPUT_LEPTONS {
-            bail!("min_output_leptons {} is above the sanity limit {MAX_MIN_OUTPUT_LEPTONS} (a fifth of the 5 coin subsidy); not applied", cfg.min_output_leptons);
-        }
-        let mut notes = Vec::new();
-        if (cfg.fee_pct * 10_000.0).round() as u32 != self.rules.lock().unwrap().fee_ppm {
-            notes.push("fee_pct changed: needs a restart (gateways have agreed to the fee)".to_string());
-        }
-        let mut next = self.rules.lock().unwrap().clone();
-        next.min_ppm = cfg.min_ppm;
-        next.min_output_leptons = cfg.min_output_leptons;
-        next.n_max = cfg.max_outputs;
-        next.validate()?;
-        let old = std::mem::replace(&mut *self.rules.lock().unwrap(), next.clone());
-        let mut msg = format!("photon dust policy: min_ppm {} -> {}, min_output_leptons {} -> {}, max_outputs {} -> {}", old.min_ppm, next.min_ppm, old.min_output_leptons, next.min_output_leptons, old.n_max, next.n_max);
-        for n in notes {
-            msg.push_str("; ");
-            msg.push_str(&n);
-        }
-        Ok(msg)
     }
 
     pub fn public_key_hex(&self) -> String {
@@ -390,10 +358,9 @@ impl PhotonService {
         let credits: Vec<(Vec<u8>, u64)> = rows.into_iter().filter_map(|(a, v)| Some((hex::decode(a).ok()?, v as u64))).collect();
         // the subsidy: every real reward (subsidy plus fees) is at least this, so a part that is worth the minimum at the subsidy is worth it at any reward
         let ref_reward = cand.subsidy().max(1) as u64;
-        let rules = self.rules.lock().unwrap().clone();
         for height in [e.height, e.height + 1] {
             if height == e.height + 1 || !plans.contains_key(&height) {
-                let (plan, tree) = derive_full(&rules, tip, height, ref_reward, &credits)?;
+                let (plan, tree) = derive_full(&self.rules, tip, height, ref_reward, &credits)?;
                 plans.insert(height, Arc::new(PlanEntry { plan, tree: Arc::new(tree) }));
             }
         }

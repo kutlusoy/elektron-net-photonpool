@@ -34,7 +34,6 @@ The installer never overwrites a configuration file, does not enable or start an
 ## 3. Behaviour worth knowing
 
 - **Graceful stop:** `KillSignal=SIGINT` and `TimeoutStopSec=30`. The pool writes the pending share totals and the remembered gateway trust to the ledger when it receives `SIGINT`; with `SIGTERM` or `SIGKILL` the last seconds of Photon shares are lost.
-- **Reload:** `systemctl reload photond` sends `SIGHUP`: the pool re-reads `photond.toml` and applies the dust policy of `[photon]` (`min_ppm`, `min_output_leptons`, `max_outputs`) from the next tip on; a refused value is logged and the old one stays. Everything else needs a restart.
 - **Start order:** `After=elektrond.service` but not `Requires=`: the pool and the gateway wait for a synchronized node and retry by themselves.
 - **Restart:** the pool restarts after 5 s, the gateway after 15 s. A gateway that ends because of a wrong pool key, a ban or a failed proof should not hammer the pool, which the longer delay prevents; check `journalctl -u photon-gateway` when it keeps restarting.
 - **Secrets:** `PHOTON_WALLET_PASSPHRASE` and similar variables go into `/etc/photond/photond.env` (mode 0600, owned by root; systemd reads it before dropping privileges).

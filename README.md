@@ -27,8 +27,8 @@ A gateway is a small program (`photond gateway`) that a mining farm runs next to
 ## Tests
 
 ```text
-cargo test                                  # 80 unit tests
-ELEKTROND=... test/run_all.sh               # integration steps 1-21 against regtest nodes (see the header of run_all.sh)
+cargo test                                  # 77 unit tests
+ELEKTROND=... test/run_all.sh               # integration steps 1-20 against regtest nodes (see the header of run_all.sh)
 ```
 
 The integration tests recompute every attestation independently in Python and validate candidates with the node itself. Load figures (10,000 miners, full blocks) are in [`doc-elektron/guideline-daemon-core.md`](doc-elektron/guideline-daemon-core.md).

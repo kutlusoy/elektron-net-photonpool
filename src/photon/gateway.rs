@@ -7,7 +7,7 @@ use super::coinbase::{node_candidate, parse, to_witness};
 use super::merkle;
 use super::msg::*;
 use super::noise::{self, NoiseConn};
-use super::plan::{check_plan, Terms};
+use super::plan::{check_plan, Rules};
 use super::gateway_stratum::{self, Fwd, Shared, StratumGwCfg};
 use super::verify::{bits_to_target, VERSION_MASK};
 use super::PROTOCOL_VERSION;
@@ -44,12 +44,11 @@ pub struct GatewayCfg {
     pub fee_pct: f64,
     #[serde(default = "d_nmax")]
     pub max_outputs: u16,
-    /// The pool decides its minimum payout part and amount (dust policy) and may change them at any time; every plan announces the values it used.
-    /// The gateway follows as long as they stay at or below these limits and refuses plans beyond them.
-    #[serde(default = "d_acc_ppm")]
-    pub accept_min_ppm_up_to: u32,
-    #[serde(default = "d_acc_lep")]
-    pub accept_min_output_leptons_up_to: u64,
+    #[serde(default = "d_minppm")]
+    pub min_ppm: u32,
+    /// Smallest payout output in leptons that the pool applies (agreed terms, like the fee).
+    #[serde(default = "d_minlep")]
+    pub min_output_leptons: u64,
     #[serde(default = "d_variants")]
     pub variants: u32,
     #[serde(default = "d_diff")]
@@ -81,8 +80,8 @@ fn d_true() -> bool { true }
 fn d_maxwait() -> u64 { 30 }
 fn d_fee() -> f64 { 1.0 }
 fn d_nmax() -> u16 { 128 }
-fn d_acc_ppm() -> u32 { 2_000 }
-fn d_acc_lep() -> u64 { 1_000_000 }
+fn d_minppm() -> u32 { 100 }
+fn d_minlep() -> u64 { 100_000 }
 fn d_variants() -> u32 { 16 }
 fn d_diff() -> f64 { 0.001 }
 
@@ -144,7 +143,7 @@ impl std::error::Error for Fatal {}
 struct Gw {
     cfg: GatewayCfg,
     node: Arc<NodeRpc>,
-    terms: Terms,
+    rules: Rules,
     pin: [u8; 32],
     epoch_tx: watch::Sender<Option<Arc<Epoch>>>,
     targets: Arc<RwLock<HashMap<u32, [u8; 32]>>>,
@@ -185,7 +184,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     };
     let node = Arc::new(NodeRpc::new(&cfg.node_rpc_url, &cfg.node_auth)?);
     let my_script = script_for_address(&cfg.payout_address, net)?;
-    let terms = Terms { n_max_limit: cfg.max_outputs, max_min_ppm: cfg.accept_min_ppm_up_to, max_min_output_leptons: cfg.accept_min_output_leptons_up_to, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script: script_for_address(&cfg.fee_address, net)? };
+    let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, min_output_leptons: cfg.min_output_leptons, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script: script_for_address(&cfg.fee_address, net)? };
     let pin: [u8; 32] = hex::decode(&cfg.pool_key)?.try_into().map_err(|_| anyhow!("pool_key must be 32 bytes of hex"))?;
 
     if cfg.corrupt_attestation {
@@ -211,7 +210,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     }
     let (reconnect, max_wait) = (cfg.reconnect, cfg.max_reconnect_secs.max(1));
     let mut gw = Gw {
-        cfg, node, terms, pin, epoch_tx, targets, fwd_rx, locals: HashMap::from([(my_script.clone(), 1)]), scripts: BTreeMap::from([(1, my_script)]), next_local: 2, plans: BTreeMap::new(), tpl: None,
+        cfg, node, rules, pin, epoch_tx, targets, fwd_rx, locals: HashMap::from([(my_script.clone(), 1)]), scripts: BTreeMap::from([(1, my_script)]), next_local: 2, plans: BTreeMap::new(), tpl: None,
         next_id: 1, last_tip: String::new(), mining: false, cursor: (0, 0), blocks_found: 0,
     };
     let mut backoff = 1u64;
@@ -338,7 +337,7 @@ impl Gw {
                         }
                         Msg::NewTip(_) => {}
                         Msg::PayoutPlan(p) => {
-                            match check_plan(&p, &self.terms) {
+                            match check_plan(&p, &self.rules) {
                                 Ok(()) => { self.plans.insert(p.height, p); }
                                 Err(e) => tracing::warn!("gateway: refusing plan for height {}: {e:#}", p.height),
                             }

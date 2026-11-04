@@ -36,7 +36,5 @@ Review and operation
 
 - Photon plans (rules version 2) carry a reference reward and a minimum payout amount in leptons (`min_output_leptons`, default 100,000) next to `min_ppm`, so no payout output is dust. Miners whose share stays below the minimum are not paid on chain by the plan (open design question, protocol guideline 6.1).
 
-- The minimum payout amount is adjustable at runtime (`systemctl reload photond`); every plan announces the minimums it used and gateways follow within their `accept_min_*` limits instead of fixed values. Defaults documented (100,000 leptons, 100 ppm, 128 outputs).
-
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.
