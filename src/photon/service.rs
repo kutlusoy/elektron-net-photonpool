@@ -44,6 +44,7 @@ pub mod code {
     pub const CHECK_FAILED: u16 = 20;
     pub const BANNED: u16 = 21;
     pub const PROTOCOL: u16 = 22;
+    pub const VERSION: u16 = 23;
 }
 
 pub struct PlanEntry {
@@ -441,7 +442,7 @@ impl Session {
         let first = tokio::time::timeout(Duration::from_secs(10), self.conn.recv()).await.map_err(|_| anyhow!("no Setup"))??;
         match Msg::decode(&first)? {
             Msg::Setup(s) if s.version == PROTOCOL_VERSION => self.send(Msg::SetupAck(Setup { version: PROTOCOL_VERSION, features: 0, max_frame: super::wire::MAX_FRAME as u32 })).await?,
-            Msg::Setup(_) => return self.disconnect(code::PROTOCOL, "unsupported protocol version").await,
+            Msg::Setup(_) => return self.disconnect(code::VERSION, "unsupported protocol version").await,
             _ => return self.disconnect(code::PROTOCOL, "Setup expected").await,
         }
         let mut tick = tokio::time::interval(Duration::from_secs(5));

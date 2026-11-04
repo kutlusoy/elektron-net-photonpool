@@ -201,4 +201,4 @@ Instead of mining on the pool's Stratum port, a farm can run its own node (built
 photond gateway --gateway-config gateway.toml
 ```
 
-Status: tested end to end on regtest with a simulated ASIC, not yet with real hardware. Details: [`doc-elektron/guideline-photon-protocol.md`](doc-elektron/guideline-photon-protocol.md).
+The gateway reconnects to the pool by itself after an outage (see `gateway.example.toml`); run it under a supervisor such as systemd so that it also comes back after a crash or reboot. Status: tested end to end on regtest with a simulated ASIC, not yet with real hardware. Details: [`doc-elektron/guideline-photon-protocol.md`](doc-elektron/guideline-photon-protocol.md).

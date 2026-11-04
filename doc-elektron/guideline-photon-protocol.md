@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.7 (several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
+- **Version:** 0.8 (automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -266,6 +266,18 @@ A farm that serves several customers or sub-farms runs one gateway and gives eac
 - **Limits:** `max_channels_per_connection` at the pool (default 64, a refused open reaches the worker as `channel limit reached`); all channels of a gateway share one connection, one set of announces and one spot check budget, and their payout scripts are all keys of the gateway's remembered trust (a banned script blocks only itself, but a failed check counts against every script of the connection).
 - **Verification:** after every `EpochCommit` the gateway requests a proof for each channel's script and checks it against the committed root; the pool answers each request with a `Proof` or a `Reject(8)` (no credit yet), in order.
 - **Test:** `test/step19_multi_channel.py`: workers of two addresses mine alternately on one gateway, a worker without an address uses the default channel, a fourth address is refused because the pool allows three channels, the latest coinbase pays each worker address 49.5 % of the reward and the pool fee 1 %, and both owners' credits verify. Passed 5 of 5 runs.
+
+## 14f. Reconnect (v0.8)
+
+The gateway keeps its state outside the pool connection (`Gw`): node link, plans, current template, the Stratum server and a channel table with gateway-local ids. A lost connection (pool restart, network, idle timeout) ends only the connection:
+
+- **Backoff:** 1 s, 2 s, 4 s ... up to `max_reconnect_secs` (default 30) plus a small jitter, reset when a connection held for 30 s. `reconnect = false` makes the first failure an error.
+- **Never retried:** a pool key that does not match the pinned one, `Disconnect` with code 21 (banned) or 23 (protocol version), a refused default channel, a plan commit that differs from its plan, an accounting proof that does not verify. These end the process with an error, because retrying cannot help and a proof failure should be seen by the operator.
+- **During the outage:** the node link and the Stratum server stay up, the template follows the node's tip as long as the plan for the new height is known (the gateway holds the plans of the current and the next block, so ASICs lose nothing for about one block); found blocks go to the own node and pay the last known plan; shares are lost because the pool is not there to credit them. Workers of known addresses can connect, a new address is refused with `the pool connection is down, try again shortly`.
+- **After the reconnect:** the gateway re-opens every channel (the request number of `OpenChannel` is the local channel id, so ASIC sessions keep their ids although the pool assigns new ones), re-announces the template of the current tip, requests new plans and proofs, and the pool continues with the credits it kept in the ledger. The pool writes pending share aggregates and trust to the ledger on a graceful shutdown (`SIGINT`).
+- **Test:** `test/step20_gateway_reconnect.py`: a worker mines three blocks, the pool is stopped, the gateway reports the lost connection, a worker of the known address connects, a new address is refused, a block mined during the outage is accepted and pays the last plan, the pool is started again, the gateway is back in about 4 s with both channels, two more blocks are credited, the coinbase pays the old credit, and A's credit is verified again; a wrong key ends the gateway at once, an unreachable pool with `reconnect = false` is an error. Passed 4 of 4 runs.
+
+Limits: an outage longer than the known plans (about one block) stops the work, because the gateway cannot build a coinbase without a plan; a restart of the gateway itself is not covered (run it under a supervisor); the pool does not yet tell the gateway how long it will be away.
 
 ## 15. Checklist
 

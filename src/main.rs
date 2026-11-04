@@ -112,7 +112,11 @@ async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
         });
     }
     let photon = pool.photon.get().cloned();
+    let flush_pool = pool.clone();
     axum::serve(listener, api::router(pool)).with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await?;
+    if let Err(e) = flush_pool.flush_shares().await {
+        tracing::warn!("could not write the share aggregates on shutdown: {e:#}");
+    }
     if let Some(ph) = photon {
         ph.flush_trust().await;
     }
