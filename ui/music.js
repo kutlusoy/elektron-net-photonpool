@@ -31,8 +31,8 @@ const Music = (() => {
     const dry = ctx.createGain(); dry.connect(out);
     const mus = ctx.createGain(); mus.connect(out); // everything melodic and low goes through here, ducked by the kick
     const delay = ctx.createDelay(1.5); delay.delayTime.value = STEP * 6; // dotted eighth
-    const fb = ctx.createGain(); fb.gain.value = 0.46; const dlp = ctx.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 2400;
-    const wet = ctx.createGain(); wet.gain.value = 0.36;
+    const fb = ctx.createGain(); fb.gain.value = 0.34; const dlp = ctx.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 2400;
+    const wet = ctx.createGain(); wet.gain.value = 0.26;
     delay.connect(dlp); dlp.connect(fb); fb.connect(delay); dlp.connect(wet); wet.connect(out);
     const send = ctx.createGain(); send.connect(delay);
     const nb = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), nd = nb.getChannelData(0);
@@ -54,21 +54,14 @@ const Music = (() => {
       return osc;
     };
     const kick = (t, v) => tone(t, 0.45, 'sine', 68, v * 0.55, dry, { to: 40, glide: 0.08 });
-    const snare = (t, v) => { noise(t, 0.2, 'bandpass', 1900, 0.7, v * 0.5); tone(t, 0.12, 'triangle', 190, v * 0.35, dry, { to: 120 }); };
-    const hat = (t, v, open) => noise(t, open ? 0.22 : 0.045, 'highpass', 7500, 0.5, v);
+    const snare = (t, v) => { noise(t, 0.12, 'bandpass', 1600, 0.9, v * 0.22); tone(t, 0.16, 'triangle', 200, v * 0.5, dry, { to: 130 }); };
+    const hat = (t, v, open) => noise(t, open ? 0.12 : 0.03, 'highpass', 9500, 0.5, v * 0.45);
     const bass = (t, f, v, len) => { tone(t, len, 'sawtooth', f, v * 0.14, mus, { lp: 200, lpTo: 80, q: 1.5 }); tone(t, len, 'sine', f, v * 2.4, mus, { att: 0.03 }); tone(t, len, 'sine', f * 2, v * 0.2, mus, { att: 0.05 }); };
     const pluck = (t, f, v) => { tone(t, 0.3, 'sawtooth', f, v, mus, { lp: 1700, lpTo: 400, q: 2 }); tone(t, 0.3, 'square', f, v * 0.5, send, { lp: 1500, lpTo: 450, det: 6 }); };
-    const pad = (t, dur, notes, v) => notes.forEach((n) => [-9, 0, 9].forEach((d) => { const o = tone(t, dur, 'sawtooth', hz(n), v / 3, send, { att: 1.6, det: d, lp: 650, lpTo: 1100 }); o.frequency.value = hz(n); }));
+    const pad = (t, dur, notes, v) => notes.forEach((n) => { [-6, 6].forEach((d) => tone(t, dur, 'sawtooth', hz(n), v / 4, send, { att: 1.8, det: d, lp: 520, lpTo: 820 })); tone(t, dur, 'sine', hz(n), v / 2, send, { att: 1.8 }); });
     const lead = (t, dur, n, v) => {
       const o = tone(t, dur, 'triangle', hz(n), v, send, { att: 0.02, lp: 3000 });
       const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 5; lg.gain.value = 7; lfo.connect(lg); lg.connect(o.detune); lfo.start(t); lfo.stop(t + dur + 0.05);
-    };
-    // rain on the glass: steady filtered noise, started separately
-    const rain = ctx.createGain(); rain.gain.value = 0.045; rain.connect(out);
-    let rainSrc = null;
-    const startRain = () => {
-      rainSrc = ctx.createBufferSource(); rainSrc.buffer = nb; rainSrc.loop = true;
-      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3800; bp.Q.value = 0.35; rainSrc.connect(bp); bp.connect(rain); rainSrc.start();
     };
 
     function step(i, t) {
@@ -94,7 +87,7 @@ const Music = (() => {
       }
       if (sec.lead && s % 4 === 0 && barIn % 2 === 0 && r() < 0.75) lead(t, STEP * (4 + 4 * Math.floor(r() * 3)), PENT[Math.floor(r() * PENT.length)], 0.09);
     }
-    return { step, out, analyser, startRain, stopRain() { if (rainSrc) rainSrc.stop(); } };
+    return { step, out, analyser, startRain() {}, stopRain() {} };
   }
 
   /* ---- player ---- */
