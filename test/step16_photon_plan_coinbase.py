@@ -7,7 +7,7 @@ from photon_testlib import *
 
 PHOTOND = os.environ.get("PHOTOND", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "target", "release", "photond"))
 FEE_SCRIPT = p2wpkh_script(900)
-RULES = {"n_max": 128, "min_ppm": 100, "fee_ppm": 10000, "fee_script": FEE_SCRIPT.hex()}
+RULES = {"n_max": 200, "fee_ppb": 10_000_000, "fee_script": FEE_SCRIPT.hex()}
 
 def cli(cmd, payload):
     r = subprocess.run([PHOTOND, cmd], input=json.dumps(payload), capture_output=True, text=True)
@@ -31,7 +31,7 @@ with Harness("step16", extra=["-acceptnonstdtxn=1"]) as h:
         variants.append(out)
     plan = variants[0]["plan"]
     h.check("the plan is identical for all variants", all(x["plan"] == plan for x in variants))
-    h.check("dust credit (3 of ~900k) is not in the plan but is in the committed root", len(plan["outputs"]) == 40 and p2wpkh_script(500).hex() not in [o["script"] for o in plan["outputs"]])
+    h.check("the smallest credit (3 of ~3 million) is paid too, nobody is left out", len(plan["outputs"]) == 41 and p2wpkh_script(500).hex() in [o["script"] for o in plan["outputs"]])
 
     bt = n.rpc("getattestationbatch", {"candidates": [x["candidate"] for x in variants]})
     h.check("the node attests all four variants", len(bt["candidates"]) == 4 and len({c["attestation_script"] for c in bt["candidates"]}) == 4)
@@ -43,7 +43,7 @@ with Harness("step16", extra=["-acceptnonstdtxn=1"]) as h:
         h.check(f"variant {v}: the node's validator accepts the block", err is None, str(err))
 
     # negative: the checker refuses a coinbase for a different plan, a lower bound, and a tampered plan
-    other = dict(plan); other["fee_ppm"] = 0
+    other = dict(plan); other["fee_ppb"] = 0
     rc, out = cli("photon-check", {"plan": other, "coinbase_hex": bt["candidates"][0]["coinbase_hex"], "max_reward": bt["coinbasevalue"]})
     h.check("a plan with other terms is refused", rc != 0)
     rc, out = cli("photon-check", {"plan": plan, "coinbase_hex": bt["candidates"][0]["coinbase_hex"], "max_reward": bt["coinbasevalue"] - 1})
@@ -51,6 +51,16 @@ with Harness("step16", extra=["-acceptnonstdtxn=1"]) as h:
     swapped = json.loads(json.dumps(plan)); swapped["outputs"][0]["script"] = p2wpkh_script(777).hex()
     rc, out = cli("photon-check", {"plan": swapped, "coinbase_hex": bt["candidates"][0]["coinbase_hex"], "max_reward": bt["coinbasevalue"]})
     h.check("a plan whose hash does not match, or whose script differs from the coinbase, is refused", rc != 0)
+
+    # more credits than outputs: the smaller ones take turns, the plan stays within the limit and the node accepts the coinbase
+    many = [{"script": p2wpkh_script(1000 + i).hex(), "credit": 1000 + 3 * i} for i in range(300)]
+    rc, out = cli("photon-plan", {**base, "rules": {**RULES, "n_max": 40}, "credits": many, "suffix": "09"})
+    h.check("300 credits with a limit of 40 outputs give a plan of at most 40 outputs", rc == 0 and 0 < len(out["plan"]["outputs"]) <= 40, str(rc))
+    bt3 = n.rpc("getattestationbatch", {"candidates": [out["candidate"]]})
+    err = proposal(n, block_hex_unsolved(*block_from_batch(bt3, bt3["candidates"][0], [bytes.fromhex(x["data"]) for x in bt3["transactions"]])))
+    h.check("the node validates the coinbase of the turn-taking plan", err is None, str(err))
+    rc, chk = cli("photon-check", {"plan": out["plan"], "coinbase_hex": bt3["candidates"][0]["coinbase_hex"], "max_reward": bt3["coinbasevalue"]})
+    h.check("the Rust checker accepts it as well", rc == 0, str(chk))
 
     # on chain
     r = n.rpc("submitblock", solve_parts(bt, block_from_batch(bt, bt["candidates"][2], datas)))
@@ -60,8 +70,9 @@ with Harness("step16", extra=["-acceptnonstdtxn=1"]) as h:
     paid = {o["scriptPubKey"]["hex"]: int(Decimal(str(o["value"])) * LEPTON) for o in outs if o["value"] > 0}
     total = sum(paid.values())
     h.check("the whole reward is paid out on chain", total == reward, f"{total} vs {reward}")
-    ok = all(paid[o["script"]] == reward * o["ppm"] // 1_000_000 for o in plan["outputs"])
-    h.check("every miner receives floor(reward * ppm / 1e6)", ok)
+    ok = all(paid[o["script"]] == reward * o["ppb"] // 1_000_000_000 for o in plan["outputs"])
+    h.check("every miner receives floor(reward * ppb / 1e9)", ok)
     h.check("the pool fee output holds the remainder, at least the agreed 1 %", paid[FEE_SCRIPT.hex()] >= reward // 100)
+    h.check("the smallest miner receives its (tiny) part on chain", paid.get(p2wpkh_script(500).hex(), 0) > 0, str(paid.get(p2wpkh_script(500).hex())))
     opret = [o["scriptPubKey"]["hex"] for o in outs if o["scriptPubKey"]["hex"].startswith("6a24" + b"PHOT".hex())]
     h.check("the accounting root is committed on chain", opret == ["6a24" + b"PHOT".hex() + plan["accounting_root"]], str(opret))

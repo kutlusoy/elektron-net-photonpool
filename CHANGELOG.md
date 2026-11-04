@@ -34,5 +34,7 @@ Review and operation
 
 - Protocol guideline: prior art section (DATUM, Stratum V2 Job Declaration, P2Pool) and an analysis of where the accounting commitment lives, header growth (factor 1.45 if it were in the header) and the effect of pruning; the payout outputs, not the commitment, are the real UTXO growth risk.
 
+- Photon payout plans (rules version 2): everybody with a credit is paid, no minimum amount, parts per billion instead of per million, at most `max_outputs` (default 200) per block with the smaller credits taking turns above that. The node patch reserves block weight for the largest coinbase of a request (a full block with a 128-output coinbase would otherwise exceed the weight limit). Capacity limits are documented in the protocol guideline (6.3); the gateway warns when a job exceeds the 16 KB line limit of ESP32 miners.
+
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.

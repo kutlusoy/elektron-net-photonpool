@@ -25,6 +25,16 @@ use tokio::sync::{mpsc, oneshot, watch, Semaphore};
 use tokio::time::{sleep_until, timeout, Instant as TokioInstant};
 
 const MAX_LINE: usize = 8192;
+/// Longest JSON line that ESP-Miner (Bitaxe and other ESP32 based miners) accepts: `STRATUM_V1_MAX_JSON_LINE_SIZE`.
+pub const ESP_MAX_LINE: usize = 16_384;
+static OVERSIZED_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Size of a `mining.notify` line for a coinbase with `p2wpkh_outputs` payout outputs and a merkle branch of `branch_depth` hashes:
+/// the coinbase is sent in hex (two characters per byte), plus about 260 bytes of fixed text and 68 bytes per branch hash.
+pub fn notify_size_estimate(p2wpkh_outputs: usize, branch_depth: usize) -> usize {
+    let coinbase = 31 * p2wpkh_outputs + 200;
+    2 * coinbase + 260 + 68 * branch_depth
+}
 const MAX_JOBS: usize = 16;
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const PREV_TARGET_GRACE: Duration = Duration::from_secs(60);
@@ -382,6 +392,9 @@ impl Session {
         let id = (epoch.id << 32) | n as u64;
         let mut msg = String::with_capacity(1024);
         cand.write_notify(&mut msg, id, version, ntime, clean);
+        if msg.len() > ESP_MAX_LINE - 400 && !OVERSIZED_WARNED.swap(true, Ordering::Relaxed) {
+            tracing::warn!("gateway stratum: a job is {} bytes; ESP32 based miners (Bitaxe) read at most {ESP_MAX_LINE} bytes per line and will not see it. Lower max_outputs at the pool and in this gateway.", msg.len());
+        }
         send(wr, msg.as_bytes()).await?;
         self.jobs.push_back(JobRef { id, cand: unit.cand, slice: unit.slice, version, epoch });
         while self.jobs.len() > MAX_JOBS {
@@ -505,5 +518,20 @@ impl Session {
         }
         let d = self.difficulty * ratio.clamp(0.125, 8.0);
         self.set_difficulty(wr, d).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_output_limit_fits_the_line_limit_of_esp_miner() {
+        // 200 outputs and a branch of 14 hashes (16,000 transactions)
+        assert!(notify_size_estimate(200, 14) < ESP_MAX_LINE - 2_000, "{}", notify_size_estimate(200, 14));
+        // the limit is reached at about 230 outputs
+        assert!(notify_size_estimate(240, 14) > ESP_MAX_LINE - 400);
+        // a plain one-output coinbase is small
+        assert!(notify_size_estimate(1, 12) < 2_000);
     }
 }

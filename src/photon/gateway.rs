@@ -44,8 +44,6 @@ pub struct GatewayCfg {
     pub fee_pct: f64,
     #[serde(default = "d_nmax")]
     pub max_outputs: u16,
-    #[serde(default = "d_minppm")]
-    pub min_ppm: u32,
     #[serde(default = "d_variants")]
     pub variants: u32,
     #[serde(default = "d_diff")]
@@ -76,8 +74,7 @@ pub struct GatewayCfg {
 fn d_true() -> bool { true }
 fn d_maxwait() -> u64 { 30 }
 fn d_fee() -> f64 { 1.0 }
-fn d_nmax() -> u16 { 128 }
-fn d_minppm() -> u32 { 100 }
+fn d_nmax() -> u16 { 200 }
 fn d_variants() -> u32 { 16 }
 fn d_diff() -> f64 { 0.001 }
 
@@ -180,7 +177,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     };
     let node = Arc::new(NodeRpc::new(&cfg.node_rpc_url, &cfg.node_auth)?);
     let my_script = script_for_address(&cfg.payout_address, net)?;
-    let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script: script_for_address(&cfg.fee_address, net)? };
+    let rules = Rules { n_max: cfg.max_outputs, fee_ppb: (cfg.fee_pct * 10_000_000.0).round() as u32, fee_script: script_for_address(&cfg.fee_address, net)? };
     let pin: [u8; 32] = hex::decode(&cfg.pool_key)?.try_into().map_err(|_| anyhow!("pool_key must be 32 bytes of hex"))?;
 
     if cfg.corrupt_attestation {

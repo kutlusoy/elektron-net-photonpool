@@ -200,7 +200,7 @@ impl PhotonService {
             crate::addr::script_for_address(&cfg.fee_address, net.hrp)?
         };
         let cfg_conc = cfg.max_concurrent_checks.max(1);
-        let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script };
+        let rules = Rules { n_max: cfg.max_outputs, fee_ppb: (cfg.fee_pct * 10_000_000.0).round() as u32, fee_script };
         rules.validate()?;
         let empty = Arc::new(PlanBook { epoch_id: 0, tip: [0; 32], tip_hex: String::new(), tip_height: 0, plans: BTreeMap::new(), max_reward: 0, bits: 0 });
         let (book, _) = watch::channel(empty);

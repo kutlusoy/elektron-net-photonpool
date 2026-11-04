@@ -17,8 +17,8 @@ payout_address = "be1q..."
 # Terms you agreed with the pool. A plan with other terms is refused.
 fee_address = "be1q..."
 fee_pct = 1.0
-max_outputs = 128
-min_ppm = 100
+# Largest plan this gateway accepts (outputs of the coinbase); keep it at or below 200 if ESP32 based miners (Bitaxe) are attached.
+max_outputs = 200
 
 # A lost pool connection is re-established with backoff (1 s, 2 s, 4 s ... up to max_reconnect_secs). While it is down the ASICs keep
 # working on the current template and, while the plans last, the next one; shares of the outage are lost. A wrong pool key, a ban or a

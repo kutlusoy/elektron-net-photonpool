@@ -37,7 +37,6 @@ listen = "127.0.0.1:{PHOTON}"
 key_file = "{path}.key"
 fee_address = "{addr(900)}"
 fee_pct = 1.0
-min_ppm = 100
 initial_difficulty = 0.0001
 min_difficulty = 0.00001
 ''')

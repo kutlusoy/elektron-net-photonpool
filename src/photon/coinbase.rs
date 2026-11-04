@@ -2,7 +2,7 @@
 //!
 //! vout: payouts in plan order, fee output (remainder, omitted when 0), attestation, witness commitment, `OP_RETURN "PHOT" || accounting_root`.
 use super::msg::PayoutPlan;
-use super::plan::PPM;
+use super::plan::PPB;
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 
@@ -17,17 +17,17 @@ pub fn commitment_script(root: &[u8; 32]) -> Vec<u8> {
     s
 }
 
-/// Payout values for `reward` and the fee remainder.
-pub fn split(reward: u64, plan: &PayoutPlan) -> (Vec<u64>, u64) {
-    let vals: Vec<u64> = plan.outputs.iter().map(|o| (reward as u128 * o.ppm as u128 / PPM as u128) as u64).collect();
-    let fee = reward - vals.iter().sum::<u64>();
-    (vals, fee)
+/// Payouts of `reward`: (index in the plan, value) for every output worth at least one lepton (a part below that is rounded away), and the fee remainder.
+pub fn split(reward: u64, plan: &PayoutPlan) -> (Vec<(usize, u64)>, u64) {
+    let pay: Vec<(usize, u64)> = plan.outputs.iter().enumerate().map(|(i, o)| (i, (reward as u128 * o.ppb as u128 / PPB as u128) as u64)).filter(|(_, v)| *v > 0).collect();
+    let fee = reward - pay.iter().map(|(_, v)| *v).sum::<u64>();
+    (pay, fee)
 }
 
 /// Candidate for `getattestationbatch`: outputs with explicit values, the commitment as tail output, an optional extranonce suffix.
 pub fn node_candidate(plan: &PayoutPlan, reward: u64, script_sig_suffix: &[u8]) -> Value {
-    let (vals, fee) = split(reward, plan);
-    let mut outs: Vec<Value> = plan.outputs.iter().zip(&vals).map(|(o, v)| json!({"scriptPubKey": hex::encode(&o.script), "value": v})).collect();
+    let (pay, fee) = split(reward, plan);
+    let mut outs: Vec<Value> = pay.iter().map(|(i, v)| json!({"scriptPubKey": hex::encode(&plan.outputs[*i].script), "value": v})).collect();
     if fee > 0 {
         outs.push(json!({"scriptPubKey": hex::encode(&plan.fee_script), "value": fee}));
     }
@@ -164,8 +164,8 @@ pub fn check_announced(plan: &PayoutPlan, cb: &ParsedCoinbase, max_reward: u64) 
     if reward > max_reward {
         bail!("coinbase value {reward} above the bound {max_reward}");
     }
-    let (vals, fee) = split(reward, plan);
-    let mut expect: Vec<(u64, &[u8])> = plan.outputs.iter().zip(&vals).map(|(o, v)| (*v, o.script.as_slice())).collect();
+    let (pay, fee) = split(reward, plan);
+    let mut expect: Vec<(u64, &[u8])> = pay.iter().map(|(i, v)| (*v, plan.outputs[*i].script.as_slice())).collect();
     if fee > 0 {
         expect.push((fee, plan.fee_script.as_slice()));
     }
@@ -199,13 +199,13 @@ mod tests {
     use crate::tx::{build_coinbase, TxOutput};
 
     fn plan() -> PayoutPlan {
-        let rules = Rules { n_max: 8, min_ppm: 100, fee_ppm: 10_000, fee_script: vec![0, 20, 0xfe] };
+        let rules = Rules { n_max: 8, fee_ppb: 10_000_000, fee_script: vec![0, 20, 0xfe] };
         derive(&rules, [1; 32], 1001, &[(vec![0, 20, 1], 600), (vec![0, 20, 2], 300), (vec![0, 20, 3], 100)]).unwrap()
     }
 
     fn make(plan: &PayoutPlan, reward: u64, tweak: impl Fn(&mut Vec<TxOutput>)) -> ParsedCoinbase {
-        let (vals, fee) = split(reward, plan);
-        let mut outs: Vec<TxOutput> = plan.outputs.iter().zip(&vals).map(|(o, v)| TxOutput { value: *v as i64, script: o.script.clone() }).collect();
+        let (pay, fee) = split(reward, plan);
+        let mut outs: Vec<TxOutput> = pay.iter().map(|(i, v)| TxOutput { value: *v as i64, script: plan.outputs[*i].script.clone() }).collect();
         if fee > 0 {
             outs.push(TxOutput { value: fee as i64, script: plan.fee_script.clone() });
         }
@@ -228,8 +228,8 @@ mod tests {
         let reward = 5_000_000_000u64;
         let cb = make(&p, reward, |_| {});
         assert_eq!(check_announced(&p, &cb, reward).unwrap(), reward);
-        let (vals, fee) = split(reward, &p);
-        assert_eq!(vals.iter().sum::<u64>() + fee, reward);
+        let (pay, fee) = split(reward, &p);
+        assert_eq!(pay.iter().map(|(_, v)| v).sum::<u64>() + fee, reward);
         assert!(fee >= reward / 100, "fee share at least the agreed 1 %");
     }
 
@@ -263,8 +263,8 @@ mod tests {
     #[test]
     fn rounding_remainder_goes_to_the_fee_and_zero_fee_output_is_omitted() {
         let mut p = plan();
-        p.outputs = vec![PlanOutput { script: vec![0, 20, 1], ppm: 1_000_000 }];
-        p.fee_ppm = 0;
+        p.outputs = vec![PlanOutput { script: vec![0, 20, 1], ppb: 1_000_000_000 }];
+        p.fee_ppb = 0;
         let cb = make(&p, 1_234_567, |_| {});
         assert_eq!(cb.outputs.len(), 4, "one payout, attestation, witness commitment, commitment");
         check_announced(&p, &cb, 2_000_000).unwrap();

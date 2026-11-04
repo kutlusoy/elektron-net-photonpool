@@ -148,15 +148,15 @@ mod tests {
     use crate::tx::{build_coinbase, merkle_branch, TxOutput};
 
     fn setup(variants: usize, bits: u32) -> (PayoutPlan, Announced) {
-        let rules = Rules { n_max: 8, min_ppm: 100, fee_ppm: 10_000, fee_script: vec![0, 20, 0xfe] };
+        let rules = Rules { n_max: 8, fee_ppb: 10_000_000, fee_script: vec![0, 20, 0xfe] };
         let tip = [5u8; 32];
         let plan = derive(&rules, tip, 1001, &[(vec![0, 20, 1], 700), (vec![0, 20, 2], 300)]).unwrap();
         let reward = 5_000_000_000u64;
-        let (vals, fee) = split(reward, &plan);
+        let (pay, fee) = split(reward, &plan);
         let others: Vec<[u8; 32]> = (0..5u8).map(|i| sha256d(&[i])).collect();
         let mut coinbases = vec![];
         for v in 0..variants {
-            let mut outs: Vec<TxOutput> = plan.outputs.iter().zip(&vals).map(|(o, x)| TxOutput { value: *x as i64, script: o.script.clone() }).collect();
+            let mut outs: Vec<TxOutput> = pay.iter().map(|(i, x)| TxOutput { value: *x as i64, script: plan.outputs[*i].script.clone() }).collect();
             outs.push(TxOutput { value: fee as i64, script: plan.fee_script.clone() });
             let mut att = vec![0x6a, 0x02, 0xe9, 0x03, 0x20];
             att.extend_from_slice(&sha256d(&[v as u8]));

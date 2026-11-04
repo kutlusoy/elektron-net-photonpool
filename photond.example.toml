@@ -128,9 +128,10 @@ key_file = "photon.key"
 # Fee output of the coinbase plan (default: the first pool payout address).
 # fee_address = "be1q..."
 fee_pct = 1.0
-max_outputs = 128
+# Most payout outputs of one block. Everybody with a credit is paid; with more credits than this the smaller ones take turns.
+# 200 keeps a job below the 16 KB line limit of ESP32 based miners (Bitaxe); see doc-elektron/guideline-photon-protocol.md 6.1 and 7.1.
+max_outputs = 200
 # Payout addresses (channels) one gateway connection may serve.
 max_channels_per_connection = 64
 # Smallest payout part in parts per million of the block reward; smaller credits carry over.
-min_ppm = 100
 window_factor = 2.0

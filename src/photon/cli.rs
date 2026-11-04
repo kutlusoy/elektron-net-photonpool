@@ -16,14 +16,14 @@ fn num(v: &Value, k: &str) -> Result<u64> {
 }
 
 fn rules_of(v: &Value) -> Result<Rules> {
-    Ok(Rules { n_max: num(v, "n_max")? as u16, min_ppm: num(v, "min_ppm")? as u32, fee_ppm: num(v, "fee_ppm")? as u32, fee_script: hexf(v, "fee_script")? })
+    Ok(Rules { n_max: num(v, "n_max")? as u16, fee_ppb: num(v, "fee_ppb")? as u32, fee_script: hexf(v, "fee_script")? })
 }
 
 pub fn plan_json(p: &PayoutPlan) -> Value {
     json!({
         "tip": hex::encode(p.tip), "height": p.height, "rules_version": p.rules_version, "plan_hash": hex::encode(p.plan_hash),
-        "accounting_root": hex::encode(p.accounting_root), "fee_script": hex::encode(&p.fee_script), "fee_ppm": p.fee_ppm,
-        "outputs": p.outputs.iter().map(|o| json!({"script": hex::encode(&o.script), "ppm": o.ppm})).collect::<Vec<_>>(),
+        "accounting_root": hex::encode(p.accounting_root), "fee_script": hex::encode(&p.fee_script), "fee_ppb": p.fee_ppb,
+        "outputs": p.outputs.iter().map(|o| json!({"script": hex::encode(&o.script), "ppb": o.ppb})).collect::<Vec<_>>(),
     })
 }
 
@@ -35,8 +35,8 @@ fn plan_from(v: &Value) -> Result<PayoutPlan> {
         plan_hash: h32(v, "plan_hash")?,
         accounting_root: h32(v, "accounting_root")?,
         fee_script: hexf(v, "fee_script")?,
-        fee_ppm: num(v, "fee_ppm")? as u32,
-        outputs: v["outputs"].as_array().ok_or_else(|| anyhow!("missing outputs"))?.iter().map(|o| Ok(PlanOutput { script: hexf(o, "script")?, ppm: num(o, "ppm")? as u32 })).collect::<Result<_>>()?,
+        fee_ppb: num(v, "fee_ppb")? as u32,
+        outputs: v["outputs"].as_array().ok_or_else(|| anyhow!("missing outputs"))?.iter().map(|o| Ok(PlanOutput { script: hexf(o, "script")?, ppb: num(o, "ppb")? as u32 })).collect::<Result<_>>()?,
     })
 }
 

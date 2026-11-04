@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.9 (prior art, placement of the commitment; automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
+- **Version:** 0.12 (everybody is paid, no minimum, parts per billion, turn-taking above the output limit, capacity limits; prior art, placement of the commitment; automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -57,7 +57,7 @@ A miner that does not want to run a node keeps using the existing pool-template 
 | `Setup` / `SetupAck` | both | version, features (`extranonce_variants`, `batch_shares`, `legacy_stratum_proxy`), limits |
 | `OpenChannel` / `OpenChannelAck` | gateway to pool, back | payout script of the miner, requested share target, channel id; the pool answers with the accepted target and the current payout plan |
 | `NewTip` | pool to gateway | tip hash and height as early as the pool knows them (a hint; gateways follow their own node) |
-| `PayoutPlan` | pool to gateway | for height `h+1`: plan hash, accounting root, list of `(script, ppm)` outputs, fee output, rules version (section 6) |
+| `PayoutPlan` | pool to gateway | for height `h+1`: plan hash, accounting root, list of `(script, ppb)` outputs, fee output, rules version (section 6) |
 | `TemplateAnnounce` | gateway to pool | tip hash, template id, coinbase (non-witness, so the pool can check the outputs), merkle branch, version, bits, attestation commitment; sent once per variant batch, not per share |
 | `Shares` | gateway to pool | batch of `(channel, template id, variant, nonce, ntime delta, version bits)`, about 16 bytes per share; the pool recomputes the header hash |
 | `ShareAck` | pool to gateway | batched accept counts and per-share rejects with reason codes (stale, duplicate, low difficulty, unknown template, bad coinbase) |
@@ -76,16 +76,18 @@ For every block the pool publishes a `PayoutPlan` for height `h+1` computed **on
 
 The plan is a deterministic function of the accounting state:
 
-1. Take the credits (PPLNS-style window or another rule fixed by `rules_version`) of the window ending at block `h-1`.
-2. Remove outputs below the dust limit; their credit is carried to the next plan.
-3. Keep at most `N_max` outputs (default 128), largest credits first; the rest is carried.
-4. Express each output as parts per million of the block reward; the pool fee is an explicit output with a published rate.
-5. Compute `plan_hash` over the canonical serialization and `accounting_root` over all credits (section 7).
+1. Take the credits (PPLNS-style window or another rule fixed by `rules_version`) of the window ending at block `h-2`.
+2. **Everybody with a credit is paid.** There is no minimum amount and no minimum part; nothing is held back. A credit becomes a weight, the weights are normalised so that payouts plus the pool fee are exactly the whole reward, and each output is expressed in **parts per billion (ppb)** of the block reward (at the current subsidy of 5 coins one part is half a lepton, so only a credit worth less than one lepton per block is rounded away; that remainder goes to the fee output).
+3. Up to `N_max` credits (default 200) are all paid in every block.
+4. With more credits than `N_max` the plan keeps the **largest `N_max - N_max/4` credits in every block** and lets the rest take turns: the remaining credits, ordered by script, are split into `g = ceil(rest / (N_max/4))` groups, the group `h mod g` is in the plan of block `h`, and its credit is multiplied by `g`. Every credit is therefore paid at its full value once per cycle of `g` blocks (about every `g` minutes with 60-second blocks), nobody is dropped, and a plan never has more than `N_max` outputs. The multiplication keeps the long-run share equal to the credit's share; the share of a single block fluctuates slightly with the size of the group.
+5. Order the outputs by part descending, then script; compute `plan_hash` over the canonical serialization and `accounting_root` over **all** credits (section 7).
+
+Why a limit at all: `N_max` is not a dust rule, it protects what is on the other side of the coinbase. ESP32 based miners (Bitaxe and others running ESP-Miner) accept at most 16,384 bytes per Stratum line (`STRATUM_V1_MAX_JSON_LINE_SIZE`), and a job carries the whole coinbase in hex, so a job with more than about 230 p2wpkh outputs cannot be read by them; 200 leaves room for a merkle branch of 14 hashes. See 6.3 for the other limits.
 
 ### 6.2 Coinbase layout
 
 ```text
-vout[0..k-1]   payouts, in plan order, value = floor(reward * ppm / 1_000_000)
+vout[0..k-1]   payouts, in plan order, value = floor(reward * ppb / 1_000_000_000); an output worth 0 is left out
 vout[k]        pool fee output, value = remainder of the reward (so the sum is exact)
 vout[k+1]      attestation OP_RETURN         (from the gateway's node)
 vout[k+2]      witness commitment            (from the gateway's node)
@@ -119,7 +121,21 @@ Sizes (60-second blocks, 525,600 blocks per year, pruning window 197,280 blocks 
 - **If it were in the header:** 80 B would become 116 B (36 B: 32 B root plus the 4 B tag), a factor of **1.45** (1.40 without the tag). The header chain, which is never pruned, would grow from 42 MB to 61 MB per year, 19 MB more every year, forever. That is why the body is the better place even apart from consensus.
 - **Pruning:** a pruned node deletes the block bodies, and with them the commitment, after 137 days. That is much longer than anything the commitment is needed for: a miner compares the root with the pool's `EpochCommit` and its own proof when the block is found and paid (maturity is 100 blocks, about 100 minutes). Whoever wants to prove a credit later keeps a receipt (the coinbase transaction, its merkle branch to the header, and the proof of its leaf; a few hundred bytes), because from the header chain alone the commitment cannot be reconstructed after pruning; unpruned nodes and block explorers keep it.
 - **UTXO set and attestation:** the commitment is an `OP_RETURN` output. It is unspendable, never enters the UTXO set and is not part of the attested set. It costs block space only.
-- **The real storage cost is the payout outputs**, not the commitment. A plan with 128 outputs adds up to 128 spendable outputs per block (67 million per year at full size), which grows the UTXO set that every node holds and that the attestation covers. The knobs are `max_outputs` (`n_max`), `min_ppm` (smallest part that is paid; smaller credits carry over to later plans) and, if needed, paying only every N-th block or only above a minimum amount in leptons. The defaults (128, 100 ppm) are a starting point for testing; for mainnet the number of outputs per block should be chosen against the expected number of active gateways and the node operators' tolerance for UTXO growth. This is an open decision, see section 16.
+- **The real storage cost is the payout outputs**, not the commitment. Everybody is paid, so a block carries up to `N_max` (200) spendable payout outputs: 4 to 6 KB per block, up to 105 million new outputs per year in the worst case (all 200 slots used in every block), about 1.2 GB of block data in a pruned node (197,280 blocks), and the same number of entries in the UTXO set that every node holds and the attestation covers. This is the accepted price of paying everybody on chain without holding anything back (decision of the project). It is bounded by `N_max`, it grows only with the number of distinct payout addresses, and miners can keep it low by using one address for a whole farm and by spending (consolidating) their payouts. No minimum amount exists to hold it back.
+
+### 6.3 Capacity: what limits the number of outputs
+
+Measured or read from the sources, 60-second blocks, regtest node with the Photon patch:
+
+| Limit | Value | What was done |
+|---|---|---|
+| ESP-Miner line size | 16,384 bytes per Stratum line; a job with 200 outputs is about 13 KB, with 1 output about 0.7 KB | `N_max` default 200; the gateway warns when a job exceeds 16,000 bytes |
+| Block weight reserved for the coinbase | the node reserves 8,000 weight units by default; a coinbase with 128 outputs weighs 16.5 k, with 200 outputs 25.4 k. On a full block this would exceed the block limit | **fixed in the node patch**: `getattestationbatch` reserves room for the largest coinbase of the request (`test/step22_coinbase_weight.py`: blocks of 324, 288 and 255 transactions for 1, 128 and 200 outputs, 92.8 k, 98.3 k and 97.9 k of a 100 k limit) |
+| Attestation time per candidate | 0.21 ms with 1 output, 2.2 ms with 128, 7.2 ms with 512 (about 0.014 ms per output) | a farm needing 100 variants spends about 0.34 s of node time per tip at 200 outputs |
+| RPC request size | one candidate with 128 outputs is about 19 KB of JSON; the node accepts 32 MB per request (about 1,500 variants) | `attest_all` splits larger requests |
+| Wire frames | plan with 200 outputs about 6 KB, an announced coinbase 6.4 KB, announces are cut at 48 KB (7 variants) | within the 64 KB frame limit |
+| Stratum traffic to the ASICs | every job carries the whole coinbase. With 12 version bits an ASIC needs a new job after 2^44 hashes: about 5 jobs per second at 100 TH/s, 11 at 200 TH/s. At 200 outputs that is 65 to 140 KB/s per ASIC, 0.5 to 1.1 Gbit/s for 1,000 ASICs | **open bottleneck for big farms.** Options: more coinbase variants per group of ASICs so that each can roll all 16 version bits (16 times fewer jobs, costs attestation time), a lower `max_outputs`, or Stratum V2 standard channels where a job is a merkle root and not a coinbase |
+| UTXO set and block data | see 7.1 | accepted |
 
 ## 8. Search space without extranonce limits
 
@@ -179,7 +195,7 @@ Legacy miners keep working on the same pool: they remain in the ledger and are p
 | Gateway mines on a stale tip | All messages carry the tip hash; stale shares are rejected |
 | Duplicate or replayed shares | Share key is the header hash, per-epoch dedupe |
 | Fake hashrate | Share proof of work is checked by the pool |
-| Dust and Sybil accounts | Dust limit, `N_max`, carry-over of small credits |
+| Many tiny accounts (Sybil) | `N_max` bounds the outputs per block and everybody is still paid in turns; the cost is paid by the attacker's own tiny credits and by the UTXO set (6.3, 7.1) |
 | Connection flooding | Noise authentication, per-IP and per-channel limits, bounded frames |
 | Reorgs | Plans and announcements are tied to a tip hash; credits are settled only for blocks that stay in the chain |
 
@@ -230,10 +246,10 @@ Code: `src/photon/` (`wire.rs`, `msg.rs`, `noise.rs`, `merkle.rs`, `plan.rs`, `c
 - **Framing:** `ext u16 | type u8 | length u24 | payload`, payload cap 64 KiB, the cap is enforced when the header is complete (before buffering). Messages 0x00-0x0f in extension 0 (`Setup`, `SetupAck`, `OpenChannel`, `OpenChannelAck`, `NewTip`, `PayoutPlan`, `TemplateAnnounce`, `Shares`, `ShareAck`, `SetTarget`, `BlockFound`, `EpochCommit`, `GetProof`, `Proof`, `Reject`, `Disconnect`). Decoding is strict: every collection is capped, truncated or trailing bytes are errors. Three wire vectors are frozen in `msg.rs`; a change there is a protocol change.
 - **Transport:** `Noise_NX_25519_ChaChaPoly_SHA256`, prologue `photon/1`. The gateway pins the pool's static key (decision for v1: key pinning instead of a certificate authority, see open question 1). Noise messages carry a u16 length prefix; frames are cut into 65,519-byte chunks and reassembled.
 - **`TemplateAnnounce`:** carries the non-witness coinbases of a batch of variants (at most 64 per message) plus one merkle branch (the transaction set is the same for all variants). Shares address a variant by number; the pool recomputes `merkle root = coinbase txid + branch` and the header (BIP 320 version rolling mask `0x1fffe000`, ntime advance at most 7200 s).
-- **Plan rules v1:** ppm = floor(credit * (1e6 - fee_ppm) / total); entries below `min_ppm` are dropped (credit carries over); at most `n_max` entries (largest credit first, ties by script bytes); ppm recomputed over the kept entries; outputs ordered by ppm descending then script. `plan_hash = SHA256("PHOTON-PLAN-V1" || rules || height || tip || root || outputs || fee)`. A gateway refuses a plan whose hash, bounds, ordering or fee terms deviate (`check_plan`).
+- **Plan rules (version 2, see 6.1):** ppb = floor(weight * (1e9 - fee_ppb) / total weight); all credits are paid, with turn-taking above `n_max`; outputs ordered by ppb descending then script. `plan_hash = SHA256("PHOTON-PLAN-V2" || rules || height || tip || root || outputs || fee)`. A gateway refuses a plan whose hash, bounds, ordering or fee terms deviate (`check_plan`).
 - **Accounting tree:** leaf `SHA256(0x00 || u16 len || script || u64 credit)`, node `SHA256(0x01 || l || r)`, odd nodes are promoted unchanged, root `SHA256(0x02 || u32 count || top)`; leaves sorted by script, scripts unique. The frozen root vector was computed independently in Python.
-- **Coinbase:** payouts in plan order (value = floor(reward * ppm / 1e6)), fee output with the remainder (omitted when 0), attestation, witness commitment, `OP_RETURN "PHOT" || root`. The checker (`check_announced`) verifies layout, values, locktime, BIP 34 height, the shape of the attestation and witness commitment outputs and a reward bound. It cannot verify the attestation digest itself; that is the node's spot check (`Trust`: probability 0.5 decaying to 0.02 with clean checks, multiplied by 4 per failure, ban after 3 failures).
-- **Measured end to end** (`step16`): 4 extranonce variants of a 40-miner plan are attested in one node call, accepted by the Rust checker and by the node's validator, one block is accepted by `submitblock` and pays exactly `floor(reward * ppm / 1e6)` per miner with the root on chain.
+- **Coinbase:** payouts in plan order (value = floor(reward * ppb / 1e9), outputs worth 0 are left out), fee output with the remainder (omitted when 0), attestation, witness commitment, `OP_RETURN "PHOT" || root`. The checker (`check_announced`) verifies layout, values, locktime, BIP 34 height, the shape of the attestation and witness commitment outputs and a reward bound. It cannot verify the attestation digest itself; that is the node's spot check (`Trust`: probability 0.5 decaying to 0.02 with clean checks, multiplied by 4 per failure, ban after 3 failures).
+- **Measured end to end** (`step16`): 4 extranonce variants of a 40-miner plan are attested in one node call, accepted by the Rust checker and by the node's validator, one block is accepted by `submitblock` and pays exactly `floor(reward * ppb / 1e9)` per miner with the root on chain.
 
 ## 14b. Pool session and gateway (v0.3)
 
@@ -329,7 +345,7 @@ Limits: an outage longer than the known plans (about one block) stops the work, 
 
 1. Noise suite and certificate scheme (25519 or secp256k1, who signs the pool key).
 2. Whether the reward fraction rules need the exact fee amount of the gateway's template or a bound only.
-3. Maximum number of coinbase outputs under block weight and attestation cost on mainnet, and how many payout outputs per block the UTXO set should tolerate (section 7.1: up to 67 million new outputs per year at 128 per block).
+3. How to carry many outputs to ASICs without the Stratum V1 traffic of a full coinbase in every job (section 6.3).
 4. How legacy ledger miners and Photon channels share one block reward in the plan.
 5. Whether the accounting commitment should cover the share log as well as the credits.
 6. Share chain design for a later pool-less mode.

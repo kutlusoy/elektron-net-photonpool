@@ -1,8 +1,8 @@
 diff --git a/src/rpc/mining.cpp b/src/rpc/mining.cpp
-index b6fbf12..2ed26db 100644
+index b6fbf12..520a0a0 100644
 --- a/src/rpc/mining.cpp
 +++ b/src/rpc/mining.cpp
-@@ -1201,6 +1201,196 @@ static RPCMethod submitheader()
+@@ -1201,6 +1201,207 @@ static RPCMethod submitheader()
      };
  }
  
@@ -103,7 +103,18 @@ index b6fbf12..2ed26db 100644
 +    if (!IsMuhashAttestationActive(nHeight, params)) throw JSONRPCError(RPC_MISC_ERROR, "unsupported-height: batch attestation needs the MuHash attestation");
 +    if (chainman.IsInitialBlockDownload()) throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, "node is still syncing");
 +
-+    std::unique_ptr<BlockTemplate> tmpl{miner.createNewBlock({.coinbase_output_script = CScript() << OP_TRUE, .include_dummy_extranonce = true}, /*cooldown=*/false)};
++    // The template must leave room for the largest coinbase of this request, otherwise a full block plus a coinbase with many outputs
++    // would exceed the block weight limit. Upper bound of the weight of a candidate's coinbase: non-witness bytes at 4 WU, plus the
++    // witness (marker, flag, reserved value) and a margin for the attestation and witness commitment outputs.
++    size_t max_coinbase_weight{0};
++    for (const Cand& pc : parsed) {
++        size_t bytes{4 + 1 + 32 + 4 + 1 + 100 + 4 + 3 + 4 + (8 + 1 + 40) + (8 + 1 + 38)};
++        for (const Out& o : pc.outputs) bytes += 8 + 3 + o.script.size();
++        for (const Out& o : pc.tail) bytes += 8 + 3 + o.script.size();
++        max_coinbase_weight = std::max(max_coinbase_weight, bytes * 4 + 40);
++    }
++    const size_t reserved_weight{std::clamp<size_t>(std::max<size_t>(DEFAULT_BLOCK_RESERVED_WEIGHT, max_coinbase_weight + 400), MINIMUM_BLOCK_RESERVED_WEIGHT, MAX_BLOCK_WEIGHT / 2)};
++    std::unique_ptr<BlockTemplate> tmpl{miner.createNewBlock({.block_reserved_weight = reserved_weight, .coinbase_output_script = CScript() << OP_TRUE, .include_dummy_extranonce = true}, /*cooldown=*/false)};
 +    if (!tmpl) throw JSONRPCError(RPC_INTERNAL_ERROR, "failed to create a block template");
 +    CBlock block{tmpl->getBlock()};
 +    const node::CoinbaseTx cbinfo{tmpl->getCoinbaseTx()};
@@ -199,7 +210,7 @@ index b6fbf12..2ed26db 100644
  void RegisterMiningRPCCommands(CRPCTable& t)
  {
      static const CRPCCommand commands[]{
-@@ -1209,6 +1399,7 @@ void RegisterMiningRPCCommands(CRPCTable& t)
+@@ -1209,6 +1410,7 @@ void RegisterMiningRPCCommands(CRPCTable& t)
          {"mining", &prioritisetransaction},
          {"mining", &getprioritisedtransactions},
          {"mining", &getblocktemplate},
