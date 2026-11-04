@@ -406,9 +406,6 @@ pub struct PhotonCfg {
     /// Smallest payout part in parts per million of the reward.
     #[serde(default = "d_ph_minppm")]
     pub min_ppm: u32,
-    /// Smallest payout output in leptons (measured at the subsidy). Smaller credits get no output; keeps the UTXO set free of dust.
-    #[serde(default = "d_ph_minlep")]
-    pub min_output_leptons: u64,
     #[serde(default = "d_ph_window")]
     pub window_factor: f64,
     #[serde(default = "d_s_diff")]
@@ -454,7 +451,6 @@ fn d_ph_key() -> String { "photon.key".into() }
 fn d_ph_fee() -> f64 { 1.0 }
 fn d_ph_nmax() -> u16 { 128 }
 fn d_ph_minppm() -> u32 { 100 }
-fn d_ph_minlep() -> u64 { 100_000 }
 fn d_ph_window() -> f64 { 2.0 }
 fn d_ph_conn() -> usize { 1000 }
 fn d_ph_conn_ip() -> usize { 32 }

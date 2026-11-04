@@ -7,7 +7,7 @@ from photon_testlib import *
 
 PHOTOND = os.environ.get("PHOTOND", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "target", "release", "photond"))
 FEE_SCRIPT = p2wpkh_script(900)
-RULES = {"n_max": 128, "min_ppm": 100, "min_output_leptons": 100_000, "fee_ppm": 10000, "fee_script": FEE_SCRIPT.hex()}
+RULES = {"n_max": 128, "min_ppm": 100, "fee_ppm": 10000, "fee_script": FEE_SCRIPT.hex()}
 
 def cli(cmd, payload):
     r = subprocess.run([PHOTOND, cmd], input=json.dumps(payload), capture_output=True, text=True)
@@ -32,7 +32,6 @@ with Harness("step16", extra=["-acceptnonstdtxn=1"]) as h:
     plan = variants[0]["plan"]
     h.check("the plan is identical for all variants", all(x["plan"] == plan for x in variants))
     h.check("dust credit (3 of ~900k) is not in the plan but is in the committed root", len(plan["outputs"]) == 40 and p2wpkh_script(500).hex() not in [o["script"] for o in plan["outputs"]])
-    h.check("the plan carries the reference reward", plan["ref_reward"] == reward)
 
     bt = n.rpc("getattestationbatch", {"candidates": [x["candidate"] for x in variants]})
     h.check("the node attests all four variants", len(bt["candidates"]) == 4 and len({c["attestation_script"] for c in bt["candidates"]}) == 4)
@@ -53,15 +52,6 @@ with Harness("step16", extra=["-acceptnonstdtxn=1"]) as h:
     rc, out = cli("photon-check", {"plan": swapped, "coinbase_hex": bt["candidates"][0]["coinbase_hex"], "max_reward": bt["coinbasevalue"]})
     h.check("a plan whose hash does not match, or whose script differs from the coinbase, is refused", rc != 0)
 
-    # the minimum amount in leptons removes the smallest credits from the plan; the node accepts such a coinbase as well
-    strict = {**RULES, "min_output_leptons": 1_000_000}
-    rc, out = cli("photon-plan", {**base, "rules": strict, "suffix": "07"})
-    h.check("a higher minimum amount drops more small credits", rc == 0 and 0 < len(out["plan"]["outputs"]) < 40, str(len(out["plan"]["outputs"])))
-    bt2 = n.rpc("getattestationbatch", {"candidates": [out["candidate"]]})
-    err = proposal(n, block_hex_unsolved(*block_from_batch(bt2, bt2["candidates"][0], [bytes.fromhex(x["data"]) for x in bt2["transactions"]])))
-    h.check("the node validates the coinbase of the stricter plan", err is None, str(err))
-    h.check("every output of the stricter plan is worth the minimum", all(reward * o["ppm"] // 1_000_000 >= 1_000_000 for o in out["plan"]["outputs"]))
-
     # on chain
     r = n.rpc("submitblock", solve_parts(bt, block_from_batch(bt, bt["candidates"][2], datas)))
     h.check("the block is accepted by submitblock", r is None, str(r))
@@ -72,7 +62,6 @@ with Harness("step16", extra=["-acceptnonstdtxn=1"]) as h:
     h.check("the whole reward is paid out on chain", total == reward, f"{total} vs {reward}")
     ok = all(paid[o["script"]] == reward * o["ppm"] // 1_000_000 for o in plan["outputs"])
     h.check("every miner receives floor(reward * ppm / 1e6)", ok)
-    h.check("every payout output is worth at least the minimum amount of 100,000 leptons", all(paid[o["script"]] >= 100_000 for o in plan["outputs"]), str(sorted(paid.values())[:3]))
     h.check("the pool fee output holds the remainder, at least the agreed 1 %", paid[FEE_SCRIPT.hex()] >= reward // 100)
     opret = [o["scriptPubKey"]["hex"] for o in outs if o["scriptPubKey"]["hex"].startswith("6a24" + b"PHOT".hex())]
     h.check("the accounting root is committed on chain", opret == ["6a24" + b"PHOT".hex() + plan["accounting_root"]], str(opret))

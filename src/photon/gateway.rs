@@ -46,9 +46,6 @@ pub struct GatewayCfg {
     pub max_outputs: u16,
     #[serde(default = "d_minppm")]
     pub min_ppm: u32,
-    /// Smallest payout output in leptons that the pool applies (agreed terms, like the fee).
-    #[serde(default = "d_minlep")]
-    pub min_output_leptons: u64,
     #[serde(default = "d_variants")]
     pub variants: u32,
     #[serde(default = "d_diff")]
@@ -81,7 +78,6 @@ fn d_maxwait() -> u64 { 30 }
 fn d_fee() -> f64 { 1.0 }
 fn d_nmax() -> u16 { 128 }
 fn d_minppm() -> u32 { 100 }
-fn d_minlep() -> u64 { 100_000 }
 fn d_variants() -> u32 { 16 }
 fn d_diff() -> f64 { 0.001 }
 
@@ -184,7 +180,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     };
     let node = Arc::new(NodeRpc::new(&cfg.node_rpc_url, &cfg.node_auth)?);
     let my_script = script_for_address(&cfg.payout_address, net)?;
-    let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, min_output_leptons: cfg.min_output_leptons, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script: script_for_address(&cfg.fee_address, net)? };
+    let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script: script_for_address(&cfg.fee_address, net)? };
     let pin: [u8; 32] = hex::decode(&cfg.pool_key)?.try_into().map_err(|_| anyhow!("pool_key must be 32 bytes of hex"))?;
 
     if cfg.corrupt_attestation {
@@ -500,10 +496,6 @@ async fn build_template(node: &Arc<NodeRpc>, cfg: &GatewayCfg, plan: &PayoutPlan
     // the reward is only known from the node's template; the trivial candidate costs one cheap call
     let probe = node.call("getattestationbatch", json!([{"candidates": [{"outputs": [{"scriptPubKey": hex::encode(&plan.fee_script)}]}]}])).await?;
     let reward = probe["coinbasevalue"].as_u64().ok_or_else(|| anyhow!("no coinbasevalue"))?;
-    // the plan's reference reward must be about the node's reward, otherwise the minimum output amount could be bent
-    if plan.ref_reward == 0 || plan.ref_reward > reward.saturating_mul(4) || plan.ref_reward.saturating_mul(4) < reward {
-        bail!("plan reference reward {} is implausible for the node's reward {}", plan.ref_reward, reward);
-    }
     let height = probe["height"].as_u64().unwrap_or(0) as u32;
     if height != plan.height {
         bail!("node template is for height {height}, plan is for {}", plan.height);

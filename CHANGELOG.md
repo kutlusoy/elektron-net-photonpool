@@ -34,7 +34,5 @@ Review and operation
 
 - Protocol guideline: prior art section (DATUM, Stratum V2 Job Declaration, P2Pool) and an analysis of where the accounting commitment lives, header growth (factor 1.45 if it were in the header) and the effect of pruning; the payout outputs, not the commitment, are the real UTXO growth risk.
 
-- Photon plans (rules version 2) carry a reference reward and a minimum payout amount in leptons (`min_output_leptons`, default 100,000) next to `min_ppm`, so no payout output is dust. Miners whose share stays below the minimum are not paid on chain by the plan (open design question, protocol guideline 6.1).
-
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.

@@ -199,8 +199,8 @@ mod tests {
     use crate::tx::{build_coinbase, TxOutput};
 
     fn plan() -> PayoutPlan {
-        let rules = Rules { n_max: 8, min_ppm: 100, min_output_leptons: 0, fee_ppm: 10_000, fee_script: vec![0, 20, 0xfe] };
-        derive(&rules, [1; 32], 1001, 5_000_000_000, &[(vec![0, 20, 1], 600), (vec![0, 20, 2], 300), (vec![0, 20, 3], 100)]).unwrap()
+        let rules = Rules { n_max: 8, min_ppm: 100, fee_ppm: 10_000, fee_script: vec![0, 20, 0xfe] };
+        derive(&rules, [1; 32], 1001, &[(vec![0, 20, 1], 600), (vec![0, 20, 2], 300), (vec![0, 20, 3], 100)]).unwrap()
     }
 
     fn make(plan: &PayoutPlan, reward: u64, tweak: impl Fn(&mut Vec<TxOutput>)) -> ParsedCoinbase {

@@ -69,8 +69,6 @@ pub struct PayoutPlan {
     pub outputs: Vec<PlanOutput>,
     pub fee_script: Vec<u8>,
     pub fee_ppm: u32,
-    /// Reward (the subsidy) the minimum output amount was converted with; see `plan::Rules::effective_min_ppm`.
-    pub ref_reward: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,7 +236,7 @@ impl Msg {
                 for o in &m.outputs {
                     w.bytes16(&o.script).u32(o.ppm);
                 }
-                w.bytes16(&m.fee_script).u32(m.fee_ppm).u64(m.ref_reward);
+                w.bytes16(&m.fee_script).u32(m.fee_ppm);
             }
             Msg::TemplateAnnounce(m) => {
                 w.h32(&m.tip).u32(m.template_id).u32(m.height).u32(m.version).u32(m.bits).u32(m.curtime);
@@ -314,7 +312,7 @@ impl Msg {
                 for _ in 0..n {
                     outputs.push(PlanOutput { script: r.bytes16(MAX_SCRIPT)?, ppm: r.u32()? });
                 }
-                Msg::PayoutPlan(PayoutPlan { tip, height, rules_version, plan_hash, accounting_root, outputs, fee_script: r.bytes16(MAX_SCRIPT)?, fee_ppm: r.u32()?, ref_reward: r.u64()? })
+                Msg::PayoutPlan(PayoutPlan { tip, height, rules_version, plan_hash, accounting_root, outputs, fee_script: r.bytes16(MAX_SCRIPT)?, fee_ppm: r.u32()? })
             }
             0x06 => {
                 let (tip, template_id, height, version, bits, curtime) = (r.h32()?, r.u32()?, r.u32()?, r.u32()?, r.u32()?, r.u32()?);
@@ -384,7 +382,7 @@ mod tests {
             Msg::OpenChannel(OpenChannel { request: 7, payout_script: vec![0, 20, 1, 2, 3], target: h(0x0f) }),
             Msg::OpenChannelAck(OpenChannelAck { request: 7, channel: 3, target: h(0x0e), plan_height: 1001 }),
             Msg::NewTip(NewTip { tip: h(1), height: 1000 }),
-            Msg::PayoutPlan(PayoutPlan { tip: h(1), height: 1001, rules_version: 1, plan_hash: h(2), accounting_root: h(3), outputs: vec![PlanOutput { script: vec![0, 20, 9], ppm: 600_000 }, PlanOutput { script: vec![0, 20, 8], ppm: 350_000 }], fee_script: vec![0, 20, 7], fee_ppm: 10_000, ref_reward: 5_000_000_000 }),
+            Msg::PayoutPlan(PayoutPlan { tip: h(1), height: 1001, rules_version: 1, plan_hash: h(2), accounting_root: h(3), outputs: vec![PlanOutput { script: vec![0, 20, 9], ppm: 600_000 }, PlanOutput { script: vec![0, 20, 8], ppm: 350_000 }], fee_script: vec![0, 20, 7], fee_ppm: 10_000 }),
             Msg::TemplateAnnounce(TemplateAnnounce { tip: h(1), template_id: 5, height: 1001, version: 0x2000_0000, bits: 0x1d00ffff, curtime: 1_700_000_000, branch: vec![h(4), h(5)], first_variant: 10, coinbases: vec![vec![1; 100], vec![2; 120]] }),
             Msg::Shares(Shares { channel: 3, template_id: 5, items: vec![ShareItem { variant: 10, nonce: 1, ntime_delta: 2, version_bits: 3 }, ShareItem { variant: 11, nonce: 4, ntime_delta: 5, version_bits: 6 }] }),
             Msg::ShareAck(ShareAck { channel: 3, template_id: 5, accepted: 1, rejects: vec![(1, reject::DUPLICATE)] }),

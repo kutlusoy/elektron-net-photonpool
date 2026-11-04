@@ -19,8 +19,6 @@ fee_address = "be1q..."
 fee_pct = 1.0
 max_outputs = 128
 min_ppm = 100
-# Smallest payout output in leptons that the pool applies; a plan with a different value is refused.
-min_output_leptons = 100000
 
 # A lost pool connection is re-established with backoff (1 s, 2 s, 4 s ... up to max_reconnect_secs). While it is down the ASICs keep
 # working on the current template and, while the plans last, the next one; shares of the outage are lost. A wrong pool key, a ban or a
