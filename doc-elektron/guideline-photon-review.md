@@ -27,9 +27,9 @@ Method: read every file against the threat model of the protocol guideline, list
 | 7 | Medium | `GetProof` could be requested without limit. | At most 8 requests per channel and tip, then strikes and disconnect. | by construction |
 | 8 | Low | The trust book removed old entries in quadratic time and the counters could overflow. | Hash set for the removal; saturating counters; failures capped at 16 in the probability. | unit tests |
 | 9 | Low | Trust per IPv6 address was trivially evaded by rotating addresses inside a /64. | IPv6 trust keys use the /64 prefix. | unit test |
+| 10 | Low | Test-only gateway options (`corrupt_attestation`, `announce_bits_override`, `software_miner`) could be left on in production unnoticed. | A warning is logged at startup when one of them is set. | - |
 | 11 | High | The batch RPC left only the default 8,000 weight units for the coinbase. A coinbase with 128 or 200 outputs weighs 16.5 k and 25.4 k, so a full block built with it would have exceeded the block weight limit. | The RPC reserves room for the largest coinbase of the request. | `step22` |
 | 12 | Medium | ESP-Miner (Bitaxe) reads at most 16,384 bytes per Stratum line; a job with more than about 230 payout outputs is invisible to it. | Default `max_outputs` is 200, the gateway warns about larger jobs, and the plan lets the smaller credits take turns above the limit. | unit test of the size estimate |
-| 10 | Low | Test-only gateway options (`corrupt_attestation`, `announce_bits_override`, `software_miner`) could be left on in production unnoticed. | A warning is logged at startup when one of them is set. | - |
 
 Robustness tests added: `random_and_mutated_frames_never_panic` (50,000 random frames and 2,000 mutations of every message type) and `random_and_mutated_coinbases_never_panic` (60,000 random and mutated coinbases through the parser and the plan check). They run in `cargo test`.
 
