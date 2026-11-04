@@ -429,6 +429,12 @@ pub struct PhotonCfg {
     pub max_check_bytes: usize,
     #[serde(default = "d_ph_idle")]
     pub idle_secs: u64,
+    /// Attestation spot checks the pool starts per tip, over all gateways. Each one costs the node a full block validation.
+    #[serde(default = "d_ph_budget")]
+    pub max_checks_per_tip: u32,
+    /// Spot checks validated by the node at the same time.
+    #[serde(default = "d_ph_conc")]
+    pub max_concurrent_checks: usize,
 }
 
 impl Default for PhotonCfg {
@@ -448,3 +454,5 @@ fn d_ph_chan() -> usize { 8 }
 fn d_ph_bound() -> f64 { 100.0 }
 fn d_ph_check_bytes() -> usize { 8 * 1024 * 1024 }
 fn d_ph_idle() -> u64 { 300 }
+fn d_ph_budget() -> u32 { 8 }
+fn d_ph_conc() -> usize { 2 }

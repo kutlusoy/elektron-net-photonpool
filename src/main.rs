@@ -42,6 +42,11 @@ enum Cmd {
         #[arg(long)]
         gateway_config: PathBuf,
     },
+    /// Photon: simulate many gateways against a pool (load test); config from --load-config.
+    PhotonLoad {
+        #[arg(long)]
+        load_config: PathBuf,
+    },
     /// Photon: derive a payout plan and the node candidate from JSON on stdin (cross-language tests).
     PhotonPlan,
     /// Photon: check a coinbase against a plan, JSON on stdin (cross-language tests).
@@ -75,6 +80,7 @@ async fn main() -> Result<()> {
             }
         },
         Cmd::Gateway { gateway_config } => photon::gateway::run(toml::from_str(&std::fs::read_to_string(&gateway_config)?)?).await,
+        Cmd::PhotonLoad { load_config } => photon::loadgen::run(toml::from_str(&std::fs::read_to_string(&load_config)?)?).await,
         Cmd::PhotonPlan | Cmd::PhotonCheck => unreachable!(),
         Cmd::Check { mine } => check(Pool::connect(config::Config::load(&cli.config)?).await?, mine).await,
     }

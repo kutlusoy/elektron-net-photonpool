@@ -313,7 +313,7 @@ async fn build_template(node: &Arc<NodeRpc>, cfg: &GatewayCfg, plan: &PayoutPlan
         bail!("node template is for height {height}, plan is for {}", plan.height);
     }
     let cands: Vec<Value> = (0..cfg.variants).map(|v| node_candidate(plan, reward, &v.to_le_bytes())).collect();
-    let bt = node.call("getattestationbatch", json!([{"candidates": cands}])).await?;
+    let bt = super::coinbase::attest_all(node, &cands).await?;
     if bt["coinbasevalue"].as_u64() != Some(reward) || bt["height"].as_u64() != Some(height as u64) {
         bail!("template changed between the two node calls");
     }

@@ -38,6 +38,27 @@ pub fn node_candidate(plan: &PayoutPlan, reward: u64, script_sig_suffix: &[u8]) 
     c
 }
 
+/// Asks the node to attest all candidates, split into calls that stay well below the RPC body limit (32 MB) and the
+/// candidate limit (4096). Returns the first response with the candidates of all calls; calls must agree on the tip.
+pub async fn attest_all(node: &crate::rpc::NodeRpc, cands: &[Value]) -> Result<Value> {
+    let per = cands.first().map(|c| c.to_string().len()).unwrap_or(1).max(1);
+    let chunk = (12_000_000 / per).clamp(1, 4000);
+    let mut merged: Option<Value> = None;
+    for part in cands.chunks(chunk) {
+        let r = node.call("getattestationbatch", json!([{"candidates": part}])).await?;
+        match merged.as_mut() {
+            None => merged = Some(r),
+            Some(m) => {
+                if m["tip"] != r["tip"] || m["coinbasevalue"] != r["coinbasevalue"] {
+                    bail!("the template changed between node calls");
+                }
+                m["candidates"].as_array_mut().ok_or_else(|| anyhow!("no candidates"))?.extend(r["candidates"].as_array().cloned().unwrap_or_default());
+            }
+        }
+    }
+    merged.ok_or_else(|| anyhow!("no candidates to attest"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedCoinbase {
     pub script_sig: Vec<u8>,

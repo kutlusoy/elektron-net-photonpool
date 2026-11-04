@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.4 (implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
+- **Version:** 0.5 (spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -224,6 +224,28 @@ Pool: `[photon] enabled = true` in `photond.toml` (see `photond.example.toml`). 
 
 Limits of this version: Photon channels form their own window, legacy Stratum miners are not part of the plan (open question 4); a cheater is only caught when a check hits one of its variants and does not finish during a tip change; shares credited before a failed check are not clawed back; the Stratum front end has only been run against the test client, not against ASIC firmware; one gateway uses one channel (one payout address).
 
+## 14c. Load of the spot checks (v0.5)
+
+Measured with `test/load_spotchecks.py` and `photond photon-load`: many simulated gateways (own Noise connection, channel, announces, shares, real transaction sets for the spot checks) against one pool and one node, everything on one machine over loopback (regtest, blocks of 250 to 1,000 transactions because the node was limited by `-blockmaxweight`; 100 s per scenario, a tip every 10 s, 2 variants per gateway, 0.2 shares per second per gateway).
+
+| Gateways | Budget / concurrency | Checks per tip | Check time total / node | Pool CPU | Node CPU | Pool RSS | Failures, drops |
+|---|---|---|---|---|---|---|---|
+| 100 | 8 / 2 | 8 | 35 / 13 ms | 1 % | 4 % | 35 MB | 0, 0 |
+| 500 | 8 / 2 | 8 | 49 / 15 ms | 4 % | 17 % | 92 MB | 0, 0 |
+| 2000 | 8 / 2 | 6.2 | 118 / 36 ms | 10 % | 38 % | 275 MB | 0, 0 |
+| 500 | 64 / 4 | 64 | 227 / 26 ms | 4 % | 18 % | 114 MB | 0, 0 |
+
+Node CPU includes the load generator's own batch attestation calls (up to 4,000 candidates per tip), which a real pool does not have. Without a budget (first run: every selected gateway is checked, 36 to 182 checks per tip) the node queued the validations: 213 ms average at 100 gateways, 953 ms at 500, and at 2,000 gateways its RPC queue overflowed, the answers were not JSON, and 343 honest checks were counted as failures. That exposed two design errors, both fixed:
+
+- **Infrastructure errors are not gateway failures.** Only a definitive rejection by the node, a malformed or oversized transaction stream, or a missing delivery counts against a gateway. A node that cannot answer makes the check inconclusive.
+- **Checks have a budget.** `max_checks_per_tip` (default 8, over all gateways, first come first served among the gateways selected by their trust probability) and `max_concurrent_checks` (default 2). Selected checks beyond the budget are skipped (`checksSkipped`), which costs nothing but coverage.
+
+Cost model: validating a block costs the node about 15 ms at 250 transactions, 36 to 53 ms at 500 to 1,000, and about 0.75 s at 11,000 (the full-block measurement of `getattestationbatch` in `guideline-daemon-core.md`; proposal validation is the same attestation work). With the default budget of 8 per tip and blocks every 60 s, full blocks cost the node about 6 s per minute (10 % of one core); a budget of 64 would need most of a core. The data transferred for a check is the transaction set (0.02 to 0.08 MB here, a few MB for full blocks) and the pool memory per connection is about 100 KB.
+
+What the budget means for security: with N gateways and a steady trust probability of 0.02 the chance that one gateway is checked in a given tip is about budget / (0.02 N), capped by its own probability. At 2,000 gateways and a budget of 8 that is far below one check per hour for an established gateway, so an attacker that behaved correctly for a long time is hard to catch; new connections (probability 0.5) are checked far more often until the budget is used, and a pool restart makes everyone new at once. The spot check therefore limits fraud to what a gateway earns before its first checks; it is not a continuous guarantee. Mitigations that are not implemented: sorting the selection by trust, remembering trust across reconnects per address, and checking shares instead of templates.
+
+Another limit found by the generator: the node's RPC body limit is 32 MB. A candidate with a 128-output plan is about 20 KB of JSON, so about 1,500 variants fit into one `getattestationbatch` call. The gateway and the load generator now split larger requests (`attest_all`).
+
 ## 15. Checklist
 
 - [x] Batch attestation RPC as a node patch, equivalence against the oracle.
@@ -231,7 +253,7 @@ Limits of this version: Photon channels form their own window, legacy Stratum mi
 - [x] Message definitions and first test vectors frozen (`msg.rs`, `merkle.rs`).
 - [x] Plan derivation specified and implemented deterministically (rules v1).
 - [x] Pool session: listener, channel state, plan publication from the ledger, `TemplateAnnounce` handling, spot-check calls to the node (`step17`).
-- [ ] Spot check cost and adaptive probability measured under load.
+- [x] Spot check cost measured under load (14c); [ ] mainnet-sized blocks with several hundred real gateways on separate machines.
 - [x] Gateway core with CPU miner and local Stratum V1 front end ([ ] tested with real ASIC firmware).
 - [ ] Independent review of the Noise handshake and the key certification.
 

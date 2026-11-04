@@ -74,7 +74,8 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
             let st = &ph.stats;
             let g = |a: &std::sync::atomic::AtomicU64| a.load(Ordering::Relaxed);
             json!({"enabled": true, "listen": ph.cfg.listen, "publicKey": ph.public_key_hex(), "connections": g(&st.connections), "channels": g(&st.channels), "sharesOk": g(&st.accepted), "sharesRejected": g(&st.rejected),
-                   "announces": g(&st.announces), "checksOk": g(&st.checks_ok), "checksFailed": g(&st.checks_failed), "checksInconclusive": g(&st.checks_inconclusive), "blocks": g(&st.blocks)})
+                   "announces": g(&st.announces), "checksOk": g(&st.checks_ok), "checksFailed": g(&st.checks_failed), "checksInconclusive": g(&st.checks_inconclusive), "blocks": g(&st.blocks),
+                   "checkTotalUs": g(&st.check_total_us), "checkMaxUs": g(&st.check_max_us), "checkNodeUs": g(&st.check_node_us), "checkBytes": g(&st.check_bytes), "checkTimed": g(&st.check_timed), "checksSkipped": g(&st.checks_skipped)})
         }).unwrap_or_else(|| json!({"enabled": false})),
     }))
 }

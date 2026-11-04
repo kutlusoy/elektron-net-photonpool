@@ -70,6 +70,10 @@ pps = 2.0
 
 [payout.pplns]
 window_factor = 2.0
+# Attestation spot checks over all gateways per tip, and how many the node validates at once. A check costs the node one
+# block validation (about 0.75 s for a full block).
+max_checks_per_tip = 8
+max_concurrent_checks = 2
 
 [payout.pps]
 # Offered, but refused until the pool wallet holds reserve_min above all liabilities.

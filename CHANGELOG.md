@@ -17,7 +17,10 @@ Docker
 - `docker-compose.yml` (node and pool) and `stack/` (node, pool, Caddy with HTTPS, encrypted wallet). The node is built from `elektron-net` `main`.
 
 Tests (`test/`)
-- 18 integration steps against unmodified regtest nodes with an independent Python attestation oracle, 61 Rust unit tests, a differential test of the batch RPC and a full-block load simulation (11,000 transactions per block, 10,000 miners).
+- 18 integration steps, a spot check load test with simulated gateways (`test/load_spotchecks.py`, `photond photon-load`) against unmodified regtest nodes with an independent Python attestation oracle, 61 Rust unit tests, a differential test of the batch RPC and a full-block load simulation (11,000 transactions per block, 10,000 miners).
+
+Photon spot checks
+- Per-tip budget (`max_checks_per_tip`, default 8) and concurrency limit (`max_concurrent_checks`, default 2); a node that cannot answer makes a check inconclusive instead of failing the gateway; the gateway splits large attestation requests below the node's 32 MB RPC limit. Load figures in `doc-elektron/guideline-photon-protocol.md` section 14c.
 
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.

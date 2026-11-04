@@ -77,6 +77,14 @@ pub struct PhotonStats {
     pub checks_failed: AtomicU64,
     pub checks_inconclusive: AtomicU64,
     pub blocks: AtomicU64,
+    /// Spot check timing: request to verdict (transfer plus node validation), node validation alone, bytes received.
+    pub check_total_us: AtomicU64,
+    pub check_max_us: AtomicU64,
+    pub check_node_us: AtomicU64,
+    pub check_bytes: AtomicU64,
+    pub check_timed: AtomicU64,
+    /// Checks that were due but skipped because the per-tip budget was used up.
+    pub checks_skipped: AtomicU64,
 }
 
 pub struct PhotonService {
@@ -89,6 +97,8 @@ pub struct PhotonService {
     /// Share hashes of the current and the previous tip (old-tip shares are still accepted for a short grace period).
     seen: Mutex<(HashSet<[u8; 32]>, HashSet<[u8; 32]>)>,
     recent: Mutex<VecDeque<Arc<PlanEntry>>>,
+    check_used: std::sync::atomic::AtomicU32,
+    check_slots: Semaphore,
 }
 
 fn rand64() -> u64 {
@@ -148,11 +158,12 @@ impl PhotonService {
         } else {
             crate::addr::script_for_address(&cfg.fee_address, net.hrp)?
         };
+        let cfg_conc = cfg.max_concurrent_checks.max(1);
         let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script };
         rules.validate()?;
         let empty = Arc::new(PlanBook { epoch_id: 0, tip: [0; 32], tip_hex: String::new(), tip_height: 0, plans: BTreeMap::new(), max_reward: 0 });
         let (book, _) = watch::channel(empty);
-        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new((HashSet::new(), HashSet::new())), recent: Mutex::new(VecDeque::new()) }))
+        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new((HashSet::new(), HashSet::new())), recent: Mutex::new(VecDeque::new()), check_used: std::sync::atomic::AtomicU32::new(0), check_slots: Semaphore::new(cfg_conc) }))
     }
 
     pub fn public_key_hex(&self) -> String {
@@ -192,6 +203,7 @@ impl PhotonService {
                         Ok(b) => {
                             let b = Arc::new(b);
                             last = Some(b.clone());
+                            self.check_used.store(0, Ordering::Relaxed);
                             {
                                 let mut g = self.seen.lock().unwrap();
                                 let cur = std::mem::take(&mut g.0);
@@ -251,6 +263,15 @@ impl PhotonService {
         let subsidy = cand.subsidy().max(0) as f64;
         let max_reward = ((subsidy * (1.0 + self.cfg.max_reward_over_subsidy_pct / 100.0)) as u64).max(cand.coinbase_value.max(0) as u64);
         Ok(PlanBook { epoch_id: e.id, tip, tip_hex: e.tip_hex.clone(), tip_height, plans, max_reward })
+    }
+
+    /// Takes one unit of the per-tip spot check budget.
+    fn reserve_check(&self) -> bool {
+        let ok = self.check_used.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |u| (u < self.cfg.max_checks_per_tip).then_some(u + 1)).is_ok();
+        if !ok {
+            self.stats.checks_skipped.fetch_add(1, Ordering::Relaxed);
+        }
+        ok
     }
 
     fn credit(&self, account: &str, diff: f64) {
@@ -529,7 +550,7 @@ impl Session {
         let (first, n) = (announced.ann.first_variant, announced.ann.coinbases.len() as u64);
         self.templates.entry(template_id).or_default().push(announced);
         let roll = (rand64() >> 11) as f64 / (1u64 << 53) as f64;
-        if self.check.is_none() && self.trust.should_check(roll) {
+        if self.check.is_none() && self.trust.should_check(roll) && self.svc.reserve_check() {
             let variant = first + (rand64() % n) as u32;
             self.check = Some(PendingCheck { template_id, variant, started: Instant::now(), buf: Vec::new(), next_seq: 0 });
             self.held.entry((template_id, variant)).or_default();
@@ -634,7 +655,28 @@ impl Session {
         }
         let c = self.check.take().unwrap();
         let key = (c.template_id, c.variant);
-        match self.run_check(&c).await {
+        let assembled = self.assemble_check(&c);
+        // the node is only asked once a slot is free; waiting for the slot is not counted as validation time
+        let block_hex = match assembled {
+            Ok(b) => b,
+            Err(e) => return self.fail_check(key, &format!("{e:#}")).await,
+        };
+        let svc = self.svc.clone();
+        let slot = svc.check_slots.acquire().await?;
+        let node_start = Instant::now();
+        let outcome: Result<Option<String>> = match tokio::time::timeout(Duration::from_secs(60), svc.pool.node.proposal(&block_hex)).await {
+            Ok(r) => r,
+            Err(_) => Err(anyhow!("node did not answer in time")),
+        };
+        drop(slot);
+        let (node_us, total_us) = (node_start.elapsed().as_micros() as u64, c.started.elapsed().as_micros() as u64);
+        let st = &self.svc.stats;
+        st.check_node_us.fetch_add(node_us, Ordering::Relaxed);
+        st.check_total_us.fetch_add(total_us, Ordering::Relaxed);
+        st.check_max_us.fetch_max(total_us, Ordering::Relaxed);
+        st.check_bytes.fetch_add(c.buf.len() as u64, Ordering::Relaxed);
+        st.check_timed.fetch_add(1, Ordering::Relaxed);
+        match outcome {
             // "duplicate": the node already has exactly this block, which is the strongest possible pass
             Ok(None) => self.check_passed(key),
             Ok(Some(reason)) if reason == "duplicate" => self.check_passed(key),
@@ -645,12 +687,18 @@ impl Session {
                 Ok(())
             }
             Ok(Some(reason)) => self.fail_check(key, &reason).await,
-            Err(e) => self.fail_check(key, &format!("{e:#}")).await,
+            // a node that cannot answer says nothing about the gateway
+            Err(e) => {
+                self.svc.pool.event("warn", format!("photon spot check could not be validated by the node: {e:#}"));
+                self.svc.stats.checks_inconclusive.fetch_add(1, Ordering::Relaxed);
+                self.release(key);
+                Ok(())
+            }
         }
     }
 
     /// Assembles the announced variant with the delivered transactions and lets the node validate it, attestation included.
-    async fn run_check(&self, c: &PendingCheck) -> Result<Option<String>> {
+    fn assemble_check(&self, c: &PendingCheck) -> Result<String> {
         let a = self.find(c.template_id, c.variant).ok_or_else(|| anyhow!("template no longer known"))?;
         let mut txs = Vec::new();
         let (mut p, mut n) = (0usize, 0u64);
@@ -675,7 +723,7 @@ impl Session {
         put_varint(&mut block, 1 + n);
         block.extend_from_slice(&to_witness(cb));
         block.extend_from_slice(&txs);
-        self.svc.pool.node.proposal(&hex::encode(block)).await
+        Ok(hex::encode(block))
     }
 
     async fn proof(&mut self, g: GetProof) -> Result<()> {
