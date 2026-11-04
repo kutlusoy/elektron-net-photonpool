@@ -32,5 +32,7 @@ Review and operation
 - First review pass over all Photon code (`doc-elektron/guideline-photon-review.md`). Fixed: announced difficulty was trusted (a gateway could have earned credit without work), unbounded memory per connection, a panic aborting the whole pool (release profile now unwinds), no per-address connection limit, quadratic trust-book pruning, unlimited proof requests, IPv6 trust evasion. Robustness tests for the decoders.
 - `systemd/`: units for pool, gateway and node, sysusers file, installer (`DESTDIR` supported).
 
+- Protocol guideline: prior art section (DATUM, Stratum V2 Job Declaration, P2Pool) and an analysis of where the accounting commitment lives, header growth (factor 1.45 if it were in the header) and the effect of pruning; the payout outputs, not the commitment, are the real UTXO growth risk.
+
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.

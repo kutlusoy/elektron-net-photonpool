@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.8 (automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
+- **Version:** 0.9 (prior art, placement of the commitment; automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -105,6 +105,22 @@ vout[k+3]      OP_RETURN <"PHOT" || accounting_root>   single push, 36 bytes
 
 This does not make the pool trustless (it still decides which shares count), but every deviation becomes provable.
 
+### 7.1 Where the commitment lives, and what pruning means
+
+The commitment is an output of the **coinbase transaction**, therefore part of the block body. It is not in the block header and cannot be: the header has fixed fields (version, previous hash, merkle root, time, bits, nonce) and adding one would be a consensus change, which this project excludes. The header still commits to it indirectly, because the coinbase txid is a leaf of the merkle root.
+
+Sizes (60-second blocks, 525,600 blocks per year, pruning window 197,280 blocks = 137 days):
+
+| | per block | per year | kept by a pruned node |
+|---|---|---|---|
+| Commitment output (8 B value, 1 B length, 38 B script) | 47 B | 24.7 MB | 9.3 MB |
+| For comparison: 128 payout outputs (31 B each, p2wpkh) | 4.0 KB | 2.1 GB | 783 MB (worst case) |
+
+- **If it were in the header:** 80 B would become 116 B (36 B: 32 B root plus the 4 B tag), a factor of **1.45** (1.40 without the tag). The header chain, which is never pruned, would grow from 42 MB to 61 MB per year, 19 MB more every year, forever. That is why the body is the better place even apart from consensus.
+- **Pruning:** a pruned node deletes the block bodies, and with them the commitment, after 137 days. That is much longer than anything the commitment is needed for: a miner compares the root with the pool's `EpochCommit` and its own proof when the block is found and paid (maturity is 100 blocks, about 100 minutes). Whoever wants to prove a credit later keeps a receipt (the coinbase transaction, its merkle branch to the header, and the proof of its leaf; a few hundred bytes), because from the header chain alone the commitment cannot be reconstructed after pruning; unpruned nodes and block explorers keep it.
+- **UTXO set and attestation:** the commitment is an `OP_RETURN` output. It is unspendable, never enters the UTXO set and is not part of the attested set. It costs block space only.
+- **The real storage cost is the payout outputs**, not the commitment. A plan with 128 outputs adds up to 128 spendable outputs per block (67 million per year at full size), which grows the UTXO set that every node holds and that the attestation covers. The knobs are `max_outputs` (`n_max`), `min_ppm` (smallest part that is paid; smaller credits carry over to later plans) and, if needed, paying only every N-th block or only above a minimum amount in leptons. The defaults (128, 100 ppm) are a starting point for testing; for mainnet the number of outputs per block should be chosen against the expected number of active gateways and the node operators' tolerance for UTXO growth. This is an open decision, see section 16.
+
 ## 8. Search space without extranonce limits
 
 Today the fixed coinbase leaves about 2^44 header values per candidate and nTime step, which does not suffice for large farms. With an own node a gateway creates **coinbase variants**:
@@ -179,6 +195,25 @@ Legacy miners keep working on the same pool: they remain in the ledger and are p
 | Extranonce limitation on Elektron Net | blocks scaling | blocks scaling | n/a | n/a | solved through attested variants |
 
 Photon follows the goals of DATUM and borrows the framing of Stratum V2. What is specific to Elektron Net is the attestation: the coinbase must be attested by the node that builds it, which is why the batch attestation RPC is the key building block and why a light pruned node is an advantage.
+
+## 13a. Prior art and what is specific here
+
+The concept is **not new**. Miner-built block templates with payouts written into the coinbase exist for Bitcoin:
+
+- **DATUM** (OCEAN, announced September 2024, still beta according to its release notes): a gateway runs next to the miner's own node, builds the template, talks Stratum V1 to the ASICs and an encrypted link to the pool; the pool supplies the payout split and the payouts are coinbase outputs, so the pool holds no miner funds. Sources: [NO BS Bitcoin](https://nobsbitcoin.com/ocean-launches-datum), [D-Central](https://d-central.tech/datum-protocol/), [Gateway releases](https://github.com/OCEAN-xyz/datum_gateway/releases/tag/v0.4.0beta), [Spark analysis](https://www.spark.money/research/bitcoin-decentralized-mining-pool-ocean-demand). The Photon gateway model is the same architecture.
+- **Stratum V2 Job Declaration**: miners declare their own templates, the pool does accounting and payouts. Reports and forum threads state that stock SV2 gives the pool no way to make the payout split checkable before a block is found and discuss extensions (a pool-signed commitment to the split, multi-output or CTV based payouts). Sources: [specification](https://stratumprotocol.org/specification/06-job-declaration-protocol), [Delving Bitcoin: non-custodial payouts](https://delvingbitcoin.org/t/scaling-noncustodial-mining-payouts-with-ctv/1753/14), [Delving Bitcoin: SV2 extensions for payout verification](https://mirror.b10c.me/delvingbitcoin-org/2026-08-14-sv2-extensions-for-payout-verification-and-job-size-at-scale-id2805.html).
+- **P2Pool and P2Pool v2**: no central pool; a share chain defines the payouts, which are written into the coinbase of each found block.
+
+What is specific to Elektron Net and this design:
+
+| Aspect | Prior art | Photon |
+|---|---|---|
+| Coinbase freedom | free, extranonce rotation is cheap | every coinbase byte is bound to the node's UTXO attestation, so each variant needs its own attestation: `getattestationbatch` and variants per template (sections 8, 9) |
+| Checking the pool's accounting | share chain (P2Pool), unclear for DATUM, proposals for SV2 | merkle root of all credits in every block plus a proof per payout script (section 7) |
+| Checking the gateway | not needed for payouts | the attestation can only be validated by a node, so the pool spot-checks announced variants with a budget and a trust score (guidelines 14c, 14d) |
+| Plan timing | not known | plan for height `h+2` is published when `h` arrives, so gateways need no round trip after a new tip |
+
+Limits of this comparison: the sources are secondary (press, blogs, forum threads) and were found with two web searches; a source for the merkle-root-of-credits commitment in the coinbase was not found, but that is not proof that none exists. The ecosystem differs too: DATUM and Stratum V2 have deployed pools and firmware clients, while the only Photon gateway is the one in this repository, tested on regtest with a simulated ASIC and not reviewed by a second person. "Protocol" is generous: this is a profile built from known parts (Noise transport, SV2-like framing, a DATUM-like gateway model) plus the Elektron-specific pieces in the table. Open decision: whether to pursue interoperability with Stratum V2 (see the landscape review) or stay with this profile.
 
 ## 14. Implementation plan in this repository
 
@@ -294,7 +329,7 @@ Limits: an outage longer than the known plans (about one block) stops the work, 
 
 1. Noise suite and certificate scheme (25519 or secp256k1, who signs the pool key).
 2. Whether the reward fraction rules need the exact fee amount of the gateway's template or a bound only.
-3. Maximum number of coinbase outputs under block weight and attestation cost on mainnet.
+3. Maximum number of coinbase outputs under block weight and attestation cost on mainnet, and how many payout outputs per block the UTXO set should tolerate (section 7.1: up to 67 million new outputs per year at 128 per block).
 4. How legacy ledger miners and Photon channels share one block reward in the plan.
 5. Whether the accounting commitment should cover the share log as well as the credits.
 6. Share chain design for a later pool-less mode.
