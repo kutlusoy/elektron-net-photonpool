@@ -345,6 +345,9 @@ impl Config {
 
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let mut cfg: Config = toml::from_str(&std::fs::read_to_string(path)?)?;
+        // The Docker setup knows where its node is; these override a config copied from the bare-metal example.
+        if let Ok(v) = std::env::var("PHOTOND_NODE_RPC_URL") { if !v.is_empty() { cfg.node.rpc_url = v; } }
+        if let Ok(v) = std::env::var("PHOTOND_NODE_AUTH") { if !v.is_empty() { cfg.node.auth = v; } }
         if cfg.pool.payout_addresses.is_empty() && !(cfg.payout.wallet_addresses > 0 && !cfg.payout.wallet.is_empty()) {
             bail!("set pool.payout_addresses, or payout.wallet together with payout.wallet_addresses");
         }

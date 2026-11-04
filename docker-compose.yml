@@ -31,6 +31,11 @@ services:
       - "3333:3333"                  # Stratum V1, public (miners connect here)
       - "127.0.0.1:8081:8081"        # admin API and web UI, local only
       - "127.0.0.1:8082:8082"        # public pool page (publish via a TLS reverse proxy)
+    environment:
+      # Where the node is in this setup. They override [node] rpc_url/auth of photond.toml, so a config copied
+      # from the bare-metal photond.example.toml works too. Options: an http URL / "cookie:/path" | "user:password" | "env:NAME"; empty = use photond.toml.
+      PHOTOND_NODE_RPC_URL: ${PHOTOND_NODE_RPC_URL:-http://node:8332}
+      PHOTOND_NODE_AUTH: ${PHOTOND_NODE_AUTH:-cookie:/node/.cookie}
     volumes:
       - node-data:/node:ro
       - ./photond.toml:/config/photond.toml:ro

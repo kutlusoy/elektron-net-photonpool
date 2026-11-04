@@ -5,6 +5,7 @@
 # photond.example.toml (add the line to this file to change it).
 
 [node]
+# docker-compose.yml also sets PHOTOND_NODE_RPC_URL and PHOTOND_NODE_AUTH, which override rpc_url and auth below.
 # Options: http URL of the node; in this setup the node container is called "node".
 rpc_url = "http://node:8332"
 # The node writes its RPC cookie into the shared volume mounted at /node.
