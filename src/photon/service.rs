@@ -200,7 +200,7 @@ impl PhotonService {
             crate::addr::script_for_address(&cfg.fee_address, net.hrp)?
         };
         let cfg_conc = cfg.max_concurrent_checks.max(1);
-        let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script };
+        let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, min_output_leptons: cfg.min_output_leptons, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script };
         rules.validate()?;
         let empty = Arc::new(PlanBook { epoch_id: 0, tip: [0; 32], tip_hex: String::new(), tip_height: 0, plans: BTreeMap::new(), max_reward: 0, bits: 0 });
         let (book, _) = watch::channel(empty);
@@ -356,9 +356,11 @@ impl PhotonService {
         let window = self.cfg.window_factor * difficulty_from_target(&cand.target);
         let rows = self.pool.ledger.call(move |c| ledger::window_split(c, ledger::MODE_PHOTON, window, CREDIT_SCALE)).await?;
         let credits: Vec<(Vec<u8>, u64)> = rows.into_iter().filter_map(|(a, v)| Some((hex::decode(a).ok()?, v as u64))).collect();
+        // the subsidy: every real reward (subsidy plus fees) is at least this, so a part that is worth the minimum at the subsidy is worth it at any reward
+        let ref_reward = cand.subsidy().max(1) as u64;
         for height in [e.height, e.height + 1] {
             if height == e.height + 1 || !plans.contains_key(&height) {
-                let (plan, tree) = derive_full(&self.rules, tip, height, &credits)?;
+                let (plan, tree) = derive_full(&self.rules, tip, height, ref_reward, &credits)?;
                 plans.insert(height, Arc::new(PlanEntry { plan, tree: Arc::new(tree) }));
             }
         }

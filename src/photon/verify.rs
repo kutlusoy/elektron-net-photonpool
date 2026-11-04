@@ -148,9 +148,9 @@ mod tests {
     use crate::tx::{build_coinbase, merkle_branch, TxOutput};
 
     fn setup(variants: usize, bits: u32) -> (PayoutPlan, Announced) {
-        let rules = Rules { n_max: 8, min_ppm: 100, fee_ppm: 10_000, fee_script: vec![0, 20, 0xfe] };
+        let rules = Rules { n_max: 8, min_ppm: 100, min_output_leptons: 0, fee_ppm: 10_000, fee_script: vec![0, 20, 0xfe] };
         let tip = [5u8; 32];
-        let plan = derive(&rules, tip, 1001, &[(vec![0, 20, 1], 700), (vec![0, 20, 2], 300)]).unwrap();
+        let plan = derive(&rules, tip, 1001, 5_000_000_000, &[(vec![0, 20, 1], 700), (vec![0, 20, 2], 300)]).unwrap();
         let reward = 5_000_000_000u64;
         let (vals, fee) = split(reward, &plan);
         let others: Vec<[u8; 32]> = (0..5u8).map(|i| sha256d(&[i])).collect();
