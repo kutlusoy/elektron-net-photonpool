@@ -71,6 +71,11 @@ max_job_interval_ms = 30000
 # only for miners that really roll all granted bits. A duplicate share is treated as a sign that the miner has swept its space and triggers fresh work at once.
 # Options: whole number 0 to 16. Default 5.
 version_space_bits = 5
+# Miners whose user agent (the name they send with mining.subscribe, for example "bitaxe/BM1370/v2.9.0") contains one of these words, case-insensitive, get every fresh
+# job marked clean, so that they drop their queued older work and switch at once. ESP-Miner (Bitaxe) keeps up to 10 identical jobs queued ahead when the pool sends
+# no extranonce2 space, which showed up as duplicate shares and shares for jobs the pool no longer knew. Large ASICs should not get this: they flush their pipeline on a clean job.
+# Options: list of words; "*" matches every miner; [] switches it off. Default ["bitaxe", "esp-miner"].
+clean_work_agents = ["bitaxe", "esp-miner"]
 # Miner user name must be "<address>.<worker>" with a valid address of the network.
 # Options: true (default) | false (any user name is accepted; solo mode always needs an address).
 require_address = true
