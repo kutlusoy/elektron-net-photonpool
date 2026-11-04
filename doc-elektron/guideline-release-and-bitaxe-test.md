@@ -74,17 +74,25 @@ Firmware version, pool settings, the first 30 lines of the Bitaxe log after conn
 - Docker images are not built in CI; the first image build happens on your server.
 - Mainnet-scale benchmarks are missing (a regtest simulation of 11,000 transactions per block and 10,000 miners is documented in [`guideline-daemon-core.md`](./guideline-daemon-core.md)).
 
-## 8a. First hardware result (one Bitaxe, BM1370)
+## 8a. First hardware result (one Bitaxe Gamma, BM1370, firmware 2.9.0)
 
-The first run showed 98.8 % duplicate shares (326 duplicates against 4 accepted) and a hash rate estimate of 1.4 GH/s for a device that reports 6 TH/s itself.
-The log shows the same result (job, ntime, version bits, nonce) submitted again about every 163 ms, so the chip sweeps the same space of one job again and again.
-What the code of ESP-Miner says: with `extranonce2_size = 0` the job counts as not rollable (`miner_job_is_rollable`), the firmware then sends each job once and does not create new headers
-by itself, whereas a normal pool gets a new header every 500 ms through `extranonce_2++`. One header seems to cover only about 2^37 hashes of this chip (a pass of about 163 ms at roughly 1 TH/s), not the 2^44 that the
-pool assumed for 12 granted version bits. The conclusion is not proven (no chip documentation was used): it is the explanation that fits the log and the firmware source.
+First run: 98.8 % duplicate shares (326 duplicates against 4 accepted) and a hash rate estimate of 1.4 GH/s for a device that reports 6 TH/s. After the first change
+(fresh jobs every 200 ms): the hash rate shown by the device was correct (1.01 TH/s), but 83 % of the shares were rejected as "Job not found" and 14 % as duplicates.
 
-Change made: `[stratum] version_space_bits` (default 5) tells the pool how much space one job gives a miner, so it sends fresh work about that often (at least every `min_job_interval_ms`),
-and a duplicate share now triggers fresh work at once (for 30 s at the shortest interval). To confirm: duplicates should drop sharply and the pool's hash rate estimate should approach what the device reports.
-Open question for the Photon design: a miner that needs a new header every few hundred milliseconds needs a new unit (candidate, nTime step or slice) at that rate; the work space and traffic figures of the protocol guideline have to be re-checked against this.
+Cause, from the log and the firmware source (tag v2.9.0, `create_jobs_task.c`): for every notification ESP-Miner keeps its ASIC job queue filled with up to 10 jobs, each with
+`extranonce2 + 1`. With `extranonce2_size = 0` (which the pool must send, because the attestation sits inside the coinbase) all of them are identical. The ASIC task takes one job
+per 500 ms, so the chip sweeps the same header again and again (hits repeat about every 163 ms, which I verified by recomputing the logged results from the job), and a new notification waits behind the queued jobs, which
+is up to 5 s of latency. Shares then arrive for jobs that the pool has already dropped. The firmware only throws the queue away on a notification marked clean.
+
+Changes:
+- `[stratum] clean_work_agents` (default `["bitaxe", "esp-miner"]`): every fresh job for these miners is marked clean, so the chip always gets the newest job at once and no queue builds up.
+  Large ASICs do not get it, a clean job makes them flush their pipeline. `test/step24_clean_work_for_esp_miner.py` checks it.
+- `[stratum] version_space_bits` (default 5): job cadence from the space a miner really sweeps (a pass of one job takes the chip about 160 ms at 1 TH/s, so about 5 jobs per second, never faster than `min_job_interval_ms`).
+- A duplicate share triggers fresh work at once.
+- The pool keeps the jobs of a connection for 10 s (at least 16, at most 128), so that late shares are still found.
+
+To confirm on the next run: stale and duplicate shares should fall to a few percent, and the pool's hash rate estimate should come close to the 1 TH/s of the device.
+Consequence for the Photon design: a Bitaxe needs a new header about every 160 ms; the work space and traffic figures of the protocol guideline assumed the miner covers 2^44 hashes per header and have to be re-checked.
 
 ## 9. Checklist
 

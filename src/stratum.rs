@@ -19,11 +19,20 @@ use tokio::sync::{watch, Semaphore};
 use tokio::time::{sleep_until, timeout, Instant as TokioInstant};
 
 const MAX_LINE: usize = 8192;
+/// Jobs kept per connection for late shares: at least 16, then every job up to this age, never more than the hard limit.
 const MAX_JOBS: usize = 16;
+const MAX_JOBS_HARD: usize = 128;
+const JOB_KEEP: Duration = Duration::from_secs(10);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const PREV_TARGET_GRACE: Duration = Duration::from_secs(60);
 /// After a duplicate share the miner gets fresh work at the shortest interval for this long.
 const DUP_BOOST: Duration = Duration::from_secs(30);
+
+/// Whether a miner with this user agent gets every fresh job marked clean.
+fn agent_wants_clean(words: &[String], agent: &str) -> bool {
+    let a = agent.to_ascii_lowercase();
+    words.iter().any(|w| w == "*" || (!w.is_empty() && a.contains(&w.to_ascii_lowercase())))
+}
 
 /// Time until the next job for a miner: the time its hardware needs to sweep the space of one job (a bit less, to stay ahead), within the configured limits.
 /// Without a hash rate estimate the pool sends a job per second; after a duplicate share it sends them as fast as allowed.
@@ -87,6 +96,7 @@ struct JobRef {
     src: Src,
     n: u32,
     version: u32,
+    sent: Instant,
 }
 
 struct Session {
@@ -115,6 +125,7 @@ struct Session {
     hash_est: f64,
     last_job: Instant,
     dup_until: Instant,
+    agent_clean: bool,
     last_adjust: Instant,
     shares_since_adjust: u32,
     bad: u32,
@@ -157,7 +168,7 @@ impl Session {
         Self {
             pool, cfg, stats, id, mode: port.mode, port, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
             difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0, rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(),
-            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_job: now, dup_until: now, last_adjust: now, shares_since_adjust: 0, bad: 0,
+            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_job: now, dup_until: now, agent_clean: false, last_adjust: now, shares_since_adjust: 0, bad: 0,
             acc_minute: 0, acc_diff: 0.0, acc_cnt: 0, acc_last: now,
         }
     }
@@ -222,6 +233,7 @@ impl Session {
         match req.method {
             "mining.subscribe" => {
                 self.subscribed = true;
+                self.agent_clean = agent_wants_clean(&self.cfg.clean_work_agents, req.params.get(0).and_then(Value::as_str).unwrap_or(""));
                 self.reply(wr, &id, &format!("[[[\"mining.notify\",\"{:x}\"]],\"\",0]", self.id), "null").await?;
                 self.maybe_start(wr).await
             }
@@ -342,7 +354,7 @@ impl Session {
             self.schedule_next();
             return Ok(());
         };
-        let clean = force_clean || epoch.tip_hex != self.last_tip;
+        let clean = force_clean || epoch.tip_hex != self.last_tip || self.agent_clean;
         let (n, src, unit): (u32, Src, (usize, u8, u32)) = if self.mode == Mode::Solo {
             self.pool.touch_solo(&self.account);
             match self.pool.ensure_solo(&epoch, &self.account).await {
@@ -375,8 +387,8 @@ impl Session {
         send(wr, msg.as_bytes()).await?;
         self.last_job = Instant::now();
         self.stats.unit.store(((unit.0 as u64) << 16) | ((unit.2 as u64) << 8) | unit.1 as u64, Ordering::Relaxed);
-        self.jobs.push_back(JobRef { id, epoch, src, n, version });
-        while self.jobs.len() > MAX_JOBS {
+        self.jobs.push_back(JobRef { id, epoch, src, n, version, sent: Instant::now() });
+        while self.jobs.len() > MAX_JOBS_HARD || (self.jobs.len() > MAX_JOBS && self.jobs.front().map_or(false, |j| j.sent.elapsed() > JOB_KEEP)) {
             self.jobs.pop_front();
         }
         self.schedule_next();
@@ -608,6 +620,17 @@ mod tests {
         assert_eq!(job_delay_ms(&c, 12, 1.0e3, false), c.max_job_interval_ms);
         // miners that granted fewer bits, or a configured smaller space, are not given more than they have
         assert_eq!(job_delay_ms(&c, 2, 1.0e10, false), (2f64.powi(34) / 1.0e10 * 0.8 * 1000.0) as u64);
+    }
+
+    #[test]
+    fn clean_work_goes_to_the_listed_agents_only() {
+        let w = cfg().clean_work_agents;
+        assert!(agent_wants_clean(&w, "bitaxe/BM1370/v2.9.0"));
+        assert!(agent_wants_clean(&w, "ESP-Miner/2.9"));
+        assert!(!agent_wants_clean(&w, "cgminer/4.11"));
+        assert!(!agent_wants_clean(&w, ""));
+        assert!(agent_wants_clean(&["*".to_string()], "anything"));
+        assert!(!agent_wants_clean(&[], "bitaxe"));
     }
 
     #[test]
