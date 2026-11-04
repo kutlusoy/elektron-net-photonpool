@@ -179,6 +179,7 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .pane { transition: transform .65s cubic-bezier(.2, .8, .2, 1), filter .65s, opacity .65s, left .6s cubic-bezier(.2, .8, .2, 1), top .6s cubic-bezier(.2, .8, .2, 1), width .6s cubic-bezier(.2, .8, .2, 1), height .6s cubic-bezier(.2, .8, .2, 1), box-shadow .6s; }
 .pane.front { position: absolute; grid-area: auto; z-index: 5; background: color-mix(in srgb, var(--panel) 96%, transparent); }
 .pane.front pre, .pane.front .tty { font-size: 1.08em; }
+.pane.front pre { overflow: auto; }
 .grid.depth { perspective: 1300px; perspective-origin: calc(50% + var(--mx, 0) * 70px) calc(50% + var(--my, 0) * 45px); }
 .grid.depth .pane.front { box-shadow: 0 0 0 1px var(--c1), 0 0 46px color-mix(in srgb, var(--c1) 30%, transparent), 0 30px 80px rgba(0, 0, 0, .7); }
 .grid.depth .pane:not(.front), .grid.depth .pane.leaving {

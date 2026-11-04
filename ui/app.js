@@ -80,7 +80,7 @@ function demoSource() {
     miners() {
       return miners.map((m) => ({ name: m.name, proto: m.proto, hashrate: m.th * 1e12, diff: m.th * 1e12 * 10 / 4294967296, ok: m.ok, stale: m.stale, dup: m.dup + m.inv, seen: m.seen, unit: m.unit }));
     },
-    blocks() { return st.blocks.slice(0, 12); },
+    blocks(n) { return st.blocks.slice(0, n || 12); },
     events() { const out = st.ev.slice(evCursor); evCursor = st.ev.length; return out; },
   };
 }
@@ -125,6 +125,7 @@ function logEvent(e) {
 }
 const out = (html) => line(html);
 
+document.addEventListener('depthchange', () => { try { render(); } catch (_) { /* no data yet */ } });
 function render() {
   const s = ui.src.summary();
   if (!s) return;
@@ -149,7 +150,7 @@ function render() {
   ].join('\n');
   $('#pane-tip').innerHTML = [
     `${span('dim', 'height    ')}${span('hl', num(s.node.height))}`,
-    `${span('dim', 'hash      ')}${link(blockUrl(s.pool.explorerUrl, s.node.tip), short(s.node.tip, 10, 8), 'c1')}`,
+    `${span('dim', 'hash      ')}${link(blockUrl(s.pool.explorerUrl, s.node.tip), wide('tip') ? s.node.tip : short(s.node.tip, 10, 8), 'c1')}`,
     `${span('dim', 'age       ')}${hms(age)} ${bar(age / 60, 14, age > 75 ? 'warn' : 'c1')}`,
     `${span('dim', 'node link ')}${s.node.connected ? span('ok', 'connected') : span('err', 'DOWN')} ${esc(s.node.transport)} rtt ${s.node.rttMs.toFixed(1)}ms`,
     `${span('dim', 'tip>job   ')}p50 ${s.node.p50.toFixed(0)}ms  p95 ${s.node.p95.toFixed(0)}ms  ${span('dim', 'n=' + s.node.samples)}`,
@@ -164,12 +165,13 @@ function render() {
     `${span('dim', 'unit       ')}${span('dim', 'candidate / ntime / slice')}`,
   ].join('\n');
   renderMiners();
-  const blocks = ui.src.blocks();
-  $('#pane-blocks').innerHTML = [span('row-h', pad('HEIGHT', 9) + pad('AGE', 9) + pad('WORKER', 19) + 'STATE')]
+  const bw = wide('blocks');
+  const blocks = bw ? ui.src.blocks(50) : ui.src.blocks();
+  $('#pane-blocks').innerHTML = [span('row-h', pad('HEIGHT', 9) + pad('AGE', 9) + fit('WORKER', bw ? 36 : 19, bw) + (bw ? pad('HASH', 66) : '') + 'STATE')]
     .concat(blocks.map((b) => {
       const a = Date.now() / 1000 - b.time;
       const cls = b.status === 'found' ? 'ok' : b.status === 'maturing' ? 'c3' : 'dim';
-      return `${linkPad(b.url || blockUrl(s.pool.explorerUrl, b.hash), num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 9)}${pad(trunc(workerLabel(b.worker), 18), 19)}${span(cls, b.status)}`;
+      return `${linkPad(b.url || blockUrl(s.pool.explorerUrl, b.hash), num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 9)}${bw ? pad(b.worker, 36) : pad(trunc(workerLabel(b.worker), 18), 19)}${bw ? pad(b.hash || '', 66) : ''}${span(cls, b.status)}`;
     })).join('\n');
 }
 
@@ -181,13 +183,14 @@ function minerRows() {
 }
 function renderMiners() {
   const rows = minerRows();
-  const shown = rows.slice(0, ui.minerLimit);
+  const mw = wide('miners');
+  const shown = rows.slice(0, mw ? Math.max(ui.minerLimit, 200) : ui.minerLimit);
   $('#miners-hint').textContent = `${shown.length}/${rows.length} sort:${ui.minerSort}${ui.minerFilter ? ' grep:' + ui.minerFilter : ''}`;
-  $('#pane-miners').innerHTML = [span('row-h', pad('WORKER', 19) + pad('PROTO', 6) + lpad('HASHRATE', 12) + lpad('DIFF', 10) + lpad('OK', 8) + lpad('STALE', 7) + lpad('DUP', 6) + '  ' + pad('LAST', 6) + 'UNIT')]
+  $('#pane-miners').innerHTML = [span('row-h', fit('WORKER', mw ? 48 : 19, mw) + pad('PROTO', 6) + lpad('HASHRATE', 12) + lpad('DIFF', 10) + lpad('OK', 8) + lpad('STALE', 7) + lpad('DUP', 6) + '  ' + pad('LAST', 6) + 'UNIT')]
     .concat(shown.map((m) => {
       const stale = m.stale / Math.max(1, m.ok + m.stale);
       const seen = m.seen === 0 ? span('ok', 'now   ') : span(m.seen > 5 ? 'warn' : 'dim', pad(m.seen + 's', 6));
-      return `${pad(trunc(workerLabel(m.name), 18), 19)}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', m.unit)}`;
+      return `${mw ? pad(m.name, 48) : pad(trunc(workerLabel(m.name), 18), 19)}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', m.unit)}`;
     })).join('\n');
 }
 

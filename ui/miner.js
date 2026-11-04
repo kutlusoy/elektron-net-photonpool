@@ -47,6 +47,7 @@ function compress(values, n) {
   return Array.from({ length: n }, (_, i) => { const part = values.slice(Math.floor(i * size), Math.floor((i + 1) * size)); return part.reduce((a, b) => a + b, 0) / Math.max(1, part.length); });
 }
 
+document.addEventListener('depthchange', () => { try { render(); } catch (_) { /* no data yet */ } });
 function render() {
   const p = M.pool, a = M.acct;
   if (p) { $('#pool-name').textContent = p.name; document.title = 'MINER | ' + p.name; }
@@ -92,8 +93,8 @@ function render() {
     `${span('dim', 'shares 1h   ')}${esc(sh(a.shares1h))}`,
     `${span('dim', 'shares 24h  ')}${esc(sh(a.shares24h))}`,
   ].join('\n');
-  $('#pane-workers').innerHTML = [span('row-h', pad('WORKER', 16) + pad('MODE', 7) + lpad('HASHRATE', 12) + lpad('DIFF', 9) + lpad('OK', 8) + lpad('STALE', 7) + lpad('BAD', 5) + '  LAST')]
-    .concat(a.workerList.map((w) => `${pad(trunc(w.name, 15), 16)}${span('c2', pad(modeLabel[w.mode] || w.mode, 7))}${lpad(fmtHash(w.hashrate), 12)}${lpad(num(w.difficulty), 9)}${lpad(num(w.accepted), 8)}${span(w.stale > 0 ? 'warn' : 'dim', lpad(num(w.stale), 7))}${lpad(num(w.invalid), 5)}  ${w.seen < 120 ? span('ok', w.seen + 's') : span('dim', ago(Date.now() / 1000 - w.seen))}`))
+  $('#pane-workers').innerHTML = [span('row-h', fit('WORKER', wide('workers') ? 40 : 16, wide('workers')) + pad('MODE', 7) + lpad('HASHRATE', 12) + lpad('DIFF', 9) + lpad('OK', 8) + lpad('STALE', 7) + lpad('BAD', 5) + '  LAST')]
+    .concat(a.workerList.map((w) => `${wide('workers') ? pad(w.name, 40) : pad(trunc(w.name, 15), 16)}${span('c2', pad(modeLabel[w.mode] || w.mode, 7))}${lpad(fmtHash(w.hashrate), 12)}${lpad(num(w.difficulty), 9)}${lpad(num(w.accepted), 8)}${span(w.stale > 0 ? 'warn' : 'dim', lpad(num(w.stale), 7))}${lpad(num(w.invalid), 5)}  ${w.seen < 120 ? span('ok', w.seen + 's') : span('dim', ago(Date.now() / 1000 - w.seen))}`))
     .concat(a.workerList.length ? [] : [span('dim', 'no worker is connected right now')]).join('\n');
   $('#pane-pend').innerHTML = [span('row-h', pad('BLOCK', 9) + pad('AMOUNT', 14) + 'STATE')]
     .concat(a.credits.map((c) => {
@@ -102,7 +103,7 @@ function render() {
     }))
     .concat(a.credits.length ? [] : [span('dim', 'no PPLNS credits yet')]).join('\n');
   $('#pane-pay').innerHTML = [span('row-h', pad('AGE', 7) + pad('AMOUNT', 14) + 'TX')]
-    .concat(a.payouts.map((x) => `${pad(ago(x.time), 7)}${pad(coins(x.amount), 14)}${link(txUrl(explorer, x.txid), short(x.txid || 'pending', 6, 4), 'c1')}`))
+    .concat(a.payouts.map((x) => `${pad(ago(x.time), 7)}${pad(coins(x.amount), 14)}${link(txUrl(explorer, x.txid), wide('pay') ? (x.txid || 'pending') : short(x.txid || 'pending', 6, 4), 'c1')}`))
     .concat(a.payouts.length ? [] : [span('dim', 'nothing paid out yet')]).join('\n');
   $('#pane-found').innerHTML = [span('row-h', pad('BLOCK', 9) + pad('AGE', 7) + pad('MODE', 7) + 'STATE')]
     .concat(a.blocksFound.map((b) => `${linkPad(b.url, num(b.height), 9)}${pad(ago(b.time), 7)}${span('c2', pad(modeLabel[b.mode] || b.mode, 7))}${b.status}`))

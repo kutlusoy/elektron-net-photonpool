@@ -57,6 +57,7 @@
     }
     grid.classList.add('depth');
     place(p, full());
+    document.dispatchEvent(new Event('depthchange'));
   }
 
   function restore() {
@@ -64,6 +65,7 @@
     release(cur);
     cur = null;
     grid.classList.remove('depth');
+    document.dispatchEvent(new Event('depthchange'));
   }
 
   const toggle = (p) => (cur === p ? restore() : focus(p));
