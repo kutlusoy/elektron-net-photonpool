@@ -170,6 +170,9 @@ keep_days = 14
 listen = "127.0.0.1:8081"
 # Folder with the web UI files. Options: directory path. Default "ui".
 ui_dir = "ui"
+# Folder with audio files for the optional background music of the web pages (player in the title bar, see music/README.md).
+# Options: directory path; "" uses "music" inside ui_dir. Default "".
+music_dir = ""
 # Optional: base URL of a mempool-style block explorer. Found blocks and the chain tip link to <explorer_url>/block/<hash> in the web UI.
 # Options: "http://..." or "https://..."; "" disables links. Default "".
 explorer_url = "https://mempool.elektron-net.org"

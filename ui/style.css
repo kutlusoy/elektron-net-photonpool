@@ -278,3 +278,18 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .mvol { width: 70px; accent-color: var(--c1); cursor: pointer; }
 .mtime { font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
 @media (max-width: 720px) { .mtime, .meq { display: none; } .mvol { width: 52px; } }
+
+/* Playlist mode of the music player: track title with the credit tooltip */
+.music { position: relative; z-index: 60; }
+.mnav { display: none; }
+.music.multi .mnav { display: inline-block; }
+.mtitle { max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--fg); cursor: default; outline: none; }
+.mtitle:empty { display: none; }
+.music.credit .mtitle { border-bottom: 1px dotted var(--c2); cursor: help; }
+.mtip { display: none; position: absolute; right: 0; top: 100%; padding-top: 8px; min-width: 240px; max-width: 360px; font-size: 11px; line-height: 1.45; }
+.mtip > div { padding: 0 10px; background: rgba(2, 3, 8, .96); border-left: 1px solid var(--c1); border-right: 1px solid var(--c1); box-shadow: 0 0 16px color-mix(in srgb, var(--c1) 30%, transparent); }
+.mtip > div:first-child { padding-top: 6px; border-top: 1px solid var(--c1); }
+.mtip > div:last-child { padding-bottom: 6px; border-bottom: 1px solid var(--c1); }
+.mtip a { color: var(--c1); word-break: break-all; }
+.music.credit .mtitle:hover + .mtip, .music.credit .mtitle:focus + .mtip, .music.credit .mtip:hover, .music.credit .mtip:focus-within { display: block; }
+@media (max-width: 720px) { .mtitle { max-width: 12ch; } }

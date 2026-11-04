@@ -69,6 +69,9 @@ share_secs = 10
 listen = "0.0.0.0:8081"
 # Options: directory path inside the container.
 ui_dir = "/app/ui"
+# Folder with audio files for the optional background music (the compose files mount ./music here, see music/README.md).
+# Options: directory path inside the container; "" uses "music" inside ui_dir. Default "".
+music_dir = "/app/ui/music"
 # Optional: block explorer for links to found blocks (<explorer_url>/block/<hash>).
 # Options: "http://..." | "https://..." | "" (no links).
 explorer_url = "https://mempool.elektron-net.org"

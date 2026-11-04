@@ -39,6 +39,7 @@ services:
     volumes:
       - node-data:/node:ro
       - ./photond.toml:/config/photond.toml:ro
+      - ./music:/app/ui/music:ro     # optional background music, see music/README.md
       - photon-data:/data
 
   # Optional HTTPS for the public pool page without any other setup:

@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /// Token bucket per client address.
 pub struct Limiter {
@@ -72,7 +72,7 @@ struct Limit {
 }
 
 pub fn router(pool: Arc<Pool>) -> Router {
-    let st = St { limiter: Arc::new(Limiter::new(pool.cfg.public.rate_per_min)), pool };
+    let st = St { limiter: Arc::new(Limiter::new(pool.cfg.public.rate_per_min)), pool: pool.clone() };
     Router::new()
         .route("/public/v1/pool", get(pool_view))
         .route("/public/v1/blocks", get(blocks))
@@ -88,6 +88,8 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/miner.html", get(|State(s): State<St>| file(s, "miner.html", "text/html; charset=utf-8")))
         .route("/miner", get(|State(s): State<St>| file(s, "miner.html", "text/html; charset=utf-8")))
         .route("/miner.js", get(|State(s): State<St>| file(s, "miner.js", "text/javascript; charset=utf-8")))
+        .route("/music/playlist.json", get(|State(s): State<St>| crate::music::playlist_response(crate::music::dir(&s.pool.cfg.api.music_dir, &s.pool.cfg.api.ui_dir))))
+        .nest_service("/music", crate::music::files(crate::music::dir(&pool.cfg.api.music_dir, &pool.cfg.api.ui_dir)))
         .layer(middleware::from_fn_with_state(st.clone(), guard))
         .with_state(st)
 }

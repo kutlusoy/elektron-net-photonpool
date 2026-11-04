@@ -243,11 +243,14 @@ pub struct ApiCfg {
     /// Base URL of a mempool-style block explorer, used to link found blocks. Empty disables links.
     #[serde(default)]
     pub explorer_url: String,
+    /// Folder with audio files for the optional background music of the web pages. Empty: "music" inside ui_dir.
+    #[serde(default)]
+    pub music_dir: String,
 }
 
 impl Default for ApiCfg {
     fn default() -> Self {
-        Self { listen: d_listen(), ui_dir: d_ui(), explorer_url: String::new() }
+        Self { listen: d_listen(), ui_dir: d_ui(), explorer_url: String::new(), music_dir: String::new() }
     }
 }
 

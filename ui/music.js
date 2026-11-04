@@ -91,63 +91,125 @@ const Music = (() => {
   }
 
   /* ---- player ---- */
+  // Two sources behind one set of controls: audio files from the server's music folder (streamed by an <audio> element, looped as
+  // a playlist) when there are any, otherwise the generated score above.
   const KEY = 'photon.music.volume';
-  const P = { ctx: null, b: null, master: null, timer: 0, next: 0, step: 0, t0: 0, state: 'stopped', vol: 0.35 };
+  const P = { ctx: null, b: null, master: null, timer: 0, next: 0, step: 0, t0: 0, state: 'stopped', vol: 0.35, tracks: [], idx: 0, audio: null, an: null, actx: null, onTrack: () => {} };
   try { const v = parseFloat(localStorage.getItem(KEY)); if (v >= 0 && v <= 1) P.vol = v; } catch (_) { /* storage unavailable */ }
   const gainOf = (v) => v * v;
+  const files = () => P.tracks.length > 0;
 
   function pump() {
     while (P.next < P.ctx.currentTime + 0.25) { P.b.step(P.step, P.next); P.step = (P.step + 1) % STEPS; P.next += STEP; }
   }
+  function loadTrack(play) {
+    const t = P.tracks[P.idx];
+    P.audio.src = 'music/' + encodeURIComponent(t.file);
+    P.onTrack(t);
+    if (play) P.audio.play().catch(() => { P.state = 'stopped'; });
+  }
+  function filePlayer() {
+    if (P.audio) return;
+    const a = P.audio = new Audio(); a.preload = 'none'; a.volume = gainOf(P.vol);
+    a.addEventListener('ended', () => skip(1));
+    a.addEventListener('error', () => { if (P.tracks.length > 1) skip(1); });
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; P.actx = new AC();
+      P.an = P.actx.createAnalyser(); P.an.fftSize = 64; P.an.smoothingTimeConstant = 0.8;
+      P.actx.createMediaElementSource(a).connect(P.an); P.an.connect(P.actx.destination);
+    } catch (_) { P.an = null; }
+  }
+  function skip(d) {
+    if (!files()) return;
+    P.idx = (P.idx + d + P.tracks.length) % P.tracks.length;
+    if (P.audio) loadTrack(P.state === 'playing');
+    else P.onTrack(P.tracks[P.idx]);
+  }
   function play() {
     if (P.state === 'playing') return;
+    if (files()) {
+      filePlayer();
+      if (P.actx && P.actx.state === 'suspended') P.actx.resume();
+      if (P.state === 'stopped' || !P.audio.src) loadTrack(true); else P.audio.play().catch(() => {});
+      P.state = 'playing'; return;
+    }
     if (P.state === 'paused') { P.ctx.resume(); P.state = 'playing'; return; }
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     P.ctx = new AC(); P.master = P.ctx.createGain(); P.master.gain.value = gainOf(P.vol); P.master.connect(P.ctx.destination);
-    P.b = build(P.ctx, P.master); P.b.startRain();
+    P.b = build(P.ctx, P.master); P.an = P.b.analyser; P.b.startRain();
     P.step = 0; P.next = P.t0 = P.ctx.currentTime + 0.1; pump(); P.timer = setInterval(pump, 60); P.state = 'playing';
   }
-  function pause() { if (P.state !== 'playing') return; P.ctx.suspend(); P.state = 'paused'; }
+  function pause() {
+    if (P.state !== 'playing') return;
+    if (files()) P.audio.pause(); else P.ctx.suspend();
+    P.state = 'paused';
+  }
   function stop() {
     if (P.state === 'stopped') return;
+    if (files()) { P.audio.pause(); P.audio.currentTime = 0; P.state = 'stopped'; return; }
     clearInterval(P.timer); const ctx = P.ctx; P.state = 'stopped';
     try { P.master.gain.cancelScheduledValues(ctx.currentTime); P.master.gain.setTargetAtTime(0, ctx.currentTime, 0.05); } catch (_) { /* already closed */ }
-    setTimeout(() => ctx.close().catch(() => {}), 400); P.ctx = P.b = P.master = null;
+    setTimeout(() => ctx.close().catch(() => {}), 400); P.ctx = P.b = P.master = P.an = null;
   }
   function volume(v) {
     P.vol = Math.max(0, Math.min(1, v));
+    if (P.audio) P.audio.volume = gainOf(P.vol);
     if (P.master) P.master.gain.setTargetAtTime(gainOf(P.vol), P.ctx.currentTime, 0.03);
     try { localStorage.setItem(KEY, String(P.vol)); } catch (_) { /* ignore */ }
   }
-  const time = () => (P.ctx && P.state !== 'stopped' ? Math.max(0, P.ctx.currentTime - P.t0) % TOTAL : 0);
+  const time = () => {
+    if (files()) return P.audio ? P.audio.currentTime || 0 : 0;
+    return P.ctx && P.state !== 'stopped' ? Math.max(0, P.ctx.currentTime - P.t0) % TOTAL : 0;
+  };
+  const length = () => (files() ? (P.audio && Number.isFinite(P.audio.duration) ? P.audio.duration : NaN) : TOTAL);
 
   /* ---- widget in the title bar ---- */
+  const fmt = (s) => (Number.isFinite(s) ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--:--');
   function mount() {
     const bar = document.querySelector('.titlebar'); if (!bar || bar.querySelector('.music')) return;
     const w = document.createElement('span'); w.className = 'music';
     const mk = (cls, txt, title) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = txt; b.title = title; b.setAttribute('aria-label', title); w.append(b); return b; };
-    const pp = mk('mbtn', '▶', 'play music'), st = mk('mbtn', '■', 'stop music');
+    const prev = mk('mbtn mnav', '⏮', 'previous track'), pp = mk('mbtn', '▶', 'play music'), st = mk('mbtn', '■', 'stop music'), nxt = mk('mbtn mnav', '⏭', 'next track');
     const eq = document.createElement('canvas'); eq.className = 'meq'; eq.width = 40; eq.height = 14; w.append(eq);
     const vol = document.createElement('input'); vol.type = 'range'; vol.min = 0; vol.max = 100; vol.value = Math.round(P.vol * 100); vol.className = 'mvol'; vol.title = 'volume'; vol.setAttribute('aria-label', 'music volume'); w.append(vol);
-    const tm = document.createElement('span'); tm.className = 'mtime'; tm.textContent = '--:-- / ' + fmt(TOTAL); w.append(tm);
+    const title = document.createElement('span'); title.className = 'mtitle'; title.tabIndex = 0; w.append(title);
+    const tip = document.createElement('span'); tip.className = 'mtip'; w.append(tip);
+    const tm = document.createElement('span'); tm.className = 'mtime'; w.append(tm);
     const clock = bar.querySelector('.clock'); bar.insertBefore(w, clock);
-    const g = eq.getContext('2d'), data = new Uint8Array(32);
+    const showTime = () => { tm.textContent = `${P.state === 'stopped' && !files() ? '--:--' : fmt(time())} / ${fmt(length())}`; };
+    showTime();
+    // the track and its credit: visible title, tooltip with the credit line, artist link and license code
+    P.onTrack = (t) => {
+      title.textContent = '♪ ' + t.title + (t.artist ? ' — ' + t.artist : '');
+      tip.textContent = '';
+      const line = (txt) => { const d = document.createElement('div'); d.textContent = txt; tip.append(d); return d; };
+      line(t.credit || (t.artist ? `${t.title} by ${t.artist}` : t.title));
+      if (t.url) { const d = document.createElement('div'), a = document.createElement('a'); a.href = t.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = t.url; d.append(a); tip.append(d); }
+      if (t.license) line('License code: ' + t.license);
+      w.classList.toggle('credit', !!(t.credit || t.url || t.license));
+    };
     const sync = () => { pp.textContent = P.state === 'playing' ? '❚❚' : '▶'; pp.title = P.state === 'playing' ? 'pause music' : 'play music'; w.classList.toggle('on', P.state === 'playing'); };
     pp.addEventListener('click', () => { if (P.state === 'playing') pause(); else play(); sync(); });
-    st.addEventListener('click', () => { stop(); sync(); tm.textContent = '00:00 / ' + fmt(TOTAL); });
+    st.addEventListener('click', () => { stop(); sync(); showTime(); });
+    prev.addEventListener('click', () => skip(-1)); nxt.addEventListener('click', () => skip(1));
     vol.addEventListener('input', () => volume(vol.value / 100));
+    fetch('music/playlist.json', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => {
+      if (!j || !Array.isArray(j.tracks) || !j.tracks.length) return;
+      P.tracks = j.tracks.filter((t) => t && typeof t.file === 'string'); if (!P.tracks.length) return;
+      w.classList.add('files'); w.classList.toggle('multi', P.tracks.length > 1); P.onTrack(P.tracks[0]); pp.title = 'play music'; showTime();
+    }).catch(() => { /* no playlist: the generated score is used */ });
+    const g = eq.getContext('2d'), data = new Uint8Array(32);
     const color = () => getComputedStyle(document.body).getPropertyValue('--c1').trim() || '#0ff';
     setInterval(() => {
-      if (P.state !== 'stopped') tm.textContent = `${fmt(time())} / ${fmt(TOTAL)}`;
+      showTime(); sync();
       g.clearRect(0, 0, 40, 14);
-      if (P.state === 'playing' && P.b) {
-        P.b.analyser.getByteFrequencyData(data); g.fillStyle = color(); g.shadowColor = g.fillStyle; g.shadowBlur = 4;
+      if (P.state === 'playing' && P.an) {
+        P.an.getByteFrequencyData(data); g.fillStyle = color(); g.shadowColor = g.fillStyle; g.shadowBlur = 4;
         for (let i = 0; i < 8; i++) { const v = data[i * 2 + 1] / 255, h = Math.max(1, v * 13); g.fillRect(i * 5, 14 - h, 3, h); }
       }
     }, 66);
   }
-  const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount();
 
-  return { play, pause, stop, volume, time, total: TOTAL, state: () => P.state, _build: build, _STEP: STEP, _STEPS: STEPS };
+  return { play, pause, stop, volume, time, skip, total: TOTAL, state: () => P.state, tracks: () => P.tracks, _build: build, _STEP: STEP, _STEPS: STEPS };
 })();

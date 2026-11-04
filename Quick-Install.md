@@ -164,6 +164,10 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 - [ ] Port `3333` reachable from the miners, `8081` only local.
 - [ ] Payout handling decided (see the payout modes guideline) before real miners connect.
 
+## 9a. Background music (optional)
+
+The web pages can play background music. Put audio files (mp3, ogg, opus, m4a, wav, flac) into the `music/` folder next to `docker-compose.yml` (for bare metal: set `music_dir` in `[api]`). The player in the title bar plays them as a looping playlist with play, pause, stop, previous, next and volume; the browser streams the files, so nothing is held in memory. Copy `music/playlist.example.json` to `music/playlist.json` to set titles and the credit that a license asks for; it is shown in a tooltip on the track title. Audio files and `playlist.json` are ignored by git on purpose, because most free licenses allow using a track on your site but not passing the file on: copy them to the server yourself. See [`music/README.md`](music/README.md).
+
 ## 10. Standalone or complete Docker stack
 
 The pool is fully usable on its own (sections 3 and 4). For a public page with automatic HTTPS in the standalone Docker setup, point a DNS record at the server, open ports 80 and 443 and start the optional Caddy profile:
