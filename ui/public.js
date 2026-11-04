@@ -94,18 +94,77 @@ function render() {
       ...p.modes.map((m) => `${span('c2', pad((modeLabel[m.mode] || m.mode).toLowerCase(), 6))}${span('dim', modeShort[m.mode] || '')}`),
       '', span('dim', `min payout ${leptons(p.minPayoutLeptons)} leptons`)]).join('\n');
   const fwk = colw(view.blocks.map((b) => b.finder), 6);
-  $('#pane-blocks').innerHTML = [span('row-h', pad('HEIGHT', 9) + pad('AGE', 8) + pad('MODE', 7) + fit('FINDER', wide('blocks') ? fwk : 17, wide('blocks')) + 'STATE')]
-    .concat(view.blocks.map((b) => {
+  trackSeries(p);
+  const blocksS = sortRows('blocks', view.blocks, { height: (b) => b.height, time: (b) => b.time, mode: (b) => b.mode, finder: (b) => b.finder, status: (b) => b.status }, 'height');
+  const payoutsS = sortRows('payouts', view.payouts, { time: (x) => x.time, amount: (x) => x.amount, txid: (x) => x.txid || '' }, 'time');
+  $('#pane-blocks').innerHTML = [`<span class="row-h">${hdr('blocks', [['height', 'HEIGHT', 9], ['time', 'AGE', 8], ['mode', 'MODE', 7, false, 1], ['finder', 'FINDER', wide('blocks') ? fwk : 17, false, 1], ['status', 'STATE', 8, false, 1]], 'height')}</span>`]
+    .concat(blocksS.map((b) => {
       const a = Date.now() / 1000 - b.time;
       const cls = b.status === 'mature' ? 'dim' : b.status === 'orphaned' ? 'err' : 'c3';
       return `${linkPad(b.url, num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 8)}${pad(modeLabel[b.mode] || b.mode, 7)}${fit(b.finder, wide('blocks') ? fwk : 17, wide('blocks'))}${span(cls, b.status)}`;
     })).join('\n');
-  $('#pane-payouts').innerHTML = [span('row-h', pad('AGE', 8) + pad('AMOUNT', 15) + 'TX')]
-    .concat(view.payouts.map((x) => {
+  $('#pane-payouts').innerHTML = [`<span class="row-h">${hdr('payouts', [['time', 'AGE', 8], ['amount', 'AMOUNT', 15], ['txid', 'TX', 6, false, 1]], 'time')}</span>`]
+    .concat(payoutsS.map((x) => {
       const a = Date.now() / 1000 - x.time;
       return `${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 8)}${pad(coins(x.amount), 15)}${link(txUrl(p.explorerUrl, x.txid), wide('payouts') ? (x.txid || '') : short(x.txid || '', 6, 4), 'c1')}`;
     })).join('\n') || span('dim', 'no payouts yet');
+  Extras.tick();
 }
+
+
+/* ---------- live series and the extra panels of maximized panes ---------- */
+
+function trackSeries(p) {
+  Series.seed('hr', p.hashrate.hist, 5);
+  Series.push('hr', p.hashrate.now); Series.push('h1', p.hashrate.h1); Series.push('online', p.miners.online); Series.push('workers', p.miners.workers);
+}
+const card = Extras.card;
+const timeLine = (host, series, fmt, extra = {}) => Neon.line(host, { series, fmt, xfmt: agoLabel, ...extra });
+
+Extras.add('pool', (el) => {
+  const k = card(el, 'pool numbers', 'wide'), hr = card(el, 'pool hashrate (since this page was opened)', 'wide'), mi = card(el, 'miners and workers online'), bl = card(el, 'blocks');
+  return () => {
+    const p = view.pool; if (!p) return;
+    Neon.kpis(k, [{ label: 'hashrate', value: p.hashrate.now, fmt: fmtHash }, { label: '1 h avg', value: p.hashrate.h1, fmt: fmtHash, color: 'c2' }, { label: 'miners', value: p.miners.online, fmt: num }, { label: 'workers', value: p.miners.workers, fmt: num, color: 'c2' },
+      { label: 'blocks 24 h', value: p.found24h, fmt: num, color: 'c3' }, { label: 'difficulty', value: p.networkDifficulty, fmt: (v) => v.toExponential(2), color: 'c3' }, { label: 'uptime', value: p.uptime, fmt: dhms, color: 'ok' }]);
+    timeLine(hr, [{ name: 'hashrate', data: Series.get('hr'), color: 'c1' }, { name: '1 h avg', data: Series.get('h1'), color: 'c2' }], fmtHash);
+    timeLine(mi, [{ name: 'miners', data: Series.get('online'), color: 'ok' }, { name: 'workers', data: Series.get('workers'), color: 'c2' }], num);
+    const b = p.blocks || {};
+    Neon.donut(bl, Object.entries({ maturing: b.maturing || 0, mature: b.mature || 0, orphaned: b.orphaned || 0, found: b.found || 0 }).filter(([, v]) => v > 0).map(([n, v]) => ({ label: n, value: v, color: n === 'orphaned' ? 'err' : n === 'maturing' ? 'c3' : n === 'found' ? 'ok' : 'c1', text: num(v) })), { big: num((b.maturing || 0) + (b.mature || 0) + (b.orphaned || 0) + (b.found || 0)), sub: 'blocks' });
+  };
+});
+
+Extras.add('modes', (el) => {
+  const f = card(el, 'fees by mode (%)'), a = card(el, 'availability');
+  return () => {
+    const p = view.pool; if (!p) return;
+    Neon.bars(f, p.modes.map((m) => ({ key: m.mode, label: modeLabel[m.mode] || m.mode, value: m.fee, text: m.fee + '%', color: m.available ? 'c1' : 'warn' })), { max: Math.max(5, ...p.modes.map((m) => m.fee)) });
+    Neon.donut(a, p.modes.map((m) => ({ key: m.mode, label: (modeLabel[m.mode] || m.mode) + (m.available ? '' : ' (paused)'), value: 1, color: m.available ? 'ok' : 'warn', text: m.available ? 'open' : 'paused' })), { big: String(p.modes.filter((m) => m.available).length), sub: 'modes open' });
+  };
+});
+
+Extras.add('blocks', (el) => {
+  const k = card(el, 'found blocks', 'wide'), gap = card(el, 'minutes between blocks', 'wide'), md = card(el, 'blocks by mode'), st = card(el, 'status');
+  return () => {
+    const b = view.blocks; if (!b.length) { k.innerHTML = '<span class="dim">no block found yet</span>'; return; }
+    const t = b.map((x) => x.time).sort((x, y) => x - y), gaps = t.slice(1).map((x, i) => (x - t[i]) / 60);
+    Neon.kpis(k, [{ label: 'listed', value: b.length, fmt: num }, { label: 'last found', value: Date.now() / 1000 - t[t.length - 1], fmt: hms, color: 'c2' }, { label: 'avg gap', value: gaps.length ? gaps.reduce((x, y) => x + y, 0) / gaps.length : 0, fmt: (v) => v.toFixed(1) + ' min', color: 'c3' }]);
+    if (gaps.length) Neon.columns(gap, gaps.map((g, i) => ({ key: t[i + 1], label: '', value: g, text: g.toFixed(1) + ' min', tip: agoLabel(t[i + 1]) })), { color: 'c3' });
+    const by = (f) => { const o = {}; b.forEach((x) => { o[f(x)] = (o[f(x)] || 0) + 1; }); return Object.entries(o); };
+    Neon.donut(md, by((x) => x.mode).map(([n, c]) => ({ label: modeLabel[n] || n, value: c, text: num(c) })), { big: num(b.length), sub: 'blocks' });
+    Neon.donut(st, by((x) => x.status).map(([n, c]) => ({ label: n, value: c, color: n === 'orphaned' ? 'err' : n === 'mature' ? 'c1' : 'c3', text: num(c) })), { big: num(b.length), sub: 'blocks' });
+  };
+});
+
+Extras.add('payouts', (el) => {
+  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins), oldest to newest', 'wide');
+  return () => {
+    const x = view.payouts; if (!x.length) { k.innerHTML = '<span class="dim">no payouts yet</span>'; return; }
+    const tot = x.reduce((a, y) => a + y.amount, 0), sorted = [...x].sort((a, y) => a.time - y.time);
+    Neon.kpis(k, [{ label: 'listed', value: x.length, fmt: num }, { label: 'total', value: tot, fmt: coins, color: 'c2' }, { label: 'average', value: tot / x.length, fmt: coins, color: 'c2' }, { label: 'largest', value: Math.max(...x.map((y) => y.amount)), fmt: coins, color: 'c3' }]);
+    Neon.columns(c, sorted.map((y) => ({ key: y.txid || y.time, label: '', value: y.amount, text: coins(y.amount), tip: agoLabel(y.time) })), { color: 'c2' });
+  };
+});
 
 /* ---------- console ---------- */
 

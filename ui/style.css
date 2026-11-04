@@ -177,7 +177,7 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 /* Depth view (depth.js): the maximized pane comes forward, the others recede in 3D and blur. */
 .grid { position: relative; }
 .pane { transition: transform .65s cubic-bezier(.2, .8, .2, 1), filter .65s, opacity .65s, left .6s cubic-bezier(.2, .8, .2, 1), top .6s cubic-bezier(.2, .8, .2, 1), width .6s cubic-bezier(.2, .8, .2, 1), height .6s cubic-bezier(.2, .8, .2, 1), box-shadow .6s; }
-.pane.front { position: absolute; grid-area: auto; z-index: 5; background: color-mix(in srgb, var(--panel) 96%, transparent); }
+.pane.front { position: absolute; grid-area: auto !important; z-index: 5; background: color-mix(in srgb, var(--panel) 96%, transparent); }
 .pane.front pre, .pane.front .tty { font-size: 1.08em; }
 .pane.front pre { overflow: auto; }
 .grid.depth { perspective: 1300px; perspective-origin: calc(50% + var(--mx, 0) * 70px) calc(50% + var(--my, 0) * 45px); }
@@ -193,3 +193,78 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .pane h2 .max:hover, .pane h2 .max:focus-visible { color: var(--c1); border-color: var(--c1); outline: none; }
 @media (max-width: 720px) { .pane h2 .max { display: none; } }
 @media (prefers-reduced-motion: reduce) { .pane { transition: none; } }
+
+/* Sortable column headers (common.js) */
+.th { cursor: pointer; user-select: none; }
+.th:hover { color: var(--c1); text-shadow: 0 0 8px var(--glow); }
+.th.on { color: var(--c3); }
+
+/* Extra panels of a maximized pane (charts.js) */
+.pane.front { overflow: hidden; }
+.pane.front.has-extra > pre { flex: 0 1 auto; max-height: 30%; overflow: auto; border-bottom: 1px dashed var(--line); }
+.extra { display: none; flex: 1 1 0; min-height: 0; overflow: auto; padding: 10px; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-content: start; grid-auto-rows: max-content; opacity: 0; }
+.pane.front .extra { display: grid; animation: extra-in .7s .25s cubic-bezier(.2, .8, .2, 1) forwards; }
+.pane.leaving .extra { animation: none; opacity: 0; }
+@keyframes extra-in { from { opacity: 0; transform: translateY(18px) scale(.98); } to { opacity: 1; transform: none; } }
+.card { position: relative; border: 1px solid var(--line); background: rgba(2, 3, 8, .5); padding: 0 0 6px; overflow: hidden; }
+.card.wide { grid-column: 1 / -1; }
+.card::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(100deg, transparent 35%, color-mix(in srgb, var(--c1) 20%, transparent) 50%, transparent 65%); transform: translateX(-120%); animation: sweep 1.4s .5s ease-out 1 forwards; }
+@keyframes sweep { to { transform: translateX(120%); } }
+.card h3 { margin: 0; padding: 2px 10px; font-size: 10px; font-weight: 600; letter-spacing: .22em; text-transform: uppercase; color: var(--c2); border-bottom: 1px dashed var(--line); background: linear-gradient(90deg, color-mix(in srgb, var(--c2) 14%, transparent), transparent 60%); }
+.cbody { padding: 8px 10px 2px; }
+
+.nchart { position: relative; height: 190px; }
+.card.wide .nchart { height: 240px; }
+.nsvg { display: block; width: 100%; height: 100%; overflow: visible; }
+.ngrid { stroke: var(--line); stroke-dasharray: 2 5; stroke-width: 1; }
+.ntxt { fill: var(--dim); font-size: 10px; font-family: var(--mono); }
+.nline { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: ndraw 1.3s .3s ease-out forwards; filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 9px currentColor); }
+@keyframes ndraw { to { stroke-dashoffset: 0; } }
+.narea { opacity: 0; animation: nfade .9s .9s ease-out forwards; }
+@keyframes nfade { to { opacity: 1; } }
+.ndot { filter: drop-shadow(0 0 6px currentColor); }
+.nring { fill: none; stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: nping 1.8s ease-out infinite; }
+@keyframes nping { from { transform: scale(1); opacity: .9; } to { transform: scale(3.4); opacity: 0; } }
+.ncross { stroke: var(--fg); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0; pointer-events: none; }
+.nhov { fill: var(--bg); stroke-width: 2; opacity: 0; pointer-events: none; }
+.ntip { position: absolute; z-index: 3; pointer-events: none; opacity: 0; transition: opacity .12s; padding: 4px 8px; background: rgba(2, 3, 8, .92); border: 1px solid var(--c1); box-shadow: 0 0 14px color-mix(in srgb, var(--c1) 35%, transparent); font-size: 11px; white-space: nowrap; }
+.ntip b { color: var(--c1); font-weight: 600; }
+.ntip i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; }
+
+.nbars { display: grid; gap: 4px; }
+.nrow { display: grid; grid-template-columns: minmax(70px, 34%) 1fr auto; gap: 8px; align-items: center; font-size: 11px; }
+.nrow:hover .nfill { filter: brightness(1.5) drop-shadow(0 0 6px currentColor); }
+.nlab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+.ntrack { height: 9px; background: color-mix(in srgb, var(--c1) 8%, transparent); }
+.nfill { height: 100%; width: 0; transition: width .9s cubic-bezier(.2, .8, .2, 1), filter .2s; box-shadow: 0 0 10px currentColor; }
+.nval { color: var(--fg); text-align: right; min-width: 7ch; }
+
+.ncols { display: flex; align-items: flex-end; gap: 4px; height: 170px; padding-top: 6px; }
+.ncol { position: relative; flex: 1; min-width: 6px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+.nbar { width: 100%; height: 0; border-top: 2px solid currentColor; transition: height .9s cubic-bezier(.2, .8, .2, 1), filter .2s; box-shadow: 0 -4px 14px -4px currentColor; }
+.ncol:hover .nbar { filter: brightness(1.6); }
+.nclab { margin-top: 3px; height: 12px; font-size: 9px; color: var(--dim); text-align: center; overflow: hidden; white-space: nowrap; }
+.ncol:hover::after, .nrow:hover::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); z-index: 4; padding: 2px 7px; white-space: nowrap; background: rgba(2, 3, 8, .95); border: 1px solid var(--c1); font-size: 11px; color: var(--fg); pointer-events: none; }
+.nrow { position: relative; }
+.nrow:hover::after { left: 40%; bottom: 80%; }
+
+.ndonut { display: flex; align-items: center; gap: 14px; }
+.ndsvg { width: 150px; height: 150px; flex: none; }
+.ndtrack { fill: none; stroke: color-mix(in srgb, var(--c1) 10%, transparent); stroke-width: 11; }
+.ndseg { fill: none; stroke-width: 11; transition: stroke-dasharray 1s cubic-bezier(.2, .8, .2, 1), stroke-dashoffset 1s cubic-bezier(.2, .8, .2, 1), opacity .2s, stroke-width .2s; filter: drop-shadow(0 0 5px currentColor); }
+.hov .ndseg { opacity: .35; } .hov .ndseg.on { opacity: 1; stroke-width: 14; }
+.ndbig { fill: var(--fg); font-size: 17px; font-family: var(--mono); font-weight: 600; }
+.ndsub { fill: var(--dim); font-size: 8px; font-family: var(--mono); }
+.nleg { display: grid; gap: 3px; font-size: 11px; min-width: 0; }
+.nlrow { display: grid; grid-template-columns: 9px 1fr auto; gap: 7px; align-items: center; cursor: default; }
+.nlrow i { width: 9px; height: 9px; box-shadow: 0 0 8px currentColor; }
+.nlrow span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nlrow:hover span { color: var(--fg); }
+
+.nkpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.nkpi { padding: 2px 4px; }
+.nkv { font-size: 22px; font-weight: 600; line-height: 1.15; text-shadow: 0 0 12px currentColor; font-variant-numeric: tabular-nums; }
+.nkl { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+.nks { font-size: 10px; color: var(--dim); min-height: 12px; }
+@media (prefers-reduced-motion: reduce) { .nline, .narea, .ncard, .card::after, .nring, .pane.front .extra { animation: none; stroke-dashoffset: 0; opacity: 1; } .nfill, .nbar, .ndseg { transition: none; } }
+@media (max-width: 720px) { .extra { display: none !important; } }

@@ -7,6 +7,7 @@ Pool (`photond`)
 - Payout modes solo (direct coinbase payout, no fee), PPLNS and PPS in one pool; mode per port or `m=` in the password; PPS paused until the wallet reserve is funded.
 - SQLite ledger, maturity tracking (101 confirmations), batched `sendmany` payouts with crash recovery, dry-run by default, encrypted wallet support.
 - Depth view in all three web pages: a pane can be maximized (button, double-click on its title, click on a pane in the background, Esc to go back); the other panes recede in 3D and blur.
+- Interactive neon charts in the maximized panes (hashrate, latency, share quality, worker distribution, blocks, payouts) with draw-in animation and hover read-out, and sortable table columns (click a header): `ui/charts.js`.
 - Public pool page and personal miner page on a separate listener with rate limiting; terminal-style operator UI and read-only admin API.
 - Candidate backends: `gbt` (one `getblocktemplate` per payout address, unmodified node) and `batch` (`getattestationbatch`, Photon node patch), `pool.backend = auto`.
 - Photon protocol (`src/photon/`): framing, messages, Noise transport, payout plan, accounting tree, coinbase check, share verifier, pool session (`[photon]` in `photond.toml`, off by default) and `photond gateway` with a Stratum V1 front end for ASICs (`gateway.example.toml`) and a CPU miner for tests. The first Bitaxe test uses the normal pool Stratum port.
