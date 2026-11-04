@@ -13,6 +13,7 @@ fi
 if [ -n "$ELEKTROND_BATCH" ]; then
   ELEKTROND="$ELEKTROND_BATCH" python3 step14_batch_attestation.py || rc=1
   for seed in 1 2 3; do SEED=$seed ELEKTROND="$ELEKTROND_BATCH" python3 step15_differential.py || rc=1; done
+  ELEKTROND="$ELEKTROND_BATCH" python3 step16_photon_plan_coinbase.py || rc=1   # needs target/release/photond or PHOTOND
 else
   echo "[step14] skipped (set ELEKTROND_BATCH to an elektrond built with the Photon node patch)"
 fi

@@ -4,6 +4,7 @@ mod api;
 mod config;
 mod diff;
 mod ledger;
+mod photon;
 mod pool;
 mod public;
 mod rpc;
@@ -36,12 +37,28 @@ enum Cmd {
         #[arg(long)]
         mine: bool,
     },
+    /// Photon: derive a payout plan and the node candidate from JSON on stdin (cross-language tests).
+    PhotonPlan,
+    /// Photon: check a coinbase against a plan, JSON on stdin (cross-language tests).
+    PhotonCheck,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_writer(std::io::stderr).with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).init();
     let cli = Cli::parse();
+    if matches!(cli.cmd, Cmd::PhotonPlan | Cmd::PhotonCheck) {
+        let input: serde_json::Value = serde_json::from_reader(std::io::stdin())?;
+        let out = if matches!(cli.cmd, Cmd::PhotonPlan) { photon::cli::run_plan(&input) } else { photon::cli::run_check(&input) };
+        match out {
+            Ok(v) => println!("{v}"),
+            Err(e) => {
+                println!("{}", json!({"ok": false, "error": format!("{e:#}")}));
+                std::process::exit(1);
+            }
+        }
+        return Ok(());
+    }
     match cli.cmd {
         Cmd::Run => loop {
             match Pool::connect(config::Config::load(&cli.config)?).await {
@@ -52,6 +69,7 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        Cmd::PhotonPlan | Cmd::PhotonCheck => unreachable!(),
         Cmd::Check { mine } => check(Pool::connect(config::Config::load(&cli.config)?).await?, mine).await,
     }
 }

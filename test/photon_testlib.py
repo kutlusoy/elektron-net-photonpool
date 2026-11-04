@@ -228,3 +228,26 @@ def make_spend(prev_txid_le, n, value, fee=1000, outputs=1):
     outs = b"".join(txout(each, b"\x51") for _ in range(outputs))
     raw = struct.pack("<i", 2) + varint(1) + prev_txid_le + struct.pack("<I", n) + b"\x00" + struct.pack("<I", 0xfffffffd) + varint(outputs) + outs + struct.pack("<I", 0)
     return raw, [(each, i) for i in range(outputs)]
+
+
+def wrap_witness(cb_nowit, reserved):
+    return cb_nowit[:4] + b"\x00\x01" + cb_nowit[4:-4] + varint(1) + varint(32) + reserved + cb_nowit[-4:]
+
+
+def block_from_batch(bt, cand, datas):
+    """Block parts (head, witness coinbase, rest, tx count) from a getattestationbatch response and one candidate."""
+    cb = bytes.fromhex(cand["coinbase_hex"])
+    wit = wrap_witness(cb, bytes.fromhex(bt.get("coinbase_witness", "00" * 32))[::-1])
+    leaves = [sha256d(cb)] + [sha256d(d) for d in datas]
+    while len(leaves) > 1:
+        if len(leaves) % 2: leaves.append(leaves[-1])
+        leaves = [sha256d(leaves[i] + leaves[i + 1]) for i in range(0, len(leaves), 2)]
+    head = struct.pack("<i", bt["version"]) + bytes.fromhex(bt["tip"])[::-1] + leaves[0] + struct.pack("<I", bt["curtime"]) + bytes.fromhex(bt["bits"])[::-1]
+    return head, wit, b"".join(datas), 1 + len(datas)
+
+
+def solve_parts(bt, parts):
+    head, wit, rest, ntx = parts
+    target = int(bt["target"], 16); nonce = 0
+    while int.from_bytes(sha256d(head + struct.pack("<I", nonce))[::-1], "big") > target: nonce += 1
+    return (head + struct.pack("<I", nonce) + varint(ntx) + wit + rest).hex()

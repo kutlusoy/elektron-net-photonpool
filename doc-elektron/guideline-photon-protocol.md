@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.1 (design draft, not implemented)
+- **Version:** 0.2 (core implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier; gateway and pool session not yet)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -188,12 +188,25 @@ Photon follows the goals of DATUM and borrows the framing of Stratum V2. What is
 4. **Gateway** (`photon-gateway` binary): local node client, variant generation, local Stratum V1 server reusing `stratum.rs`, Photon client.
 5. **Tests:** codec round trips and fuzzing, plan determinism, Merkle proofs, regtest with gateway, pool and two nodes (a block built by a gateway's node is accepted and pays the plan), simulation of many gateways.
 
+## 14a. As built (v0.2)
+
+Code: `src/photon/` (`wire.rs`, `msg.rs`, `noise.rs`, `merkle.rs`, `plan.rs`, `coinbase.rs`, `verify.rs`, `cli.rs`). Tests: 37 unit tests (`cargo test photon`) and `test/step16_photon_plan_coinbase.py` (Rust plan and checker against the patched node).
+
+- **Framing:** `ext u16 | type u8 | length u24 | payload`, payload cap 64 KiB, the cap is enforced when the header is complete (before buffering). Messages 0x00-0x0f in extension 0 (`Setup`, `SetupAck`, `OpenChannel`, `OpenChannelAck`, `NewTip`, `PayoutPlan`, `TemplateAnnounce`, `Shares`, `ShareAck`, `SetTarget`, `BlockFound`, `EpochCommit`, `GetProof`, `Proof`, `Reject`, `Disconnect`). Decoding is strict: every collection is capped, truncated or trailing bytes are errors. Three wire vectors are frozen in `msg.rs`; a change there is a protocol change.
+- **Transport:** `Noise_NX_25519_ChaChaPoly_SHA256`, prologue `photon/1`. The gateway pins the pool's static key (decision for v1: key pinning instead of a certificate authority, see open question 1). Noise messages carry a u16 length prefix; frames are cut into 65,519-byte chunks and reassembled.
+- **`TemplateAnnounce`:** carries the non-witness coinbases of a batch of variants (at most 64 per message) plus one merkle branch (the transaction set is the same for all variants). Shares address a variant by number; the pool recomputes `merkle root = coinbase txid + branch` and the header (BIP 320 version rolling mask `0x1fffe000`, ntime advance at most 7200 s).
+- **Plan rules v1:** ppm = floor(credit * (1e6 - fee_ppm) / total); entries below `min_ppm` are dropped (credit carries over); at most `n_max` entries (largest credit first, ties by script bytes); ppm recomputed over the kept entries; outputs ordered by ppm descending then script. `plan_hash = SHA256("PHOTON-PLAN-V1" || rules || height || tip || root || outputs || fee)`. A gateway refuses a plan whose hash, bounds, ordering or fee terms deviate (`check_plan`).
+- **Accounting tree:** leaf `SHA256(0x00 || u16 len || script || u64 credit)`, node `SHA256(0x01 || l || r)`, odd nodes are promoted unchanged, root `SHA256(0x02 || u32 count || top)`; leaves sorted by script, scripts unique. The frozen root vector was computed independently in Python.
+- **Coinbase:** payouts in plan order (value = floor(reward * ppm / 1e6)), fee output with the remainder (omitted when 0), attestation, witness commitment, `OP_RETURN "PHOT" || root`. The checker (`check_announced`) verifies layout, values, locktime, BIP 34 height, the shape of the attestation and witness commitment outputs and a reward bound. It cannot verify the attestation digest itself; that is the node's spot check (`Trust`: probability 0.5 decaying to 0.02 with clean checks, multiplied by 4 per failure, ban after 3 failures).
+- **Measured end to end** (`step16`): 4 extranonce variants of a 40-miner plan are attested in one node call, accepted by the Rust checker and by the node's validator, one block is accepted by `submitblock` and pays exactly `floor(reward * ppm / 1e6)` per miner with the root on chain.
+
 ## 15. Checklist
 
 - [x] Batch attestation RPC as a node patch, equivalence against the oracle.
 - [x] Coinbase with plan-style outputs, commitment and extranonce accepted by an unmodified validating node on regtest (`test/step14_batch_attestation.py`).
-- [ ] Message definitions and test vectors frozen.
-- [ ] Plan derivation specified and implemented deterministically.
+- [x] Message definitions and first test vectors frozen (`msg.rs`, `merkle.rs`).
+- [x] Plan derivation specified and implemented deterministically (rules v1).
+- [ ] Pool session: listener, channel state, plan publication from the ledger, `TemplateAnnounce` handling, spot-check calls to the node.
 - [ ] Spot check cost and adaptive probability measured.
 - [ ] Gateway with local Stratum V1 for ASICs.
 - [ ] Independent review of the Noise handshake and the key certification.
