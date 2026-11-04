@@ -28,6 +28,8 @@ const CREDIT_SCALE: i64 = 1_000_000_000_000;
 const MAX_TEMPLATES: usize = 16;
 const CHECK_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_STRIKES: u32 = 5;
+const STALE_GRACE: Duration = Duration::from_secs(10);
+const TIP_WAIT: Duration = Duration::from_millis(1500);
 
 pub mod code {
     pub const NOT_READY: u16 = 1;
@@ -84,7 +86,8 @@ pub struct PhotonService {
     pub book: watch::Sender<Arc<PlanBook>>,
     pub stats: PhotonStats,
     rules: Rules,
-    seen: Mutex<HashSet<[u8; 32]>>,
+    /// Share hashes of the current and the previous tip (old-tip shares are still accepted for a short grace period).
+    seen: Mutex<(HashSet<[u8; 32]>, HashSet<[u8; 32]>)>,
     recent: Mutex<VecDeque<Arc<PlanEntry>>>,
 }
 
@@ -149,7 +152,7 @@ impl PhotonService {
         rules.validate()?;
         let empty = Arc::new(PlanBook { epoch_id: 0, tip: [0; 32], tip_hex: String::new(), tip_height: 0, plans: BTreeMap::new(), max_reward: 0 });
         let (book, _) = watch::channel(empty);
-        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new(HashSet::new()), recent: Mutex::new(VecDeque::new()) }))
+        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new((HashSet::new(), HashSet::new())), recent: Mutex::new(VecDeque::new()) }))
     }
 
     pub fn public_key_hex(&self) -> String {
@@ -189,7 +192,11 @@ impl PhotonService {
                         Ok(b) => {
                             let b = Arc::new(b);
                             last = Some(b.clone());
-                            self.seen.lock().unwrap().clear();
+                            {
+                                let mut g = self.seen.lock().unwrap();
+                                let cur = std::mem::take(&mut g.0);
+                                g.1 = cur;
+                            }
                             self.pool.event("info", format!("photon plans for heights {:?} ready (tip {}..)", b.plans.keys().collect::<Vec<_>>(), &b.tip_hex[..12]));
                             self.book.send_replace(b);
                         }
@@ -283,6 +290,8 @@ struct Session {
     conn: NoiseConn<TcpStream>,
     peer: SocketAddr,
     book: Arc<PlanBook>,
+    book_rx: watch::Receiver<Arc<PlanBook>>,
+    stale_since: HashMap<u32, Instant>,
     sent: HashSet<u32>,
     channels: HashMap<u32, Chan>,
     next_chan: u32,
@@ -306,9 +315,10 @@ fn reject(code: u16, reason: &str) -> Msg {
 
 impl Session {
     fn new(svc: Arc<PhotonService>, conn: NoiseConn<TcpStream>, peer: SocketAddr) -> Self {
-        let book = svc.book.borrow().clone();
+        let mut book_rx = svc.book.subscribe();
+        let book = book_rx.borrow_and_update().clone();
         Self {
-            svc, conn, peer, book, sent: HashSet::new(), channels: HashMap::new(), next_chan: 1, templates: HashMap::new(), order: VecDeque::new(), trust: Trust::default(), seen: Seen::default(), check: None,
+            svc, conn, peer, book, book_rx, stale_since: HashMap::new(), sent: HashSet::new(), channels: HashMap::new(), next_chan: 1, templates: HashMap::new(), order: VecDeque::new(), trust: Trust::default(), seen: Seen::default(), check: None,
             held: HashMap::new(), strikes: 0, last_rx: Instant::now(),
         }
     }
@@ -329,7 +339,6 @@ impl Session {
             Msg::Setup(_) => return self.disconnect(code::PROTOCOL, "unsupported protocol version").await,
             _ => return self.disconnect(code::PROTOCOL, "Setup expected").await,
         }
-        let mut book_rx = self.svc.book.subscribe();
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         self.push_book().await?;
         loop {
@@ -340,9 +349,9 @@ impl Session {
                     let m = Msg::decode(&f)?;
                     self.handle(m).await?;
                 }
-                r = book_rx.changed() => {
+                r = self.book_rx.changed() => {
                     r?;
-                    self.book = book_rx.borrow_and_update().clone();
+                    self.book = self.book_rx.borrow_and_update().clone();
                     self.on_new_tip().await?;
                 }
                 _ = tick.tick() => self.on_tick().await?,
@@ -371,9 +380,11 @@ impl Session {
     }
 
     async fn on_new_tip(&mut self) -> Result<()> {
-        self.templates.clear();
-        self.order.clear();
-        self.seen.clear();
+        // shares for templates of the previous tip stay valid for a grace period: a block found by this very gateway changes the tip before its final share arrives
+        let now = Instant::now();
+        for id in self.templates.keys() {
+            self.stale_since.entry(*id).or_insert(now);
+        }
         self.sent.retain(|h| self.book.plans.contains_key(h));
         if let Some(c) = self.check.take() {
             self.svc.stats.checks_inconclusive.fetch_add(1, Ordering::Relaxed);
@@ -392,6 +403,12 @@ impl Session {
                 self.check = None;
                 self.fail_check(key, "transactions were not delivered in time").await?;
             }
+        }
+        let expired: Vec<u32> = self.stale_since.iter().filter(|(_, t)| t.elapsed() > STALE_GRACE).map(|(id, _)| *id).collect();
+        for id in expired {
+            self.stale_since.remove(&id);
+            self.templates.remove(&id);
+            self.order.retain(|x| *x != id);
         }
         let (min, max, goal) = (self.svc.cfg.min_difficulty, self.svc.cfg.max_difficulty, self.svc.cfg.share_secs);
         let mut updates = vec![];
@@ -462,7 +479,19 @@ impl Session {
 
     async fn announce(&mut self, a: TemplateAnnounce) -> Result<()> {
         if a.tip != self.book.tip {
-            return self.send(reject(code::STALE, "announce is not for the current tip")).await;
+            // the gateway's node can be a little ahead of the pool's: wait briefly for the pool's own tip
+            let deadline = Instant::now() + TIP_WAIT;
+            while a.tip != self.book.tip && self.book.height() < a.height {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if !tokio::time::timeout(left, self.book_rx.changed()).await.map_or(false, |r| r.is_ok()) {
+                    break;
+                }
+                self.book = self.book_rx.borrow_and_update().clone();
+                self.on_new_tip().await?;
+            }
+            if a.tip != self.book.tip {
+                return self.send(reject(code::STALE, "announce is not for the current tip")).await;
+            }
         }
         let Some(entry) = self.book.plans.get(&a.height).cloned() else {
             return self.send(reject(code::NO_PLAN, "no plan for that height")).await;
@@ -529,7 +558,8 @@ impl Session {
             match check_share(a, m.template_id, item, &target, &mut self.seen) {
                 Verdict::Reject(c) => rejects.push((i as u32, c)),
                 Verdict::Share { hash, block } => {
-                    if !self.svc.seen.lock().unwrap().insert(hash) {
+                    let fresh = { let mut g = self.svc.seen.lock().unwrap(); !g.1.contains(&hash) && g.0.insert(hash) };
+                    if !fresh {
                         rejects.push((i as u32, reject::DUPLICATE));
                         continue;
                     }
@@ -543,6 +573,9 @@ impl Session {
                     }
                 }
             }
+        }
+        if !rejects.is_empty() {
+            tracing::debug!("photon {}: template {} shares {} rejected, first {:?} (book tip height {})", self.peer, m.template_id, rejects.len(), &rejects[..rejects.len().min(3)], self.book.tip_height);
         }
         self.svc.stats.accepted.fetch_add(accepted as u64, Ordering::Relaxed);
         self.svc.stats.rejected.fetch_add(rejects.len() as u64, Ordering::Relaxed);

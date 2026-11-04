@@ -7,19 +7,24 @@ use super::merkle;
 use super::msg::*;
 use super::noise::{self, NoiseConn};
 use super::plan::{check_plan, Rules};
+use super::gateway_stratum::{self, Fwd, Shared, StratumGwCfg};
 use super::verify::{bits_to_target, VERSION_MASK};
 use super::PROTOCOL_VERSION;
 use crate::addr::script_for_address;
 use crate::diff::target_from_difficulty;
+use crate::pool::Epoch;
 use crate::rpc::NodeRpc;
+use crate::template::{BatchTemplate, Candidate, TxSet};
 use crate::template::{header_hash, meets_target};
 use crate::tx::{merkle_branch, merkle_root, put_varint, sha256d};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
+use tokio::sync::{mpsc, watch};
 
 #[derive(Deserialize, Clone)]
 pub struct GatewayCfg {
@@ -50,6 +55,9 @@ pub struct GatewayCfg {
     /// Stop after this many blocks found by this gateway (tests).
     #[serde(default)]
     pub stop_after_blocks: Option<u32>,
+    /// Stratum V1 front end for ASICs (`[stratum] listen = "0.0.0.0:3333"`).
+    #[serde(default)]
+    pub stratum: StratumGwCfg,
     /// Test only: announce coinbases with a corrupted attestation to exercise the pool's spot check.
     #[serde(default)]
     pub corrupt_attestation: bool,
@@ -72,6 +80,7 @@ struct Tpl {
     coinbases: Vec<Vec<u8>>,
     txids_root: Vec<[u8; 32]>,
     tx_data: Vec<Vec<u8>>,
+    epoch: Arc<Epoch>,
 }
 
 impl Tpl {
@@ -122,6 +131,19 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     expect_ack(&mut conn).await?;
     conn.send(&Msg::OpenChannel(OpenChannel { request: 1, payout_script: my_script.clone(), target: target_from_difficulty(cfg.share_difficulty) }).encode()).await?;
 
+    let node = Arc::new(node);
+    let (epoch_tx, epoch_rx) = watch::channel::<Option<Arc<Epoch>>>(None);
+    let (target_tx, target_rx) = watch::channel(target_from_difficulty(cfg.share_difficulty));
+    let (fwd_tx, mut fwd_rx) = mpsc::unbounded_channel::<Fwd>();
+    if !cfg.stratum.listen.is_empty() {
+        let shared = Arc::new(Shared { epoch: epoch_rx, pool_target: target_rx, fwd: fwd_tx.clone(), node: node.clone(), stats: Default::default() });
+        let scfg = cfg.stratum.clone();
+        tokio::spawn(async move {
+            if let Err(e) = gateway_stratum::serve(scfg, shared).await {
+                tracing::error!("gateway stratum stopped: {e:#}");
+            }
+        });
+    }
     let mut channel: Option<u32> = None;
     let mut target = target_from_difficulty(cfg.share_difficulty);
     let mut plans: BTreeMap<u32, PayoutPlan> = BTreeMap::new();
@@ -129,7 +151,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     let mut tpl: Option<Tpl> = None;
     let mut next_id = 1u32;
     let (mut nonce_cursor, mut variant_cursor) = (0u32, 0usize);
-    let mut pending: Vec<ShareItem> = Vec::new();
+    let mut pending: Vec<(u32, ShareItem)> = Vec::new();
     let mut last_tip = String::new();
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     let mut blocks_found = 0u32;
@@ -142,8 +164,8 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
             biased;
             f = conn.recv() => {
                 match Msg::decode(&f?)? {
-                    Msg::OpenChannelAck(a) => { channel = Some(a.channel); target = a.target; tracing::info!("gateway: channel {} open, plans from height {}", a.channel, a.plan_height); }
-                    Msg::SetTarget(t) => target = t.target,
+                    Msg::OpenChannelAck(a) => { channel = Some(a.channel); target = a.target; target_tx.send_replace(a.target); tracing::info!("gateway: channel {} open, plans from height {}", a.channel, a.plan_height); }
+                    Msg::SetTarget(t) => { target = t.target; target_tx.send_replace(t.target); }
                     Msg::NewTip(_) => {}
                     Msg::PayoutPlan(p) => {
                         match check_plan(&p, &rules) {
@@ -181,20 +203,42 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                             }
                         }
                     }
+                    Msg::Reject(r) if r.code == 8 => tracing::debug!("gateway: {}", r.reason),
                     Msg::Reject(r) => tracing::warn!("gateway: pool rejected: {} ({})", r.reason, r.code),
                     Msg::Disconnect(r) => bail!("pool disconnected us: {}", r.reason),
                     _ => {}
                 }
             }
+            Some(ev) = fwd_rx.recv() => {
+                let mut events = vec![ev];
+                while let Ok(more) = fwd_rx.try_recv() { events.push(more); }
+                let mut blocks = vec![];
+                for ev in events {
+                    match ev {
+                        // shares of the previous template stay valid for the pool's grace period, so they are sent under their own template id
+                        Fwd::Share { template_id, item } => pending.push((template_id, item)),
+                        Fwd::Block { template_id, variant, height, hash } => blocks.push(BlockFound { template_id, variant, height, hash }),
+                    }
+                }
+                // shares go out immediately: a block changes the tip and the pool drops templates of the old tip
+                if let Some(ch) = channel { send_pending(&mut conn, ch, &mut pending).await?; }
+                for b in blocks {
+                    blocks_found += 1;
+                    conn.send(&Msg::BlockFound(b).encode()).await?;
+                    if cfg.stop_after_blocks.map_or(false, |n| blocks_found >= n) { return Ok(()); }
+                }
+            }
             _ = poll.tick() => {
                 let best = node.best_block_hash().await?;
                 if best != last_tip {
+                    epoch_tx.send_replace(None);
                     let height = node.call("getblockcount", json!([])).await?.as_u64().unwrap_or(0) as u32 + 1;
                     if let (Some(plan), Some(ch)) = (plans.get(&height).cloned(), channel) {
                         let _ = ch;
                         match build_template(&node, &cfg, &plan, next_id).await {
                             Ok(t) => {
                                 announce(&mut conn, &t, &plan).await?;
+                                epoch_tx.send_replace(Some(t.epoch.clone()));
                                 tpl = Some(t);
                                 mining = true;
                                 next_id += 1;
@@ -206,11 +250,7 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                         }
                     }
                 }
-                if !pending.is_empty() {
-                    if let (Some(t), Some(ch)) = (&tpl, channel) {
-                        conn.send(&Msg::Shares(Shares { channel: ch, template_id: t.id, items: std::mem::take(&mut pending) }).encode()).await?;
-                    }
-                }
+                if let Some(ch) = channel { send_pending(&mut conn, ch, &mut pending).await?; }
             }
             _ = tokio::task::yield_now(), if cfg.software_miner && mining && tpl.is_some() && channel.is_some() => {
                 let t = tpl.as_ref().unwrap();
@@ -219,21 +259,17 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
                     let hash = header_hash(&t.header(variant_cursor, nonce_cursor));
                     let block = meets_target(&hash, &net_target);
                     if block || meets_target(&hash, &target) {
-                        pending.push(ShareItem { variant: variant_cursor as u32, nonce: nonce_cursor, ntime_delta: 0, version_bits: t.version & VERSION_MASK });
+                        pending.push((t.id, ShareItem { variant: variant_cursor as u32, nonce: nonce_cursor, ntime_delta: 0, version_bits: t.version & VERSION_MASK }));
                     }
                     if block {
                         let hex_block = hex::encode(t.block(variant_cursor, nonce_cursor));
                         let res = node.submit_block(&hex_block).await?;
                         tracing::info!("gateway: block at height {} submitted: {:?}", t.height, res);
                         if res.is_none() {
-                            last_tip.clear();
                             blocks_found += 1;
                             conn.send(&Msg::BlockFound(BlockFound { template_id: t.id, variant: variant_cursor as u32, height: t.height, hash }).encode()).await?;
                         }
-                        if let Some(ch) = channel {
-                            let items = std::mem::take(&mut pending);
-                            if !items.is_empty() { conn.send(&Msg::Shares(Shares { channel: ch, template_id: t.id, items }).encode()).await?; }
-                        }
+                        if let Some(ch) = channel { send_pending(&mut conn, ch, &mut pending).await?; }
                         mining = false;
                         if cfg.stop_after_blocks.map_or(false, |n| blocks_found >= n) { return Ok(()); }
                         break;
@@ -247,6 +283,19 @@ pub async fn run(cfg: GatewayCfg) -> Result<()> {
     }
 }
 
+async fn send_pending(conn: &mut NoiseConn<TcpStream>, channel: u32, pending: &mut Vec<(u32, ShareItem)>) -> Result<()> {
+    let mut by_template: BTreeMap<u32, Vec<ShareItem>> = BTreeMap::new();
+    for (id, item) in pending.drain(..) {
+        by_template.entry(id).or_default().push(item);
+    }
+    for (template_id, items) in by_template {
+        for chunk in items.chunks(MAX_SHARES_PER_MSG) {
+            conn.send(&Msg::Shares(Shares { channel, template_id, items: chunk.to_vec() }).encode()).await?;
+        }
+    }
+    Ok(())
+}
+
 async fn expect_ack(conn: &mut NoiseConn<TcpStream>) -> Result<()> {
     match Msg::decode(&tokio::time::timeout(Duration::from_secs(10), conn.recv()).await.map_err(|_| anyhow!("no SetupAck"))??)? {
         Msg::SetupAck(_) => Ok(()),
@@ -255,7 +304,7 @@ async fn expect_ack(conn: &mut NoiseConn<TcpStream>) -> Result<()> {
     }
 }
 
-async fn build_template(node: &NodeRpc, cfg: &GatewayCfg, plan: &PayoutPlan, id: u32) -> Result<Tpl> {
+async fn build_template(node: &Arc<NodeRpc>, cfg: &GatewayCfg, plan: &PayoutPlan, id: u32) -> Result<Tpl> {
     // the reward is only known from the node's template; the trivial candidate costs one cheap call
     let probe = node.call("getattestationbatch", json!([{"candidates": [{"outputs": [{"scriptPubKey": hex::encode(&plan.fee_script)}]}]}])).await?;
     let reward = probe["coinbasevalue"].as_u64().ok_or_else(|| anyhow!("no coinbasevalue"))?;
@@ -283,7 +332,12 @@ async fn build_template(node: &NodeRpc, cfg: &GatewayCfg, plan: &PayoutPlan, id:
         }
     }
     let txids_root = coinbases.iter().map(|cb| merkle_root(&sha256d(cb), &branch)).collect();
+    let template: BatchTemplate = serde_json::from_value(bt.clone()).context("parsing the node's template")?;
+    let txset = Arc::new(TxSet::from_gbt(&template.transactions)?);
+    let candidates = coinbases.iter().map(|cb| Candidate::from_coinbase(&template, &txset, cb)).collect::<Result<Vec<_>>>()?;
+    let epoch = Arc::new(Epoch::new(id as u64, bt["tip"].as_str().unwrap_or_default().to_string(), height, candidates));
     Ok(Tpl {
+        epoch,
         id, height, tip: rev(bt["tip"].as_str().ok_or_else(|| anyhow!("tip"))?)?, version: bt["version"].as_i64().unwrap_or(0) as u32,
         bits: u32::from_str_radix(bt["bits"].as_str().ok_or_else(|| anyhow!("bits"))?, 16)?, curtime: bt["curtime"].as_u64().unwrap_or(0) as u32,
         branch, coinbases, txids_root, tx_data,

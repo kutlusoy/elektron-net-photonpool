@@ -14,13 +14,13 @@ Status: release candidate `0.2.0-rc1` for the first mainnet test. The Rust daemo
 
 ## Photon protocol
 
-A binary, Noise-encrypted protocol for miner-built templates, non-custodial coinbase payouts and an on-chain accounting commitment. The protocol, the pool session (`[photon]`, off by default) and a gateway with a CPU miner (`photond gateway`) are implemented and tested end to end on regtest in `src/photon/`; the Stratum front end that lets ASICs attach to a gateway is next. See [`doc-elektron/guideline-photon-protocol.md`](doc-elektron/guideline-photon-protocol.md). The optional node patch `getattestationbatch` (`docker/node/patches/`, off by default) attests many coinbase candidates in one call, see [`doc-elektron/guideline-batch-attestation-rpc.md`](doc-elektron/guideline-batch-attestation-rpc.md).
+A binary, Noise-encrypted protocol for miner-built templates, non-custodial coinbase payouts and an on-chain accounting commitment. The protocol, the pool session (`[photon]`, off by default) and a gateway with a Stratum V1 front end for ASICs (`photond gateway`, see `gateway.example.toml`) are implemented and tested end to end on regtest in `src/photon/`; not yet tested with real ASIC firmware. See [`doc-elektron/guideline-photon-protocol.md`](doc-elektron/guideline-photon-protocol.md). The optional node patch `getattestationbatch` (`docker/node/patches/`, off by default) attests many coinbase candidates in one call, see [`doc-elektron/guideline-batch-attestation-rpc.md`](doc-elektron/guideline-batch-attestation-rpc.md).
 
 ## Tests
 
 ```text
 cargo test                                  # 61 unit tests
-ELEKTROND=... test/run_all.sh               # integration steps 1-17 against regtest nodes (see the header of run_all.sh)
+ELEKTROND=... test/run_all.sh               # integration steps 1-18 against regtest nodes (see the header of run_all.sh)
 ```
 
 The integration tests recompute every attestation independently in Python and validate candidates with the node itself. Load figures (10,000 miners, full blocks) are in [`doc-elektron/guideline-daemon-core.md`](doc-elektron/guideline-daemon-core.md).

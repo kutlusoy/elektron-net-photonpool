@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.3 (implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session and a gateway with a CPU miner; Stratum front end for ASICs not yet)
+- **Version:** 0.4 (implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -212,7 +212,17 @@ Pool: `[photon] enabled = true` in `photond.toml` (see `photond.example.toml`). 
 - **Gateway:** `photond gateway --gateway-config gateway.toml` (fields in `src/photon/gateway.rs`, `GatewayCfg`). It needs the patched node (`getattestationbatch`). It refuses plans whose fee terms differ from its configuration, builds `variants` coinbases per template through the node, announces them in frames under 48 KB, answers spot checks, submits found blocks to its own node and reports them. `software_miner = true` is a CPU miner for tests and regtest.
 - **Test:** `test/step17_photon_session.py` (regtest, two nodes' worth of roles on one node): an honest gateway mines six blocks that pay the miner directly in the coinbase, carry the commitment and a proof the gateway verifies; spot checks of an honest gateway pass; a gateway that corrupts the attestation is caught by the spot check and disconnected. Passed three times in a row.
 
-Limits of this version: Photon channels form their own window, legacy Stratum miners are not part of the plan (open question 4); a cheater is only caught when a check hits one of its variants and does not finish during a tip change; shares credited before a failed check are not clawed back; there is no Stratum front end yet, so ASICs cannot attach to the gateway.
+### Gateway Stratum V1 front end (v0.4)
+
+`[stratum] listen` in the gateway config (`gateway.example.toml`) starts a Stratum V1 server for ASICs and farm proxies, built on the same work scheme as the pool's Stratum server: empty `extranonce1`, `extranonce2_size = 0`, version rolling with the pool's slice bits, units = (variant, nTime offset, version slice) of the gateway's own template, vardiff per ASIC (`share_secs`). The gateway's variants are the candidates of its `Epoch`, so no two ASICs get the same work.
+
+- **Shares:** every accepted ASIC share that also meets the pool channel's target (updated by `SetTarget`) is forwarded as a Photon share; the pool credits it with the channel's difficulty. ASIC and channel difficulty are independent, so a farm can run low ASIC difficulties for monitoring.
+- **Blocks:** a share that meets the network target is submitted to the gateway's own node first, then reported with `BlockFound`.
+- **Routing:** shares are sent under the id of the template they were mined on. The pool keeps templates of the previous tip for 10 seconds, so the final share of a block that moved the tip is still credited. If the gateway's node is ahead of the pool's, the pool waits up to 1.5 s for its own tip before rejecting an announce.
+- **Tip changes:** on a new tip the epoch is cleared until the gateway holds the plan for the new height and has announced the new template; ASICs get a clean job then.
+- **Test:** `test/step18_gateway_stratum.py` mines four blocks through the Stratum port with the shared test client; blocks are accepted by the gateway's node, shares and block reports arrive at the pool, and the latest block pays the ASIC's address 99 % of the reward and the pool fee at least 1 %. Passed 8 of 8 runs.
+
+Limits of this version: Photon channels form their own window, legacy Stratum miners are not part of the plan (open question 4); a cheater is only caught when a check hits one of its variants and does not finish during a tip change; shares credited before a failed check are not clawed back; the Stratum front end has only been run against the test client, not against ASIC firmware; one gateway uses one channel (one payout address).
 
 ## 15. Checklist
 
@@ -222,7 +232,7 @@ Limits of this version: Photon channels form their own window, legacy Stratum mi
 - [x] Plan derivation specified and implemented deterministically (rules v1).
 - [x] Pool session: listener, channel state, plan publication from the ledger, `TemplateAnnounce` handling, spot-check calls to the node (`step17`).
 - [ ] Spot check cost and adaptive probability measured under load.
-- [x] Gateway core with CPU miner; [ ] gateway with local Stratum V1 for ASICs.
+- [x] Gateway core with CPU miner and local Stratum V1 front end ([ ] tested with real ASIC firmware).
 - [ ] Independent review of the Noise handshake and the key certification.
 
 ## 16. Open Questions

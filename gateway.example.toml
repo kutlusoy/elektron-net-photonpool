@@ -1,0 +1,32 @@
+# Photon gateway: runs next to your own Elektron Net node (built with the Photon node patch, see
+# doc-elektron/guideline-batch-attestation-rpc.md) and connects your ASICs to a Photon pool.
+#   photond gateway --gateway-config gateway.toml
+node_rpc_url = "http://127.0.0.1:19332"
+node_auth = "cookie:/path/to/.cookie"      # or "user:password"
+network = "mainnet"                          # mainnet, testnet or regtest
+
+# Pool: address of its Photon listener and its Noise public key (pinned; shown in the pool log and /api/v1/summary).
+pool_addr = "pool.example.org:3340"
+pool_key = "0000000000000000000000000000000000000000000000000000000000000000"
+
+# Your payout address: the pool pays it directly in the coinbase of every block this gateway finds.
+payout_address = "be1q..."
+
+# Terms you agreed with the pool. A plan with other terms is refused.
+fee_address = "be1q..."
+fee_pct = 1.0
+max_outputs = 128
+min_ppm = 100
+
+# Number of extranonce variants per template (each one is attested by your node in a single call).
+# Rule of thumb: one per 2.8e14 H/s of farm hashrate and second of nTime use, more is harmless.
+variants = 16
+# Share difficulty requested from the pool (it adjusts it with its own vardiff).
+share_difficulty = 1024
+
+# Stratum V1 front end for ASICs. Point the miners at this address; user name and password are free-form
+# (the worker name only appears in the log). Empty `listen` disables it.
+[stratum]
+listen = "0.0.0.0:3333"
+initial_difficulty = 1024
+share_secs = 10

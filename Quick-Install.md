@@ -192,3 +192,13 @@ cp stack.conf.example stack.conf      # set at least DOMAIN, optionally POOL_NAM
 ```
 
 The script generates the node and pool configuration, creates and encrypts the wallet (with a generated passphrase and a private-descriptor backup), starts the stack and writes `stack/CREDENTIALS.txt`. Payouts start in dry-run mode. Re-run `./install.sh` after changing `stack.conf`, or `./install.sh --update` to rebuild with fresh base images. Details: [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
+
+## 11. Photon gateway for farms with their own node (optional)
+
+Instead of mining on the pool's Stratum port, a farm can run its own node (built with the Photon node patch, `NODE_PATCHES=true`) and a gateway next to it. The block reward is then split in the coinbase between all Photon miners, nobody holds anyone's funds, and the pool commits its accounting on chain. The pool enables the listener with `[photon] enabled = true` (see `photond.example.toml`); the farm copies `gateway.example.toml`, sets the pool's address and public key and its own payout address, and points the ASICs at the gateway's Stratum port:
+
+```bash
+photond gateway --gateway-config gateway.toml
+```
+
+Status: tested end to end on regtest with a simulated ASIC, not yet with real hardware. Details: [`doc-elektron/guideline-photon-protocol.md`](doc-elektron/guideline-photon-protocol.md).

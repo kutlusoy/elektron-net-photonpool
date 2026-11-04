@@ -3,6 +3,7 @@
 pub mod cli;
 pub mod coinbase;
 pub mod gateway;
+pub mod gateway_stratum;
 pub mod merkle;
 pub mod msg;
 pub mod noise;

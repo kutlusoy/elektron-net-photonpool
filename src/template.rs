@@ -144,6 +144,18 @@ impl Candidate {
         Ok(c)
     }
 
+    /// Candidate for an arbitrary node-built coinbase (Photon gateway): the outputs are taken from the node's serialisation.
+    pub fn from_coinbase(bt: &BatchTemplate, txs: &Arc<TxSet>, nowit: &[u8]) -> Result<Self> {
+        let parsed = crate::photon::coinbase::parse(nowit)?;
+        let outputs: Vec<TxOutput> = parsed.outputs.iter().map(|(v, s)| TxOutput { value: *v as i64, script: s.clone() }).collect();
+        let fees = bt.transactions.iter().map(|t| t.fee).sum();
+        let (c, rebuilt) = Self::assemble(&bt.tip, bt.version, &bt.bits, &bt.target, bt.curtime, bt.mintime, bt.coinbasevalue, fees, &parsed.script_sig, bt.height, &outputs, txs.clone())?;
+        if rebuilt != nowit {
+            bail!("coinbase rebuilt locally differs from the node's");
+        }
+        Ok(c)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn assemble(prev_hex: &str, version: i32, bits_hex: &str, target_hex: &str, curtime: u32, mintime: u32, coinbase_value: i64, fees: i64, sig: &[u8], height: u32, outputs: &[TxOutput], txs: Arc<TxSet>) -> Result<(Self, Vec<u8>)> {
         let cb = build_coinbase(sig, height, outputs);
