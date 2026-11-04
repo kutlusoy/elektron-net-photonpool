@@ -1,0 +1,55 @@
+# Configuration of the Photon pool Docker stack. Copy to stack.conf and edit:
+#   cp stack.conf.example stack.conf
+# Every setting has a default; leave a line out to keep it. Only KEY=VALUE lines are read (no shell).
+
+# --- Public page and HTTPS (Caddy) ---
+# Domain of the pool (its DNS A/AAAA record must point at this server). Leave empty to run without
+# Caddy: the public page is then only available on 127.0.0.1:8082.
+DOMAIN=
+# Optional e-mail for Let's Encrypt notices.
+CADDY_EMAIL=
+# Name shown on the public page.
+POOL_NAME=Photon Pool
+# Optional block explorer, used for links to blocks and transactions (<url>/block/<hash>, <url>/tx/<txid>).
+EXPLORER_URL=
+
+# --- Node ---
+ELEKTRON_REPO=https://github.com/kutlusoy/elektron-net.git
+# Branch, tag or commit of the node to build.
+ELEKTRON_REF=main
+# Apply the Photon node patch (getattestationbatch: one call attests many payout addresses, no consensus code path
+# is changed). false (default) builds the unmodified node; the pool then needs one getblocktemplate call per address,
+# which is fine for a few miners. Set true for large pools once the patch review is complete (see doc-elektron/guideline-release-and-bitaxe-test.md).
+NODE_PATCHES=false
+
+# --- Pool wallet (on the node) ---
+WALLET_NAME=pool
+# Pool payout addresses provisioned from the wallet.
+WALLET_ADDRESSES=64
+# Leave empty to generate a strong passphrase; the wallet is encrypted with it.
+WALLET_PASSPHRASE=
+
+# --- Stratum ---
+STRATUM_PORT=3333
+# Optional extra ports whose default payout mode is PPS or solo (empty = off).
+PORT_PPS=
+PORT_SOLO=
+
+# --- Payout modes ---
+# DRY_RUN=true only logs what would be paid. Set it to false after you have seen plausible payouts in the log.
+DRY_RUN=true
+FEE_PPLNS=1.0
+FEE_PPS=2.0
+# PPLNS window as a multiple of the network difficulty.
+PPLNS_WINDOW_FACTOR=2.0
+# PPS is offered but stays paused until the wallet holds PPS_RESERVE coins above all liabilities.
+PPS_ENABLED=true
+PPS_RESERVE=5.0
+MIN_PAYOUT_LEPTONS=100000
+PAYOUT_INTERVAL_MINUTES=60
+# Fixed payout fee rate in sat/vB if the node cannot estimate fees (empty = node estimate).
+PAYOUT_FEE_RATE=
+
+# --- Host ---
+# true = open the needed ports with ufw (22 is left alone, check your SSH port first).
+FIREWALL=false

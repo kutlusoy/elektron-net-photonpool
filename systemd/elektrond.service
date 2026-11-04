@@ -1,0 +1,33 @@
+# Example unit for the Elektron Net node that the pool or the gateway talks to. Adapt the paths to your installation.
+# The node needs "allowignoredconf=1" in its configuration when it is started with -conf (see Quick-Install.md).
+[Unit]
+Description=Elektron Net node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=elektron
+Group=elektron
+ExecStart=/usr/local/bin/elektrond -conf=/etc/elektron/elektron.conf -datadir=/var/lib/elektrond
+# Clean shutdown matters for the chainstate.
+TimeoutStopSec=600
+Restart=on-failure
+RestartSec=10
+StateDirectory=elektrond
+ConfigurationDirectory=elektron
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+UMask=0077
+ReadWritePaths=/var/lib/elektrond
+
+[Install]
+WantedBy=multi-user.target

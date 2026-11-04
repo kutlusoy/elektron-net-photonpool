@@ -1,0 +1,300 @@
+#!/usr/bin/env bash
+# Installs or updates the complete Photon pool stack (node, pool, Caddy) with Docker.
+#   ./install.sh [--config FILE] [--update]
+# See stack.conf.example for all settings; doc-elektron/guideline-docker-stack.md for details.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m==> WARNING:\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m==> ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+
+CONFIG_FILE="stack.conf"
+UPDATE=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --config) CONFIG_FILE="${2:?--config needs a file}"; shift 2 ;;
+    --update) UPDATE=true; shift ;;
+    -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
+# ---- defaults (same names as stack.conf.example) ----
+DOMAIN=""; CADDY_EMAIL=""; POOL_NAME="Photon Pool"; EXPLORER_URL=""
+ELEKTRON_REPO="https://github.com/kutlusoy/elektron-net.git"; ELEKTRON_REF="main"; NODE_PATCHES="false"
+WALLET_NAME="pool"; WALLET_ADDRESSES="64"; WALLET_PASSPHRASE=""
+STRATUM_PORT="3333"; PORT_PPS=""; PORT_SOLO=""
+DRY_RUN="true"; FEE_PPLNS="1.0"; FEE_PPS="2.0"; PPLNS_WINDOW_FACTOR="2.0"; PPS_ENABLED="true"; PPS_RESERVE="5.0"
+MIN_PAYOUT_LEPTONS="100000"; PAYOUT_INTERVAL_MINUTES="60"; PAYOUT_FEE_RATE=""
+FIREWALL="false"
+KEYS="DOMAIN CADDY_EMAIL POOL_NAME EXPLORER_URL ELEKTRON_REPO ELEKTRON_REF NODE_PATCHES WALLET_NAME WALLET_ADDRESSES WALLET_PASSPHRASE STRATUM_PORT PORT_PPS PORT_SOLO DRY_RUN FEE_PPLNS FEE_PPS PPLNS_WINDOW_FACTOR PPS_ENABLED PPS_RESERVE MIN_PAYOUT_LEPTONS PAYOUT_INTERVAL_MINUTES PAYOUT_FEE_RATE FIREWALL"
+
+if [ -f "$CONFIG_FILE" ]; then
+  log "Reading $CONFIG_FILE"
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    case "$line" in *=*) ;; *) continue ;; esac
+    key="${line%%=*}"; val="${line#*=}"
+    key="$(echo "$key" | tr -d '[:space:]')"
+    val="$(echo "$val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/")"
+    case " $KEYS " in *" $key "*) printf -v "$key" '%s' "$val" ;; *) warn "ignoring unknown setting $key" ;; esac
+  done < "$CONFIG_FILE"
+else
+  log "No $CONFIG_FILE found, using the defaults (copy stack.conf.example to stack.conf to change them)."
+fi
+
+# ---- validation: everything below ends up in generated config files ----
+num()  { [[ "$2" =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "$1 must be a number (got '$2')"; }
+int()  { [[ "$2" =~ ^[0-9]+$ ]] || die "$1 must be a whole number (got '$2')"; }
+bool() { [ "$2" = "true" ] || [ "$2" = "false" ] || die "$1 must be true or false (got '$2')"; }
+num FEE_PPLNS "$FEE_PPLNS"; num FEE_PPS "$FEE_PPS"; num PPLNS_WINDOW_FACTOR "$PPLNS_WINDOW_FACTOR"; num PPS_RESERVE "$PPS_RESERVE"
+int WALLET_ADDRESSES "$WALLET_ADDRESSES"; int STRATUM_PORT "$STRATUM_PORT"; int MIN_PAYOUT_LEPTONS "$MIN_PAYOUT_LEPTONS"; int PAYOUT_INTERVAL_MINUTES "$PAYOUT_INTERVAL_MINUTES"
+for p in PORT_PPS PORT_SOLO; do [ -z "${!p}" ] || int "$p" "${!p}"; done
+[ -z "$PAYOUT_FEE_RATE" ] || num PAYOUT_FEE_RATE "$PAYOUT_FEE_RATE"
+bool NODE_PATCHES "$NODE_PATCHES"; bool DRY_RUN "$DRY_RUN"; bool PPS_ENABLED "$PPS_ENABLED"; bool FIREWALL "$FIREWALL"
+[ -z "$DOMAIN" ] || [[ "$DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || die "DOMAIN is not a valid host name"
+[ -z "$CADDY_EMAIL" ] || [[ "$CADDY_EMAIL" =~ ^[^[:space:]@\"\']+@[^[:space:]@\"\']+$ ]] || die "CADDY_EMAIL is not a valid address"
+[ -z "$EXPLORER_URL" ] || [[ "$EXPLORER_URL" =~ ^https?://[^[:space:]\"\'\<\>]+$ ]] || die "EXPLORER_URL must start with http:// or https://"
+[[ "$WALLET_NAME" =~ ^[A-Za-z0-9_-]+$ ]] || die "WALLET_NAME may only contain letters, digits, - and _"
+[[ "$ELEKTRON_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || die "ELEKTRON_REF contains invalid characters"
+[[ "$ELEKTRON_REPO" =~ ^https://[^[:space:]\"\']+$ ]] || die "ELEKTRON_REPO must be an https URL"
+[ "$WALLET_ADDRESSES" -ge 1 ] || die "WALLET_ADDRESSES must be at least 1"
+
+command -v docker >/dev/null 2>&1 || die "Docker is not installed."
+docker compose version >/dev/null 2>&1 || die "The Docker Compose plugin is missing."
+command -v openssl >/dev/null 2>&1 || die "openssl is not installed."
+
+# ---- secrets: reuse what a previous run generated ----
+existing() { [ -f "$1" ] && grep "^$2=" "$1" 2>/dev/null | tail -n1 | cut -d= -f2- || true; }
+if [ -z "$WALLET_PASSPHRASE" ]; then
+  WALLET_PASSPHRASE="$(existing photond.env PHOTON_WALLET_PASSPHRASE)"
+  if [ -n "$WALLET_PASSPHRASE" ]; then log "Reusing the wallet passphrase of the previous run."; else
+    WALLET_PASSPHRASE="$(openssl rand -base64 48 | tr -d '=+/\n' | cut -c1-32)"; log "Generated a wallet passphrase."; fi
+fi
+
+# ---- generated files ----
+mkdir -p node data/node data/photon data/backup
+chown -R 10001:10001 data/node data/photon 2>/dev/null || warn "could not chown data/ to uid 10001 (run as root, or fix the ownership by hand)"
+
+log "Writing node/elektron.conf"
+cat > node/elektron.conf <<CONF_EOF
+# Generated by install.sh. No passwords: photond uses the RPC cookie in data/node.
+server=1
+listen=1
+bind=0.0.0.0:8333
+maxconnections=125
+rpcbind=0.0.0.0
+rpcallowip=172.16.0.0/12
+disablewallet=0
+wallet=${WALLET_NAME}
+# elektrond writes a stray default config into the data directory on its first start; without this
+# its own safety check refuses to start.
+allowignoredconf=1
+CONF_EOF
+
+NAME_ESCAPED="${POOL_NAME//\\/\\\\}"; NAME_ESCAPED="${NAME_ESCAPED//\"/\\\"}"
+MODES='"solo", "pplns", "pps"'; [ "$PPS_ENABLED" = "true" ] || MODES='"solo", "pplns"'
+FEE_LINE=""; [ -z "$PAYOUT_FEE_RATE" ] || FEE_LINE="fee_rate = ${PAYOUT_FEE_RATE}"
+EXPLORER_LINE=""; [ -z "$EXPLORER_URL" ] || EXPLORER_LINE="explorer_url = \"${EXPLORER_URL}\""
+TRUST_PROXY="false"; [ -z "$DOMAIN" ] || TRUST_PROXY="true"
+PORTS_BLOCK=""
+if [ -n "$PORT_PPS" ] || [ -n "$PORT_SOLO" ]; then
+  PORTS_BLOCK="
+[[stratum.ports]]
+listen = \"0.0.0.0:${STRATUM_PORT}\"
+mode = \"pplns\"
+allow_override = true"
+  [ -z "$PORT_PPS" ]  || PORTS_BLOCK="${PORTS_BLOCK}
+
+[[stratum.ports]]
+listen = \"0.0.0.0:${PORT_PPS}\"
+mode = \"pps\""
+  [ -z "$PORT_SOLO" ] || PORTS_BLOCK="${PORTS_BLOCK}
+
+[[stratum.ports]]
+listen = \"0.0.0.0:${PORT_SOLO}\"
+mode = \"solo\""
+fi
+
+log "Writing photond.toml"
+cat > photond.toml <<TOML_EOF
+# Generated by install.sh from ${CONFIG_FILE}; edit the settings there and run ./install.sh again.
+[node]
+rpc_url = "http://node:8332"
+auth = "cookie:/node/.cookie"
+poll_ms = 100
+
+[pool]
+network = "mainnet"
+refresh_secs = 20
+spot_check = 4
+
+[payout]
+default_mode = "pplns"
+modes = [${MODES}]
+min_payout_leptons = ${MIN_PAYOUT_LEPTONS}
+dry_run = ${DRY_RUN}
+interval_secs = $(( PAYOUT_INTERVAL_MINUTES * 60 ))
+wallet = "${WALLET_NAME}"
+wallet_addresses = ${WALLET_ADDRESSES}
+wallet_passphrase_env = "PHOTON_WALLET_PASSPHRASE"
+${FEE_LINE}
+
+[payout.fee_pct]
+pplns = ${FEE_PPLNS}
+pps = ${FEE_PPS}
+
+[payout.pplns]
+window_factor = ${PPLNS_WINDOW_FACTOR}
+
+[payout.pps]
+enabled = ${PPS_ENABLED}
+reserve_min = ${PPS_RESERVE}
+
+[stratum]
+listen = "0.0.0.0:${STRATUM_PORT}"
+${PORTS_BLOCK}
+
+[ledger]
+path = "/data/photond.db"
+
+[public]
+enabled = true
+listen = "0.0.0.0:8082"
+name = "${NAME_ESCAPED}"
+stratum_host = "${DOMAIN}"
+trust_proxy = ${TRUST_PROXY}
+
+[api]
+listen = "0.0.0.0:8081"
+ui_dir = "/app/ui"
+${EXPLORER_LINE}
+TOML_EOF
+chmod 644 photond.toml
+
+( umask 077; printf 'PHOTON_WALLET_PASSPHRASE=%s\n' "$WALLET_PASSPHRASE" > photond.env )
+
+log "Writing .env and docker-compose.ports.yml"
+PROFILES=""; [ -z "$DOMAIN" ] || PROFILES="tls"
+cat > .env <<ENV_EOF
+# Generated by install.sh (no secrets here).
+COMPOSE_FILE=docker-compose.yml:docker-compose.ports.yml
+COMPOSE_PROFILES=${PROFILES}
+ELEKTRON_REPO=${ELEKTRON_REPO}
+ELEKTRON_REF=${ELEKTRON_REF}
+NODE_PATCHES=${NODE_PATCHES}
+STRATUM_PORT=${STRATUM_PORT}
+ENV_EOF
+if [ -n "$PORT_PPS$PORT_SOLO" ]; then
+  {
+    echo "# Generated by install.sh: extra Stratum ports."
+    echo "services:"
+    echo "  photond:"
+    echo "    ports:"
+    [ -z "$PORT_PPS" ]  || echo "      - \"${PORT_PPS}:${PORT_PPS}\""
+    [ -z "$PORT_SOLO" ] || echo "      - \"${PORT_SOLO}:${PORT_SOLO}\""
+  } > docker-compose.ports.yml
+else
+  printf '# Generated by install.sh: extra Stratum ports.\nservices: {}\n' > docker-compose.ports.yml
+fi
+
+if [ -n "$DOMAIN" ]; then
+  log "Writing Caddyfile for ${DOMAIN}"
+  {
+    [ -z "$CADDY_EMAIL" ] || printf '{\n\temail %s\n}\n\n' "$CADDY_EMAIL"
+    printf '%s {\n\treverse_proxy photond:8082\n}\n' "$DOMAIN"
+  } > Caddyfile
+else
+  : > Caddyfile
+fi
+
+# ---- build and start the node, set up the wallet ----
+if [ "$UPDATE" = true ]; then
+  log "Rebuilding the images with fresh base layers ..."
+  docker compose build --pull
+else
+  log "Building the images (the node is compiled from source, this takes a while) ..."
+  docker compose build
+fi
+log "Starting the node ..."
+docker compose up -d node
+
+node_cli() { docker compose exec -T -u elektron node elektron-cli -conf=/data/elektron.conf -datadir=/data "$@"; }
+wait_for_rpc() {
+  local i=0
+  until node_cli getblockchaininfo >/dev/null 2>&1; do
+    i=$((i + 1)); [ "$i" -ge 60 ] && die "The node's RPC did not come up within 5 minutes (docker compose logs node)."
+    sleep 5
+  done
+}
+log "Waiting for the node's RPC ..."
+wait_for_rpc
+
+if node_cli listwallets | grep -q "\"${WALLET_NAME}\""; then
+  log "Wallet '${WALLET_NAME}' is loaded."
+else
+  log "Creating wallet '${WALLET_NAME}' ..."
+  node_cli createwallet "$WALLET_NAME" >/dev/null || node_cli loadwallet "$WALLET_NAME" >/dev/null
+fi
+if node_cli -rpcwallet="$WALLET_NAME" getwalletinfo | grep -q '"unlocked_until"'; then
+  log "Wallet '${WALLET_NAME}' is already encrypted."
+else
+  log "Encrypting wallet '${WALLET_NAME}' ..."
+  node_cli -rpcwallet="$WALLET_NAME" encryptwallet "$WALLET_PASSPHRASE" >/dev/null || true
+  sleep 5
+  wait_for_rpc
+  node_cli listwallets | grep -q "\"${WALLET_NAME}\"" || node_cli loadwallet "$WALLET_NAME" >/dev/null
+fi
+
+BACKUP_FILE="data/backup/wallet-${WALLET_NAME}-descriptors.txt"
+if [ -f "$BACKUP_FILE" ]; then
+  log "Wallet backup already exists: ${BACKUP_FILE}"
+else
+  log "Exporting the wallet's private descriptors (complete backup) ..."
+  node_cli -rpcwallet="$WALLET_NAME" walletpassphrase "$WALLET_PASSPHRASE" 60 >/dev/null 2>&1 || warn "could not unlock the wallet for the backup"
+  ( umask 077; node_cli -rpcwallet="$WALLET_NAME" listdescriptors true > "$BACKUP_FILE" ) || { rm -f "$BACKUP_FILE"; warn "the wallet backup failed, export it by hand"; }
+  node_cli -rpcwallet="$WALLET_NAME" walletlock >/dev/null 2>&1 || true
+fi
+
+log "Starting the pool${DOMAIN:+ and Caddy} ..."
+docker compose up -d
+
+if [ "$FIREWALL" = "true" ] && command -v ufw >/dev/null 2>&1; then
+  log "Configuring ufw ..."
+  ufw allow 8333/tcp comment 'Elektron P2P' || true
+  ufw allow "${STRATUM_PORT}/tcp" comment 'Photon pool Stratum' || true
+  [ -z "$PORT_PPS" ]  || ufw allow "${PORT_PPS}/tcp"  comment 'Photon pool Stratum PPS'  || true
+  [ -z "$PORT_SOLO" ] || ufw allow "${PORT_SOLO}/tcp" comment 'Photon pool Stratum solo' || true
+  [ -z "$DOMAIN" ] || { ufw allow 80/tcp || true; ufw allow 443/tcp || true; ufw allow 443/udp || true; }
+  ufw reload || true
+else
+  log "Ports to open: 8333, ${STRATUM_PORT}${PORT_PPS:+, $PORT_PPS}${PORT_SOLO:+, $PORT_SOLO}${DOMAIN:+, 80, 443}."
+fi
+
+PUBLIC_URL="http://127.0.0.1:8082 (no DOMAIN set)"; [ -z "$DOMAIN" ] || PUBLIC_URL="https://${DOMAIN}"
+( umask 077; cat > CREDENTIALS.txt <<SUMMARY_EOF
+Photon pool stack, written $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+Public page:        ${PUBLIC_URL}
+Stratum:            ${DOMAIN:-<this server>}:${STRATUM_PORT}   (user <address>.<worker>, password x or m=solo|pplns|pps)
+Admin API/terminal: http://127.0.0.1:8081   (ssh -L 8081:127.0.0.1:8081 <user>@<server>)
+Payouts:            dry_run = ${DRY_RUN}
+
+Wallet:             ${WALLET_NAME}
+Wallet passphrase:  ${WALLET_PASSPHRASE}
+Wallet backup:      $(pwd)/${BACKUP_FILE}
+
+The wallet is encrypted. The passphrase lives ONLY in this file and in photond.env; without it and the
+backup file the funds cannot be recovered. Keep both offline and out of version control.
+
+Useful commands (run in $(pwd)):
+  docker compose ps
+  docker compose logs -f photond
+  docker compose exec -u elektron node elektron-cli -conf=/data/elektron.conf -datadir=/data getblockchaininfo
+  ./install.sh --update        rebuild with fresh base images and restart
+SUMMARY_EOF
+)
+log "Done. Summary and credentials: $(pwd)/CREDENTIALS.txt (chmod 600)"
+[ "$DRY_RUN" = "false" ] || log "Payouts are in dry-run mode; set DRY_RUN=false in ${CONFIG_FILE} and run ./install.sh again when the log looks right."
+log "photond waits for the node to finish syncing; follow it with: docker compose logs -f photond"

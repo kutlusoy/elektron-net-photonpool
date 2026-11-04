@@ -1,0 +1,36 @@
+# Caddy in front of the public pool page (installation without Docker).
+#
+# Prerequisites
+#   - DNS: an A/AAAA record for the host name below that points to this server; ports 80 and 443 reachable (Caddy needs both for the certificate).
+#   - photond.toml:
+#         [public]
+#         enabled = true
+#         listen = "127.0.0.1:8082"      # stays on loopback, Caddy is the only public entry
+#         name = "My Photon Pool"
+#         stratum_host = "pool.example.org"   # shown in the connection instructions (the miners connect to this host, not through Caddy)
+#         trust_proxy = true             # take the client address from X-Forwarded-For, which Caddy sets
+#   - Install Caddy from your distribution or https://caddyserver.com/docs/install and put this file at /etc/caddy/Caddyfile
+#     (or add the block to the one you have), then `systemctl reload caddy`.
+#
+# What is public: the pool page and the personal miner page (/miner.html#<address>) and their read-only API (/public/v1/...).
+# What is not: the operator UI and the admin API (default 127.0.0.1:8081) must never be proxied.
+# Not covered: Stratum (TCP, default 3333) and the Photon port (3340) are not HTTP; miners and gateways connect to them directly.
+# Stratum has no TLS of its own; if you want it, run a TLS terminating proxy such as stunnel in front of the Stratum port.
+
+pool.example.org {
+	encode zstd gzip
+
+	# Caddy adds X-Forwarded-For with the real client address. By default current Caddy versions replace an X-Forwarded-For that comes from an
+	# untrusted client (confirm this for your version: the pool's rate limit trusts the header when trust_proxy is set).
+	reverse_proxy 127.0.0.1:8082
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# access log in the journal
+	log {
+		output stderr
+	}
+}

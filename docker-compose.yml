@@ -1,0 +1,60 @@
+# Elektron Net node + photond pool.
+#   cp docker/photond.docker.toml photond.toml   (then set payout_addresses)
+#   docker compose up -d --build
+services:
+  node:
+    build:
+      context: ./docker/node
+      args:
+        ELEKTRON_REF: main
+        PHOTON_NODE_PATCHES: ${PHOTON_NODE_PATCHES:-false}
+    restart: unless-stopped
+    ports:
+      - "8333:8333"          # P2P, public. RPC (8332) is never published.
+    volumes:
+      - node-data:/data
+      - ./docker/elektron.conf:/config/elektron.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "gosu elektron elektron-cli -conf=/data/elektron.conf -datadir=/data getblockchaininfo >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  photond:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - node
+    ports:
+      - "3333:3333"                  # Stratum V1, public (miners connect here)
+      - "127.0.0.1:8081:8081"        # admin API and web UI, local only
+      - "127.0.0.1:8082:8082"        # public pool page (publish via a TLS reverse proxy)
+    volumes:
+      - node-data:/node:ro
+      - ./photond.toml:/config/photond.toml:ro
+      - photon-data:/data
+
+  # Optional HTTPS for the public pool page without any other setup:
+  #   POOL_DOMAIN=pool.example.org docker compose --profile tls up -d
+  # (DNS A/AAAA record of the domain must point at this server, ports 80 and 443 must be open.)
+  caddy:
+    image: caddy:2
+    profiles:
+      - tls
+    restart: unless-stopped
+    depends_on:
+      - photond
+    environment:
+      POOL_DOMAIN: ${POOL_DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  node-data:
+  photon-data:
+  caddy-data:

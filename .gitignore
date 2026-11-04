@@ -1,0 +1,16 @@
+/target
+__pycache__/
+photond.toml
+data/
+*.db
+*.db-wal
+*.db-shm
+/stack/stack.conf
+/stack/.env
+/stack/photond.env
+/stack/photond.toml
+/stack/Caddyfile
+/stack/docker-compose.ports.yml
+/stack/node/
+/stack/data/
+/stack/CREDENTIALS.txt

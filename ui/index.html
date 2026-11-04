@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHOTON POOL</title>
+<meta name="description" content="Photon pool operator terminal for Elektron Net">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="cyan">
+<div class="fx" aria-hidden="true"></div>
+<div class="window" id="window">
+  <header class="titlebar">
+    <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="wtitle">photon@elektron-net:~ <b id="mode-tag" class="tag">...</b></span>
+    <span class="clock" id="clock">--:--:--</span>
+  </header>
+  <div class="statusline" id="statusline" role="status" aria-live="off"></div>
+  <main class="grid">
+    <section class="pane p-pool" aria-label="Pool"><h2><span>POOL</span></h2><pre id="pane-pool"></pre></section>
+    <section class="pane p-tip" aria-label="Chain tip"><h2><span>TIP</span></h2><pre id="pane-tip"></pre></section>
+    <section class="pane p-alloc" aria-label="Allocator"><h2><span>ALLOCATOR</span></h2><pre id="pane-alloc"></pre></section>
+    <section class="pane p-miners" aria-label="Miners"><h2><span>MINERS</span><em id="miners-hint"></em></h2><pre id="pane-miners"></pre></section>
+    <section class="pane p-blocks" aria-label="Blocks"><h2><span>BLOCKS</span></h2><pre id="pane-blocks"></pre></section>
+    <section class="pane p-tty" aria-label="Console"><h2><span>TTY</span><em>type <kbd>help</kbd></em></h2>
+      <div class="tty" id="tty" tabindex="-1"></div>
+      <form class="prompt" id="prompt" autocomplete="off">
+        <label for="cmd"><span class="u">photon</span><span class="at">@</span><span class="h">elektron</span><span class="sep">:~$</span></label>
+        <input id="cmd" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="command line">
+      </form>
+    </section>
+  </main>
+</div>
+<script src="common.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+# photond configuration for a bare-metal install.
+# Copy to photond.toml and adjust: cp photond.example.toml photond.toml
+
+[node]
+# JSON-RPC of your Elektron Net node (mainnet default port 8332).
+rpc_url = "http://127.0.0.1:8332"
+# Either "user:password" or "cookie:/path/to/.cookie".
+# Default cookie location on Linux: ~/.elektron/.cookie
+auth = "cookie:/home/elektron/.elektron/.cookie"
+# How often the node tip is checked, in milliseconds.
+poll_ms = 100
+
+[pool]
+# mainnet, testnet or regtest. Must match the node.
+network = "mainnet"
+# Pool-owned addresses that receive block rewards (be1q... on mainnet).
+# More addresses give miners more independent search space; see
+# doc-elektron/guideline-photon-architecture.md for sizing.
+# One address per ~2.8e14 H/s of pool hashrate, plus ~25 % headroom.
+payout_addresses = [
+  "be1q_replace_with_your_pool_address_1",
+  "be1q_replace_with_your_pool_address_2",
+]
+# Rebuild candidates on an unchanged tip every N seconds to pick up new
+# transactions (0 = only on a new block).
+refresh_secs = 20
+# Candidates per epoch that are validated against the node (getblocktemplate
+# proposal) before they are used. Invalid ones are dropped.
+spot_check = 4
+
+[stratum]
+enabled = true
+listen = "0.0.0.0:3333"
+# Starting share difficulty; vardiff adapts it per connection.
+initial_difficulty = 1024
+min_difficulty = 0.0001
+max_difficulty = 1.0e12
+# Target seconds between shares per connection.
+share_secs = 10
+max_connections = 200000
+idle_secs = 300
+min_job_interval_ms = 200
+max_job_interval_ms = 30000
+# Require "<be1q address>.<worker>" as the miner user name.
+require_address = true
+
+[payout]
+# Mode of the default Stratum port (solo, pplns, pps) and the modes offered at all.
+default_mode = "pplns"
+modes = ["solo", "pplns", "pps"]
+# Solo miners are paid directly in the coinbase (no fee). The other values are the built-in defaults.
+min_payout_leptons = 100000     # 0.001 coins
+max_solo_accounts = 1000
+
+# Payouts. dry_run = true only logs what would be paid; set it to false to pay for real.
+dry_run = true
+interval_secs = 600
+# Node wallet for payouts and the PPS reserve check (empty disables both). The wallet is created or loaded
+# automatically; wallet_addresses pool addresses are provisioned from it (label "photon-pool").
+wallet = ""
+wallet_addresses = 0
+# Environment variable with the wallet passphrase, if the wallet is encrypted.
+wallet_passphrase_env = "PHOTON_WALLET_PASSPHRASE"
+# Fixed fee rate in sat/vB if the node cannot estimate fees.
+# fee_rate = 5.0
+
+[payout.fee_pct]
+pplns = 1.0
+pps = 2.0
+
+[payout.pplns]
+window_factor = 2.0
+# Attestation spot checks over all gateways per tip, and how many the node validates at once. A check costs the node one
+# block validation (about 0.75 s for a full block).
+max_checks_per_tip = 8
+max_concurrent_checks = 2
+
+[payout.pps]
+# Offered, but refused until the pool wallet holds reserve_min above all liabilities.
+enabled = true
+reserve_min = 5.0
+max_hashrate_share = 0.25
+
+# Optional: several Stratum ports with their own default mode. Without any [[stratum.ports]]
+# block the single `listen` port above is used with default_mode.
+# [[stratum.ports]]
+# listen = "0.0.0.0:3333"
+# mode = "pplns"
+# allow_override = true      # miners may choose a mode with m=solo|pplns|pps in the password
+# [[stratum.ports]]
+# listen = "0.0.0.0:3334"
+# mode = "pps"
+# [[stratum.ports]]
+# listen = "0.0.0.0:3335"
+# mode = "solo"
+
+[public]
+# Public pool page and read-only API on their own listener (off by default).
+enabled = false
+listen = "127.0.0.1:8082"
+name = "Photon Pool"
+# Host name shown in the connection instructions.
+stratum_host = ""
+# Trust X-Forwarded-For (only behind your own reverse proxy).
+trust_proxy = false
+rate_per_min = 120
+
+[ledger]
+# Share and payout database (SQLite).
+path = "photond.db"
+keep_days = 14
+
+[api]
+# Read-only admin API and web UI. Keep this on loopback or a management network.
+listen = "127.0.0.1:8081"
+ui_dir = "ui"
+# Optional: base URL of a mempool-style block explorer. Found blocks and the chain tip
+# link to <explorer_url>/block/<hash> in the web UI. Leave empty to disable links.
+explorer_url = "https://mempool.elektron-net.org"
+
+[photon]
+# Photon protocol for gateways with their own node (non-custodial coinbase payouts, see
+# doc-elektron/guideline-photon-protocol.md). Off by default.
+enabled = false
+listen = "0.0.0.0:3340"
+# Noise static key (created on first start, owner-only permissions). Gateways pin the public key shown in the log and in /api/v1/summary.
+key_file = "photon.key"
+# Fee output of the coinbase plan (default: the first pool payout address).
+# fee_address = "be1q..."
+fee_pct = 1.0
+# Most payout outputs of one block. Everybody with a credit is paid; with more credits than this the smaller ones take turns.
+# 200 keeps a job below the 16 KB line limit of ESP32 based miners (Bitaxe); see doc-elektron/guideline-photon-protocol.md 6.1 and 7.1.
+max_outputs = 200
+# Payout addresses (channels) one gateway connection may serve.
+max_channels_per_connection = 64
+# Smallest payout part in parts per million of the block reward; smaller credits carry over.
+window_factor = 2.0

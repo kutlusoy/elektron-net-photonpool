@@ -1,0 +1,35 @@
+[package]
+name = "photond"
+version = "0.2.0-rc1"
+edition = "2021"
+description = "Headless high-throughput mining pool daemon for Elektron Net"
+
+[dependencies]
+anyhow = "1"
+axum = "0.7"
+base64 = "0.22"
+bech32 = "0.11"
+bytes = "1"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+hex = "0.4"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "signal"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+toml = "0.8"
+tower-http = { version = "0.5", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+snow = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+# unwind (the default): a panic in one session task must not take the whole pool down
