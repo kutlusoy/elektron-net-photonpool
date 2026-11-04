@@ -135,5 +135,8 @@ max_channels_per_connection = 64
 min_ppm = 100
 # Smallest payout output in leptons, measured at the subsidy (0 = off). Credits that would be worth less get no output in the coinbase;
 # this keeps dust out of the UTXO set. Such miners are not paid while they stay below the minimum (see guideline-photon-protocol.md 6.1).
+# The default 100000 (0.001 coin = 0.02 % of the 5 coin subsidy) equals payout.min_payout_leptons.
+# Change it later in this file and run `systemctl reload photond` (SIGHUP): min_ppm, min_output_leptons and max_outputs apply to the plans
+# of the next tip on, without a restart and without touching the gateways (they accept up to their accept_min_* limits).
 min_output_leptons = 100000
 window_factor = 2.0

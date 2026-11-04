@@ -12,6 +12,8 @@ Type=simple
 User=photon
 Group=photon
 ExecStart=/opt/photond/photond -c /etc/photond/photond.toml run
+# `systemctl reload photond` re-reads photond.toml and applies [photon] min_ppm, min_output_leptons and max_outputs without a restart.
+ExecReload=/bin/kill -HUP $MAINPID
 # SIGINT is the graceful stop: pending share totals and the remembered gateway trust are written to the ledger first.
 KillSignal=SIGINT
 TimeoutStopSec=30

@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Run => loop {
             match Pool::connect(config::Config::load(&cli.config)?).await {
-                Ok(pool) => return run(pool).await,
+                Ok(pool) => return run(pool, cli.config.clone()).await,
                 Err(e) => {
                     tracing::warn!("waiting for the node: {e:#}");
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
+async fn run(pool: std::sync::Arc<Pool>, config_path: PathBuf) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&pool.cfg.api.listen).await?;
     pool.event("info", format!("photond {} listening on {}", env!("CARGO_PKG_VERSION"), pool.cfg.api.listen));
     tokio::spawn(pool.clone().run_tip_loop());
@@ -105,11 +105,25 @@ async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
     if pool.cfg.photon.enabled {
         let svc = photon::service::PhotonService::new(pool.clone())?;
         let _ = pool.photon.set(svc.clone());
+        let reload_svc = svc.clone();
         tokio::spawn(async move {
             if let Err(e) = svc.clone().run().await {
                 svc.pool.event("err", format!("photon listener stopped: {e:#}"));
             }
         });
+        // SIGHUP re-reads the configuration file and applies the dust policy of [photon] (systemctl reload photond)
+        #[cfg(unix)]
+        tokio::spawn(async move {
+            let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else { return };
+            while hup.recv().await.is_some() {
+                match config::Config::load(&config_path).and_then(|c| reload_svc.reload(&c.photon)) {
+                    Ok(msg) => reload_svc.pool.event("info", msg),
+                    Err(e) => reload_svc.pool.event("warn", format!("configuration reload refused, keeping the old values: {e:#}")),
+                }
+            }
+        });
+        #[cfg(not(unix))]
+        let _ = (reload_svc, config_path);
     }
     let photon = pool.photon.get().cloned();
     let flush_pool = pool.clone();

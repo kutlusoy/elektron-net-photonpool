@@ -25,16 +25,39 @@ pub struct Rules {
     pub fee_script: Vec<u8>,
 }
 
+/// What a gateway accepts from a pool: fee terms exactly, everything that shapes the dust policy up to a limit.
+/// The pool may change its minimums at any time (for example by a configuration reload); the gateway only refuses plans beyond these limits.
+#[derive(Debug, Clone)]
+pub struct Terms {
+    pub n_max_limit: u16,
+    pub max_min_ppm: u32,
+    pub max_min_output_leptons: u64,
+    pub fee_ppm: u32,
+    pub fee_script: Vec<u8>,
+}
+
+impl Terms {
+    /// The terms of the pool's own rules (self-check of freshly derived plans).
+    pub fn of(r: &Rules) -> Terms {
+        Terms { n_max_limit: r.n_max, max_min_ppm: r.min_ppm, max_min_output_leptons: r.min_output_leptons, fee_ppm: r.fee_ppm, fee_script: r.fee_script.clone() }
+    }
+}
+
+/// Smallest part (ppm of the reward) an output may have for the given minimums and reference reward.
+pub fn min_part(min_ppm: u32, min_output_leptons: u64, ref_reward: u64) -> u32 {
+    let by_amount = if min_output_leptons == 0 || ref_reward == 0 {
+        0
+    } else {
+        ((min_output_leptons as u128 * PPM as u128 + ref_reward as u128 - 1) / ref_reward as u128).min(PPM as u128) as u32
+    };
+    min_ppm.max(by_amount).max(1)
+}
+
 impl Rules {
     /// Smallest part (ppm of the reward) an output may have: `min_ppm`, and the part that is worth `min_output_leptons` at the reference reward.
     /// The reference reward is the subsidy, so every real reward (subsidy plus fees) pays at least `min_output_leptons`.
     pub fn effective_min_ppm(&self, ref_reward: u64) -> u32 {
-        let by_amount = if self.min_output_leptons == 0 || ref_reward == 0 {
-            0
-        } else {
-            ((self.min_output_leptons as u128 * PPM as u128 + ref_reward as u128 - 1) / ref_reward as u128).min(PPM as u128) as u32
-        };
-        self.min_ppm.max(by_amount).max(1)
+        min_part(self.min_ppm, self.min_output_leptons, ref_reward)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -81,7 +104,7 @@ pub fn derive_full(rules: &Rules, tip: [u8; 32], height: u32, ref_reward: u64, c
     let mut outputs: Vec<PlanOutput> = kept.iter().map(|(s, c)| PlanOutput { script: s.clone(), ppm: ppm_of(*c, base) }).filter(|o| o.ppm > 0).collect();
     outputs.sort_by(|a, b| b.ppm.cmp(&a.ppm).then_with(|| a.script.cmp(&b.script)));
 
-    let mut plan = PayoutPlan { tip, height, rules_version: RULES_VERSION, plan_hash: [0; 32], accounting_root: root, outputs, fee_script: rules.fee_script.clone(), fee_ppm: rules.fee_ppm, ref_reward };
+    let mut plan = PayoutPlan { tip, height, rules_version: RULES_VERSION, plan_hash: [0; 32], accounting_root: root, outputs, fee_script: rules.fee_script.clone(), fee_ppm: rules.fee_ppm, ref_reward, min_ppm: rules.min_ppm, min_output_leptons: rules.min_output_leptons };
     plan.plan_hash = hash(&plan);
     Ok((plan, tree))
 }
@@ -103,21 +126,23 @@ pub fn hash(p: &PayoutPlan) -> [u8; 32] {
     h.update(&p.fee_script);
     h.update(p.fee_ppm.to_le_bytes());
     h.update(p.ref_reward.to_le_bytes());
+    h.update(p.min_ppm.to_le_bytes());
+    h.update(p.min_output_leptons.to_le_bytes());
     h.finalize().into()
 }
 
-/// Structural check of a plan received from the pool: hash, bounds, ordering, ppm sum.
-pub fn check_plan(p: &PayoutPlan, rules: &Rules) -> Result<()> {
+/// Structural check of a plan received from the pool: hash, bounds, ordering, ppm sum, fee terms, and the minimum part the plan announces.
+pub fn check_plan(p: &PayoutPlan, terms: &Terms) -> Result<()> {
     if p.rules_version != RULES_VERSION {
         bail!("unknown rules version {}", p.rules_version);
     }
     if p.plan_hash != hash(p) {
         bail!("plan hash does not match the plan");
     }
-    if p.outputs.len() > rules.n_max as usize {
+    if p.outputs.len() > terms.n_max_limit as usize {
         bail!("too many outputs");
     }
-    if p.fee_ppm != rules.fee_ppm || p.fee_script != rules.fee_script {
+    if p.fee_ppm != terms.fee_ppm || p.fee_script != terms.fee_script {
         bail!("fee terms differ from the agreed rules");
     }
     let sum: u64 = p.outputs.iter().map(|o| o.ppm as u64).sum();
@@ -130,9 +155,15 @@ pub fn check_plan(p: &PayoutPlan, rules: &Rules) -> Result<()> {
     if p.ref_reward == 0 {
         bail!("plan without a reference reward");
     }
-    let min_ppm = rules.effective_min_ppm(p.ref_reward);
-    if p.outputs.iter().any(|o| o.ppm < min_ppm) {
-        bail!("output below the minimum part ({min_ppm} ppm)");
+    if p.min_ppm > terms.max_min_ppm {
+        bail!("the pool's minimum part {} ppm is above the accepted {} ppm", p.min_ppm, terms.max_min_ppm);
+    }
+    if p.min_output_leptons > terms.max_min_output_leptons {
+        bail!("the pool's minimum payout of {} leptons is above the accepted {}", p.min_output_leptons, terms.max_min_output_leptons);
+    }
+    let floor = min_part(p.min_ppm, p.min_output_leptons, p.ref_reward);
+    if p.outputs.iter().any(|o| o.ppm < floor) {
+        bail!("output below the minimum part announced by the plan ({floor} ppm)");
     }
     Ok(())
 }
@@ -156,7 +187,7 @@ mod tests {
         let ppm: Vec<u32> = p.outputs.iter().map(|o| o.ppm).collect();
         assert_eq!(ppm, vec![594_000, 297_000, 99_000]);
         assert_eq!(p.outputs[0].script, s(1));
-        check_plan(&p, &rules()).unwrap();
+        check_plan(&p, &Terms::of(&rules())).unwrap();
         assert!(p.outputs.iter().map(|o| o.ppm as u64).sum::<u64>() <= PPM - 10_000);
     }
 
@@ -195,7 +226,7 @@ mod tests {
     fn empty_credits_pay_everything_to_the_fee_script() {
         let p = derive(&rules(), [1; 32], 100, REF, &[]).unwrap();
         assert!(p.outputs.is_empty());
-        check_plan(&p, &rules()).unwrap();
+        check_plan(&p, &Terms::of(&rules())).unwrap();
     }
 
     #[test]
@@ -203,22 +234,22 @@ mod tests {
         let p = derive(&rules(), [1; 32], 100, REF, &[(s(1), 600), (s(2), 300)]).unwrap();
         let mut a = p.clone();
         a.outputs[0].ppm += 1;
-        assert!(check_plan(&a, &rules()).is_err());
+        assert!(check_plan(&a, &Terms::of(&rules())).is_err());
         let mut b = p.clone();
         b.outputs[0].script = s(77);
-        assert!(check_plan(&b, &rules()).is_err());
+        assert!(check_plan(&b, &Terms::of(&rules())).is_err());
         let mut c = p.clone();
         c.fee_ppm = 0;
         c.plan_hash = hash(&c);
-        assert!(check_plan(&c, &rules()).is_err(), "fee terms must match the rules the gateway agreed to");
+        assert!(check_plan(&c, &Terms::of(&rules())).is_err(), "fee terms must match the rules the gateway agreed to");
         let mut d = p.clone();
         d.outputs.reverse();
         d.plan_hash = hash(&d);
-        assert!(check_plan(&d, &rules()).is_err());
+        assert!(check_plan(&d, &Terms::of(&rules())).is_err());
         let mut e = p;
         e.outputs[0].ppm = 999_999;
         e.plan_hash = hash(&e);
-        assert!(check_plan(&e, &rules()).is_err());
+        assert!(check_plan(&e, &Terms::of(&rules())).is_err());
     }
 
     #[test]
@@ -246,7 +277,7 @@ mod tests {
         let reference = 50_000_000u64; // subsidy of a small chain
         let credits: Vec<_> = (1..=60u8).map(|i| (s(i), 1 + (i as u64 * i as u64) * 37)).collect();
         let p = derive(&r, [1; 32], 100, reference, &credits).unwrap();
-        check_plan(&p, &r).unwrap();
+        check_plan(&p, &Terms::of(&r)).unwrap();
         assert!(!p.outputs.is_empty() && p.outputs.len() < 60, "small credits are dropped: {}", p.outputs.len());
         for reward in [reference, reference + 1, reference * 3] {
             for o in &p.outputs {
@@ -259,29 +290,42 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_with_a_dishonest_reference_reward_or_other_minimum_is_refused() {
+    fn a_gateway_accepts_changed_minimums_up_to_its_limits_and_checks_the_plan_against_its_own_announcement() {
         let mut r = rules();
         r.n_max = 128;
         r.min_ppm = 1;
         r.min_output_leptons = 100_000;
         let credits: Vec<_> = (1..=30u8).map(|i| (s(i), 10 + i as u64 * 100)).collect();
         let p = derive(&r, [1; 32], 100, 50_000_000, &credits).unwrap();
-        check_plan(&p, &r).unwrap();
-        // a gateway that agreed to a higher minimum refuses the plan
-        let mut strict = r.clone();
-        strict.min_output_leptons = 400_000;
-        assert!(check_plan(&p, &strict).is_err());
-        // changing the reference reward changes the hash
-        let mut q = p.clone();
-        q.ref_reward *= 2;
-        assert!(check_plan(&q, &r).is_err());
-        q.plan_hash = hash(&q);
-        // a doubled reference halves the minimum part, so the same outputs still satisfy it
-        assert!(check_plan(&q, &r).is_ok());
+        assert_eq!((p.min_ppm, p.min_output_leptons), (1, 100_000));
+        let terms = Terms { n_max_limit: 128, max_min_ppm: 2000, max_min_output_leptons: 1_000_000, fee_ppm: r.fee_ppm, fee_script: r.fee_script.clone() };
+        check_plan(&p, &terms).unwrap();
+        // the pool raises its minimum later: the gateway follows as long as it stays within its limit, no reconfiguration needed
+        r.min_output_leptons = 400_000;
+        let raised = derive(&r, [1; 32], 100, 50_000_000, &credits).unwrap();
+        assert!(raised.outputs.len() < p.outputs.len());
+        check_plan(&raised, &terms).unwrap();
+        // beyond the limit the plan is refused
+        r.min_output_leptons = 5_000_000;
+        let too_high = derive(&r, [1; 32], 100, 50_000_000, &credits).unwrap();
+        assert!(check_plan(&too_high, &terms).is_err());
+        // lowering the minimum is always acceptable (more small miners are paid)
+        r.min_output_leptons = 1_000;
+        check_plan(&derive(&r, [1; 32], 100, 50_000_000, &credits).unwrap(), &terms).unwrap();
+        // a plan that announces a minimum but contains an output below it is refused
+        let mut lie = raised.clone();
+        lie.min_output_leptons = 900_000;
+        lie.plan_hash = hash(&lie);
+        assert!(check_plan(&lie, &terms).is_err());
+        // announced values are covered by the hash
+        let mut tampered = raised.clone();
+        tampered.min_output_leptons = 1;
+        assert!(check_plan(&tampered, &terms).is_err());
+        // reference reward 0 and a changed reference reward
         let mut z = p.clone();
         z.ref_reward = 0;
         z.plan_hash = hash(&z);
-        assert!(check_plan(&z, &r).is_err());
+        assert!(check_plan(&z, &terms).is_err());
         assert!(derive(&r, [1; 32], 100, 0, &credits).is_err());
     }
 
@@ -293,7 +337,7 @@ mod tests {
         let credits: Vec<_> = (0..5000u32).map(|i| (vec![0, 20, (i % 251) as u8, (i / 251) as u8], 1 + (i as u64 * 7919) % 10_000_000)).collect();
         let p = derive(&r, [3; 32], 5, REF, &credits).unwrap();
         assert!(p.outputs.len() <= 128);
-        check_plan(&p, &r).unwrap();
+        check_plan(&p, &Terms::of(&r)).unwrap();
         assert!(p.outputs.iter().map(|o| o.ppm as u64).sum::<u64>() <= PPM - r.fee_ppm as u64);
     }
 }
