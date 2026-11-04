@@ -1,0 +1,20 @@
+{
+  "tracks": [
+    {
+      "file": "space-ranger-moire.mp3",
+      "title": "Space Ranger",
+      "artist": "Moire",
+      "credit": "Music: 'Space Ranger' by Moire on #Uppbeat",
+      "url": "https://uppbeat.io/c/moire",
+      "license": "TA49G7CKZIJ5LNOR"
+    },
+    {
+      "file": "the-fog-danijel-zambo.mp3",
+      "title": "The Fog",
+      "artist": "Danijel Zambo",
+      "credit": "Music: 'The Fog' by Danijel Zambo on #Uppbeat",
+      "url": "https://uppbeat.io/c/danijel-zambo",
+      "license": "QMA6GMHGBPDIVWIZ"
+    }
+  ]
+}

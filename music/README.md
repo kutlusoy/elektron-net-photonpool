@@ -25,6 +25,6 @@ The files must be readable by the pool (in Docker it runs as user 10001): `chmod
 ## Licensing
 
 Check the license of every track before you publish a pool page with it. Free tiers usually require a credit, and many
-(for example Uppbeat) license a track for your own use, not for passing the file on. For that reason `.gitignore` keeps the audio
-files and `playlist.json` out of git: copy them to the server yourself (`scp`, or the Docker bind mount `./music`).
+(for example Uppbeat) license a track for your own use, not for passing the file on. For that reason `.gitignore` keeps new audio
+files out of git by default: copy them to the server yourself (`scp`, or the Docker bind mount `./music`). If the repository is public, anything committed here is public too.
 Only commit a track that is released under a license that allows redistribution, for example CC0, and remove its line from `.gitignore` for that file.
