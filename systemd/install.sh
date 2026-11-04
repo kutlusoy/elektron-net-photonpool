@@ -23,11 +23,37 @@ if [ "$what" = pool ] || [ "$what" = both ]; then
     install -m 0640 "$here/photond.example.toml" "$d/etc/photond/photond.toml"
     sed -i 's|^ui_dir = "ui"|ui_dir = "/opt/photond/ui"|' "$d/etc/photond/photond.toml"
   fi
-  [ -e "$d/etc/photond/photond.env" ] || { umask 077; : > "$d/etc/photond/photond.env"; }
+  if [ ! -e "$d/etc/photond/photond.env" ]; then
+    ( umask 077; cat > "$d/etc/photond/photond.env" <<'ENV'
+# Environment of the photond service (systemd EnvironmentFile; one NAME=value per line, no quotes needed, mode 0600).
+#
+# Passphrase of the node wallet, if it is encrypted. The variable name is payout.wallet_passphrase_env in photond.toml.
+# PHOTON_WALLET_PASSPHRASE=
+#
+# Node login for `auth = "env:PHOTON_NODE_AUTH"` in photond.toml: the value is user:password.
+# PHOTON_NODE_AUTH=elek:secret
+#
+# Log level. Options: error | warn | info (default) | debug | trace; per module such as photond::photon=debug,info.
+# RUST_LOG=info
+ENV
+    )
+  fi
   install -m 0644 "$here/systemd/Caddyfile.example" "$d/etc/photond/Caddyfile.example"
 fi
 if [ "$what" = gateway ] || [ "$what" = both ]; then
   install -m 0644 "$here/systemd/photon-gateway.service" "$d/usr/lib/systemd/system/photon-gateway.service"
+  if [ ! -e "$d/etc/photond/gateway.env" ]; then
+    ( umask 077; cat > "$d/etc/photond/gateway.env" <<'ENV'
+# Environment of the photon-gateway service (systemd EnvironmentFile; one NAME=value per line, mode 0600).
+#
+# Node login for `node_auth = "env:GATEWAY_NODE_AUTH"` in gateway.toml: the value is user:password.
+# GATEWAY_NODE_AUTH=elek:secret
+#
+# Log level. Options: error | warn | info (default) | debug | trace.
+# RUST_LOG=info
+ENV
+    )
+  fi
   [ -e "$d/etc/photond/gateway.toml" ] || install -m 0640 "$here/gateway.example.toml" "$d/etc/photond/gateway.toml"
 fi
 [ -e "$d/usr/lib/systemd/system/elektrond.service" ] || install -m 0644 "$here/systemd/elektrond.service" "$d/usr/lib/systemd/system/elektrond.service.example"

@@ -17,8 +17,9 @@ KillSignal=SIGINT
 TimeoutStopSec=30
 Restart=always
 RestartSec=5
-# Secrets such as PHOTON_WALLET_PASSPHRASE (mode 0600, owned by root); optional.
+# Secrets such as PHOTON_WALLET_PASSPHRASE (mode 0600, owned by root); optional. The template /etc/photond/photond.env lists the variables.
 EnvironmentFile=-/etc/photond/photond.env
+# Log level. Options: error | warn | info | debug | trace (or per module, e.g. photond::photon=debug,info).
 Environment=RUST_LOG=info
 WorkingDirectory=/var/lib/photond
 StateDirectory=photond

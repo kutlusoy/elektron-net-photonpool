@@ -146,6 +146,8 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 | Symptom | Cause and fix |
 |---|---|
 | `waiting for the node: node is still syncing` | The node is still in initial block download. Wait. |
+| `waiting for the node: reading cookie /node/.cookie: No such file or directory` | The node has not started (or not yet written its cookie). With Docker: `docker compose ps` and `docker compose logs node`; the pool keeps retrying every 5 s and starts by itself once the cookie exists. |
+| `exec /usr/local/bin/entrypoint.sh: no such file or directory` (node container) | The script has Windows line endings (`\r`) after a checkout on Windows. The repository now contains a `.gitattributes` and the image strips them; rebuild with `docker compose build --no-cache node`. If it still happens: `git config core.autocrlf false`, delete the clone, clone again. |
 | `node refused the credentials` (HTTP 401) | Wrong `node.auth`. Check `rpcuser`/`rpcpassword` or the cookie path. |
 | `address ... has prefix X, expected be` | An address of another network in `payout_addresses` or as miner account. |
 | `Unauthorized worker` in the miner | The user name is not `<be1q address>.<worker>` for the configured network. |

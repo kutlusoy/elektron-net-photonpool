@@ -15,7 +15,9 @@ ExecStart=/opt/photond/photond gateway --gateway-config /etc/photond/gateway.tom
 # A wrong pool key or a ban ends the process on purpose: the restart delay keeps it from hammering the pool.
 Restart=always
 RestartSec=15
+# Optional secrets such as the node login (mode 0600, owned by root); the template /etc/photond/gateway.env lists the variables.
 EnvironmentFile=-/etc/photond/gateway.env
+# Log level. Options: error | warn | info | debug | trace.
 Environment=RUST_LOG=info
 ConfigurationDirectory=photond
 # ASICs of a farm: far fewer than a pool, but leave room.

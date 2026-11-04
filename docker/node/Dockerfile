@@ -30,8 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /data && chown elektron:elektron /data
 COPY --from=build /usr/local/bin/elektrond /usr/local/bin/elektron-cli /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# Strip carriage returns in case the repository was checked out with Windows line endings (see .gitattributes): a "#!/bin/sh\r" shebang
+# makes the container fail with "exec /usr/local/bin/entrypoint.sh: no such file or directory".
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 VOLUME ["/data"]
 EXPOSE 8333
-ENTRYPOINT ["entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["elektrond", "-conf=/data/elektron.conf", "-datadir=/data", "-printtoconsole"]

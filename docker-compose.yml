@@ -7,6 +7,7 @@ services:
       context: ./docker/node
       args:
         ELEKTRON_REF: main
+        # Options: true | false (default). true builds the node with the Photon patch (getattestationbatch); set it in the shell or in a .env file.
         PHOTON_NODE_PATCHES: ${PHOTON_NODE_PATCHES:-false}
     restart: unless-stopped
     ports:
@@ -46,6 +47,7 @@ services:
     depends_on:
       - photond
     environment:
+      # Options: the host name of the pool (pool.example.org) for the certificate; set it in the shell, as in the command above.
       POOL_DOMAIN: ${POOL_DOMAIN:-}
     ports:
       - "80:80"
