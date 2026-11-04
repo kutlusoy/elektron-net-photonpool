@@ -22,5 +22,7 @@ Tests (`test/`)
 Photon spot checks
 - Per-tip budget (`max_checks_per_tip`, default 8) and concurrency limit (`max_concurrent_checks`, default 2); a node that cannot answer makes a check inconclusive instead of failing the gateway; the gateway splits large attestation requests below the node's 32 MB RPC limit. Load figures in `doc-elektron/guideline-photon-protocol.md` section 14c.
 
+- Gateway trust is remembered per address and per payout script (kept in the ledger), spot checks are selected proportionally to each gateway's own probability, a payout script is banned for an hour after three failed checks.
+
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.

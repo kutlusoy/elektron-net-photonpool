@@ -4,6 +4,7 @@ use super::merkle::{self, AccountingTree};
 use super::msg::*;
 use super::noise::{self, Keypair, NoiseConn};
 use super::plan::{derive_full, Rules};
+use super::trustbook::{Entry, TrustBook, MAX_AGE_SECS};
 use super::verify::{check_share, Announced, Seen, Trust, Verdict, MAX_NTIME_DELTA, VERSION_MASK};
 use super::PROTOCOL_VERSION;
 use crate::accounting::minute_now;
@@ -17,7 +18,7 @@ use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hasher};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::net::{TcpListener, TcpStream};
@@ -99,6 +100,10 @@ pub struct PhotonService {
     recent: Mutex<VecDeque<Arc<PlanEntry>>>,
     check_used: std::sync::atomic::AtomicU32,
     check_slots: Semaphore,
+    /// Remembered trust per network address and per payout script.
+    pub trust: Mutex<TrustBook>,
+    /// Sum of the spot check probabilities of all connected gateways, in millionths.
+    total_p_micro: AtomicI64,
 }
 
 fn rand64() -> u64 {
@@ -135,6 +140,11 @@ pub fn valid_payout_script(s: &[u8]) -> bool {
     (s.len() == 22 && s[0] == 0x00 && s[1] == 0x14) || (s.len() == 34 && ((s[0] == 0x00 && s[1] == 0x20) || (s[0] == 0x51 && s[1] == 0x20)))
 }
 
+/// Divisor for all spot check probabilities: 1 while their sum fits into the per-tip budget, otherwise sum / budget.
+pub fn scale_for(sum_p: f64, budget: u32) -> f64 {
+    (sum_p / budget.max(1) as f64).max(1.0)
+}
+
 /// Next share difficulty so that a channel produces about one share per `goal_secs`.
 pub fn retarget(diff: f64, accepted: u32, secs: f64, goal_secs: f64, min: f64, max: f64) -> Option<f64> {
     if secs < 30.0 {
@@ -163,7 +173,58 @@ impl PhotonService {
         rules.validate()?;
         let empty = Arc::new(PlanBook { epoch_id: 0, tip: [0; 32], tip_hex: String::new(), tip_height: 0, plans: BTreeMap::new(), max_reward: 0 });
         let (book, _) = watch::channel(empty);
-        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new((HashSet::new(), HashSet::new())), recent: Mutex::new(VecDeque::new()), check_used: std::sync::atomic::AtomicU32::new(0), check_slots: Semaphore::new(cfg_conc) }))
+        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new((HashSet::new(), HashSet::new())), recent: Mutex::new(VecDeque::new()), check_used: std::sync::atomic::AtomicU32::new(0), check_slots: Semaphore::new(cfg_conc), trust: Mutex::new(TrustBook::default()), total_p_micro: AtomicI64::new(0) }))
+    }
+
+    pub fn now() -> i64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    }
+
+    /// Factor by which individual probabilities are divided so that the expected number of checks per tip matches the budget.
+    /// Selection is proportional to each gateway's own probability: less trusted gateways are checked more often, trusted ones never drop to zero.
+    pub fn p_scale(&self) -> f64 {
+        scale_for(self.sum_p(), self.cfg.max_checks_per_tip)
+    }
+
+    pub fn sum_p(&self) -> f64 {
+        self.total_p_micro.load(Ordering::Relaxed).max(0) as f64 / 1e6
+    }
+
+    async fn load_trust(&self) {
+        let since = Self::now() - MAX_AGE_SECS;
+        match self.pool.ledger.call(move |c| ledger::trust_load(c, since)).await {
+            Ok(rows) => {
+                let n = rows.len();
+                let rows = rows.into_iter().map(|(k, passes, fails, last_fail, banned_until, updated)| (k, Entry { trust: Trust { passes: passes as u32, fails: fails as u32 }, last_fail, banned_until, updated })).collect();
+                self.trust.lock().unwrap().load(rows);
+                self.pool.event("info", format!("photon: {n} remembered gateway trust entries loaded"));
+            }
+            Err(e) => self.pool.event("warn", format!("photon: could not load remembered trust: {e:#}")),
+        }
+    }
+
+    async fn trust_flush_loop(self: Arc<Self>) {
+        let mut tick = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            tick.tick().await;
+            self.flush_trust().await;
+        }
+    }
+
+    /// Writes changed trust entries to the ledger and removes expired ones; also called on shutdown.
+    pub async fn flush_trust(&self) {
+        let (dirty, gone) = {
+            let mut b = self.trust.lock().unwrap();
+            let gone = b.prune(Self::now());
+            (b.take_dirty(), gone)
+        };
+        if dirty.is_empty() && gone.is_empty() {
+            return;
+        }
+        let rows: Vec<ledger::TrustRow> = dirty.into_iter().map(|(k, e)| (k, e.trust.passes as i64, e.trust.fails as i64, e.last_fail, e.banned_until, e.updated)).collect();
+        if let Err(e) = self.pool.ledger.call(move |c| ledger::trust_save(c, &rows, &gone)).await {
+            self.pool.event("warn", format!("photon: could not save gateway trust: {e:#}"));
+        }
     }
 
     pub fn public_key_hex(&self) -> String {
@@ -173,6 +234,8 @@ impl PhotonService {
     pub async fn run(self: Arc<Self>) -> Result<()> {
         let listener = TcpListener::bind(&self.cfg.listen).await.with_context(|| format!("binding photon listener {}", self.cfg.listen))?;
         self.pool.event("info", format!("photon protocol listening on {} (pool key {})", self.cfg.listen, self.public_key_hex()));
+        self.load_trust().await;
+        tokio::spawn(self.clone().trust_flush_loop());
         tokio::spawn(self.clone().plan_loop());
         let slots = Arc::new(Semaphore::new(self.cfg.max_connections));
         loop {
@@ -285,7 +348,9 @@ impl PhotonService {
         tcp.set_nodelay(true).ok();
         let conn = tokio::time::timeout(Duration::from_secs(10), noise::accept(tcp, &self.key)).await.map_err(|_| anyhow!("handshake timeout"))??;
         let mut s = Session::new(self.clone(), conn, peer);
-        s.run().await
+        let r = s.run().await;
+        s.set_contrib(0);
+        r
     }
 }
 
@@ -318,7 +383,8 @@ struct Session {
     next_chan: u32,
     templates: HashMap<u32, Vec<Announced>>,
     order: VecDeque<u32>,
-    trust: Trust,
+    keys: Vec<String>,
+    contrib: i64,
     seen: Seen,
     check: Option<PendingCheck>,
     held: HashMap<(u32, u32), Vec<(String, f64)>>,
@@ -339,7 +405,7 @@ impl Session {
         let mut book_rx = svc.book.subscribe();
         let book = book_rx.borrow_and_update().clone();
         Self {
-            svc, conn, peer, book, book_rx, stale_since: HashMap::new(), sent: HashSet::new(), channels: HashMap::new(), next_chan: 1, templates: HashMap::new(), order: VecDeque::new(), trust: Trust::default(), seen: Seen::default(), check: None,
+            svc, conn, peer, book, book_rx, stale_since: HashMap::new(), sent: HashSet::new(), channels: HashMap::new(), next_chan: 1, templates: HashMap::new(), order: VecDeque::new(), keys: vec![format!("ip:{}", peer.ip())], contrib: 0, seen: Seen::default(), check: None,
             held: HashMap::new(), strikes: 0, last_rx: Instant::now(),
         }
     }
@@ -353,7 +419,25 @@ impl Session {
         bail!("disconnected: {reason}")
     }
 
+    fn set_contrib(&mut self, micro: i64) {
+        self.svc.total_p_micro.fetch_add(micro - self.contrib, Ordering::Relaxed);
+        self.contrib = micro;
+    }
+
+    fn refresh_contrib(&mut self) {
+        let p = self.svc.trust.lock().unwrap().probability(&self.keys, PhotonService::now());
+        self.set_contrib((p * 1e6) as i64);
+    }
+
+    fn banned(&self) -> bool {
+        self.svc.trust.lock().unwrap().banned(&self.keys, PhotonService::now())
+    }
+
     async fn run(&mut self) -> Result<()> {
+        if self.banned() {
+            return self.disconnect(code::BANNED, "banned after repeated attestation check failures").await;
+        }
+        self.refresh_contrib();
         let first = tokio::time::timeout(Duration::from_secs(10), self.conn.recv()).await.map_err(|_| anyhow!("no Setup"))??;
         match Msg::decode(&first)? {
             Msg::Setup(s) if s.version == PROTOCOL_VERSION => self.send(Msg::SetupAck(Setup { version: PROTOCOL_VERSION, features: 0, max_frame: super::wire::MAX_FRAME as u32 })).await?,
@@ -489,6 +573,14 @@ impl Session {
         }
         let want = difficulty_from_target(&m.target);
         let diff = if want.is_finite() && want > 0.0 { want } else { self.svc.cfg.initial_difficulty }.clamp(self.svc.cfg.min_difficulty, self.svc.cfg.max_difficulty);
+        let key = format!("script:{}", hex::encode(&m.payout_script));
+        if !self.keys.contains(&key) {
+            self.keys.push(key);
+            if self.banned() {
+                return self.disconnect(code::BANNED, "payout script is banned after repeated attestation check failures").await;
+            }
+            self.refresh_contrib();
+        }
         let id = self.next_chan;
         self.next_chan += 1;
         let target = target_from_difficulty(diff);
@@ -550,7 +642,8 @@ impl Session {
         let (first, n) = (announced.ann.first_variant, announced.ann.coinbases.len() as u64);
         self.templates.entry(template_id).or_default().push(announced);
         let roll = (rand64() >> 11) as f64 / (1u64 << 53) as f64;
-        if self.check.is_none() && self.trust.should_check(roll) && self.svc.reserve_check() {
+        let p = self.svc.trust.lock().unwrap().probability(&self.keys, PhotonService::now()) / self.svc.p_scale();
+        if self.check.is_none() && roll < p && self.svc.reserve_check() {
             let variant = first + (rand64() % n) as u32;
             self.check = Some(PendingCheck { template_id, variant, started: Instant::now(), buf: Vec::new(), next_seq: 0 });
             self.held.entry((template_id, variant)).or_default();
@@ -618,7 +711,8 @@ impl Session {
     }
 
     fn check_passed(&mut self, key: (u32, u32)) -> Result<()> {
-        self.trust.record(true);
+        self.svc.trust.lock().unwrap().record(&self.keys, true, PhotonService::now());
+        self.refresh_contrib();
         self.svc.stats.checks_ok.fetch_add(1, Ordering::Relaxed);
         self.release(key);
         Ok(())
@@ -626,10 +720,11 @@ impl Session {
 
     async fn fail_check(&mut self, key: (u32, u32), why: &str) -> Result<()> {
         self.held.remove(&key);
-        self.trust.record(false);
+        let banned = self.svc.trust.lock().unwrap().record(&self.keys, false, PhotonService::now());
+        self.refresh_contrib();
         self.svc.stats.checks_failed.fetch_add(1, Ordering::Relaxed);
         self.svc.pool.event("warn", format!("photon spot check failed for {} (template {}, variant {}): {why}", self.peer, key.0, key.1));
-        if self.trust.banned() {
+        if banned {
             return self.disconnect(code::BANNED, "repeated attestation check failures").await;
         }
         self.send(reject(code::CHECK_FAILED, &why.chars().take(200).collect::<String>())).await
@@ -752,6 +847,21 @@ mod tests {
         assert!(!valid_payout_script(&[0x6a, 0x01, 0x00]), "OP_RETURN");
         assert!(!valid_payout_script(&[0x51]), "anyone-can-spend");
         assert!(!valid_payout_script(&[&[0u8, 21][..], &[1u8; 21][..]].concat()));
+    }
+
+    #[test]
+    fn selection_is_proportional_and_stays_within_the_budget() {
+        // everybody trusted: sum 40, budget 8 -> divide by 5, expected checks = 8
+        let ps = vec![0.02; 2000];
+        let sum: f64 = ps.iter().sum();
+        let scale = scale_for(sum, 8);
+        assert!((scale - 5.0).abs() < 1e-9);
+        assert!((ps.iter().map(|p| p / scale).sum::<f64>() - 8.0).abs() < 1e-9);
+        // a new gateway (0.5) is checked 25 times as often as a trusted one (0.02)
+        assert!((0.5f64 / 0.02 - 25.0).abs() < 1e-9);
+        // small pools: the budget is not the limit, probabilities stay as they are
+        assert_eq!(scale_for(1.0, 8), 1.0);
+        assert_eq!(scale_for(0.0, 0), 1.0);
     }
 
     #[test]

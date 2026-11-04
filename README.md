@@ -16,6 +16,10 @@ Status: release candidate `0.2.0-rc1` for the first mainnet test. The Rust daemo
 
 A binary, Noise-encrypted protocol for miner-built templates, non-custodial coinbase payouts and an on-chain accounting commitment. The protocol, the pool session (`[photon]`, off by default) and a gateway with a Stratum V1 front end for ASICs (`photond gateway`, see `gateway.example.toml`) are implemented and tested end to end on regtest in `src/photon/`; not yet tested with real ASIC firmware. See [`doc-elektron/guideline-photon-protocol.md`](doc-elektron/guideline-photon-protocol.md). The optional node patch `getattestationbatch` (`docker/node/patches/`, off by default) attests many coinbase candidates in one call, see [`doc-elektron/guideline-batch-attestation-rpc.md`](doc-elektron/guideline-batch-attestation-rpc.md).
 
+### What is a gateway
+
+A gateway is a small program (`photond gateway`) that a mining farm runs next to its own Elektron Net node. The ASICs connect to the gateway with normal Stratum V1; the gateway builds the block template with the node, has the node attest the coinbase, and talks to the pool over the encrypted Photon protocol. Because the farm's own node builds the block and submits a found block itself, the pool cannot censor transactions or hold back a block, and the block reward is split in the coinbase between all Photon miners, so the pool never holds their money. The pool only keeps the accounting, publishes the payout plan and checks the gateways with spot checks. Miners without their own node keep using the pool's normal Stratum port.
+
 ## Tests
 
 ```text

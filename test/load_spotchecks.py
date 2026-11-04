@@ -129,7 +129,7 @@ ramp_per_sec = 400
             timed = max(1, s["checkTimed"])
             print(f"  {N:>8} | {tips:>4} | {s['checksOk'] + s['checksFailed'] + s['checksInconclusive']:>5} total ({(s['checksOk'] + s['checksFailed'] + s['checksInconclusive']) / max(1, tips):.1f}) | {s['checkTotalUs'] / timed / 1000:.0f} / {s['checkNodeUs'] / timed / 1000:.0f} | {s['checkBytes'] / timed / 1e6:.2f} | "
                   f"{(c1[0] - c0[0]) / wall * 100:.0f} | {(c1[1] - c0[1]) / wall * 100:.0f} | n/a | {rss_max:.0f} | {s['sharesOk']} | {rep.get('dropped')}")
-            print(f"           ok {s['checksOk']} failed {s['checksFailed']} inconclusive {s['checksInconclusive']} skipped (budget) {s['checksSkipped']}, connected {rep.get('connected')}/{N}, announces {rep.get('announces')}, shares sent {rep.get('shares_sent')} acked {rep.get('shares_acked')} rejected {rep.get('shares_rejected')}, "
+            print(f"           ok {s['checksOk']} failed {s['checksFailed']} inconclusive {s['checksInconclusive']} skipped (budget) {s['checksSkipped']}, trust entries {s['trustEntries']}, sum of probabilities {s['sumP']:.1f}, connected {rep.get('connected')}/{N}, announces {rep.get('announces')}, shares sent {rep.get('shares_sent')} acked {rep.get('shares_acked')} rejected {rep.get('shares_rejected')}, "
                   f"template build {rep.get('template_build_ms_avg', 0):.0f} ms, {rep.get('tx_per_template_avg', 0):.0f} tx per template")
             h.check(f"{N} gateways: no spot check failed and nobody dropped", s["checksFailed"] == 0 and rep.get("dropped") == 0, str(s))
         finally:

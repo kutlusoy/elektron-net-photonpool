@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.5 (spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
+- **Version:** 0.6 (trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -242,9 +242,20 @@ Node CPU includes the load generator's own batch attestation calls (up to 4,000 
 
 Cost model: validating a block costs the node about 15 ms at 250 transactions, 36 to 53 ms at 500 to 1,000, and about 0.75 s at 11,000 (the full-block measurement of `getattestationbatch` in `guideline-daemon-core.md`; proposal validation is the same attestation work). With the default budget of 8 per tip and blocks every 60 s, full blocks cost the node about 6 s per minute (10 % of one core); a budget of 64 would need most of a core. The data transferred for a check is the transaction set (0.02 to 0.08 MB here, a few MB for full blocks) and the pool memory per connection is about 100 KB.
 
-What the budget means for security: with N gateways and a steady trust probability of 0.02 the chance that one gateway is checked in a given tip is about budget / (0.02 N), capped by its own probability. At 2,000 gateways and a budget of 8 that is far below one check per hour for an established gateway, so an attacker that behaved correctly for a long time is hard to catch; new connections (probability 0.5) are checked far more often until the budget is used, and a pool restart makes everyone new at once. The spot check therefore limits fraud to what a gateway earns before its first checks; it is not a continuous guarantee. Mitigations that are not implemented: sorting the selection by trust, remembering trust across reconnects per address, and checking shares instead of templates.
+What the budget means for security: with N gateways and a steady trust probability of 0.02 the chance that one gateway is checked in a given tip is about budget / (0.02 N), capped by its own probability. At 2,000 gateways and a budget of 8 that is far below one check per hour for an established gateway, so an attacker that behaved correctly for a long time is hard to catch; new connections (probability 0.5) are checked far more often until the budget is used, and a pool restart makes everyone new at once. The spot check therefore limits fraud to what a gateway earns before its first checks; it is not a continuous guarantee. Mitigations: the proportional selection and the remembered trust of section 14d; not implemented: checking shares instead of templates.
 
 Another limit found by the generator: the node's RPC body limit is 32 MB. A candidate with a 128-output plan is about 20 KB of JSON, so about 1,500 variants fit into one `getattestationbatch` call. The gateway and the load generator now split larger requests (`attest_all`).
+
+## 14d. Trust memory and spot check selection (v0.6)
+
+**Remembered trust.** The pool keeps a `TrustBook` (`src/photon/trustbook.rs`) with one entry per network address (`ip:<address>`) and per payout script (`script:<hex>`): passed and failed spot checks, time of the last failure, ban time. A connection uses all keys it knows and takes the highest check probability among them, so a reconnect, a new address with the same payout script, or a new script from a known address does not start from scratch. Entries are written to the ledger (table `photon_trust`) every 30 seconds and on shutdown, loaded at start, and dropped after 30 days without activity.
+
+- **Forgiveness:** one failure is forgiven per 24 hours without a new one.
+- **Ban:** three failures ban a payout script for one hour, also on other addresses and across restarts; after the ban a single further failure bans it again. An address is never banned (many gateways can sit behind one address, and a farm behind a NAT must not be locked out by one cheater); its failures only keep the check probability of everything behind it high (up to 1.0 after two failures). In a loopback test all gateways share one address, so all of them share one entry; with real addresses trust is per farm.
+
+**Selection.** Instead of first come, first served, the probability of each announce is its own trust probability divided by `max(1, sum of the probabilities of all connected gateways / max_checks_per_tip)`. The expected number of checks per tip is then the budget, and the share of the budget a gateway receives is proportional to its own probability: new or failed gateways are checked much more often than established ones (0.5 against 0.02 is 25 times), and an established gateway never drops to zero, which a strict "least trusted first" order would allow (a cheater would only have to behave until it is trusted). The hard cap `max_checks_per_tip` stays.
+
+Status: `/api/v1/summary` reports `photon.trustEntries` and `photon.sumP`. Tests: 8 unit tests of the book (shared keys, least trusted key decides, ban and re-ban, forgiveness, pruning, address without ban) and `test/step17_photon_session.py` (trust is remembered, the banned script is refused on reconnect and after a restart of the pool, the honest gateway reconnects).
 
 ## 15. Checklist
 

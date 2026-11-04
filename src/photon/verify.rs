@@ -108,7 +108,7 @@ pub fn check_share(a: &Announced, template_id: u32, item: &ShareItem, share_targ
 }
 
 /// Trust score of a gateway: how often its announced variants are validated by the node.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Trust {
     pub passes: u32,
     pub fails: u32,

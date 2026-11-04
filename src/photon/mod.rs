@@ -10,6 +10,7 @@ pub mod msg;
 pub mod noise;
 pub mod plan;
 pub mod service;
+pub mod trustbook;
 pub mod verify;
 pub mod wire;
 

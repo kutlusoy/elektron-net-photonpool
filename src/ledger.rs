@@ -49,7 +49,8 @@ pub fn init(conn: &Connection) -> Result<()> {
          CREATE TABLE IF NOT EXISTS credits(block_hash TEXT NOT NULL, account TEXT NOT NULL, amount INTEGER NOT NULL, status TEXT NOT NULL, PRIMARY KEY(block_hash, account));
          CREATE TABLE IF NOT EXISTS balance(account TEXT PRIMARY KEY, confirmed INTEGER NOT NULL DEFAULT 0, paid INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS payouts(id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, txid TEXT, status TEXT NOT NULL, total INTEGER NOT NULL);
-         CREATE TABLE IF NOT EXISTS payout_items(payout_id INTEGER NOT NULL, account TEXT NOT NULL, amount INTEGER NOT NULL);",
+         CREATE TABLE IF NOT EXISTS payout_items(payout_id INTEGER NOT NULL, account TEXT NOT NULL, amount INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS photon_trust(key TEXT PRIMARY KEY, passes INTEGER NOT NULL, fails INTEGER NOT NULL, last_fail INTEGER NOT NULL, banned_until INTEGER NOT NULL, updated INTEGER NOT NULL) WITHOUT ROWID;",
     )?;
     Ok(())
 }
@@ -81,6 +82,27 @@ pub fn add_shares(conn: &mut Connection, rows: &[ShareRow], pps: Option<(f64, i6
                 bal.execute(params![acc, amount])?;
             }
         }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Rows of the remembered gateway trust: (key, passes, fails, last_fail, banned_until, updated).
+pub type TrustRow = (String, i64, i64, i64, i64, i64);
+
+pub fn trust_load(conn: &Connection, since: i64) -> Result<Vec<TrustRow>> {
+    let mut stmt = conn.prepare("SELECT key, passes, fails, last_fail, banned_until, updated FROM photon_trust WHERE updated >= ?1")?;
+    let rows = stmt.query_map(params![since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+pub fn trust_save(conn: &mut Connection, rows: &[TrustRow], delete: &[String]) -> Result<()> {
+    let tx = conn.transaction()?;
+    for r in rows {
+        tx.execute("INSERT OR REPLACE INTO photon_trust(key, passes, fails, last_fail, banned_until, updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![r.0, r.1, r.2, r.3, r.4, r.5])?;
+    }
+    for k in delete {
+        tx.execute("DELETE FROM photon_trust WHERE key = ?1", params![k])?;
     }
     tx.commit()?;
     Ok(())

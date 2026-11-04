@@ -111,7 +111,11 @@ async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
             }
         });
     }
+    let photon = pool.photon.get().cloned();
     axum::serve(listener, api::router(pool)).with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await?;
+    if let Some(ph) = photon {
+        ph.flush_trust().await;
+    }
     Ok(())
 }
 

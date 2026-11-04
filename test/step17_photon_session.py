@@ -139,6 +139,30 @@ with Harness("step17", extra=["-acceptnonstdtxn=1"]) as h:
             n.rpc("generatetodescriptor", 1, "raw(51)")
             time.sleep(1.2)
         h.check("a gateway that keeps cheating is disconnected", cheat.poll() is not None)
+        s = summary()["photon"]
+        h.check("the pool remembers trust per address and per payout script", s["trustEntries"] >= 2, str(s))
+
+        # the ban survives a reconnect ...
+        again = subprocess.run([PHOTOND, "gateway", "--gateway-config", base + ".gw2.toml"], capture_output=True, text=True, timeout=60)
+        h.check("the banned gateway is refused when it reconnects", again.returncode != 0 and "banned" in again.stderr, again.stderr[-300:])
+
+        # ... and a restart of the pool (trust is written to the ledger on shutdown)
+        import signal
+        pool.send_signal(signal.SIGINT); pool.wait(timeout=30)
+        pool = subprocess.Popen([PHOTOND, "-c", base + ".toml", "run"], stdout=subprocess.DEVNULL, stderr=open(base + ".pool2.log", "w"))
+        for _ in range(200):
+            try:
+                if summary()["photon"].get("publicKey") and summary()["node"]["height"] > 0: break
+            except Exception: pass
+            time.sleep(0.2)
+        time.sleep(1.5)
+        h.check("remembered trust is loaded after a restart", summary()["photon"]["trustEntries"] >= 2, str(summary()["photon"]))
+        again = subprocess.run([PHOTOND, "gateway", "--gateway-config", base + ".gw2.toml"], capture_output=True, text=True, timeout=60)
+        h.check("the banned gateway is still refused after the restart", again.returncode != 0 and "banned" in again.stderr, again.stderr[-300:])
+        ok_gw = subprocess.Popen([PHOTOND, "gateway", "--gateway-config", base + ".gw3.toml"], stdout=subprocess.DEVNULL, stderr=open(base + ".gw3b.log", "w"))
+        gws.append(ok_gw)
+        time.sleep(4)
+        h.check("the honest gateway connects again and its trust is reused", ok_gw.poll() is None and summary()["photon"]["channels"] >= 1, str(summary()["photon"]))
     finally:
         for g in gws:
             if g.poll() is None: g.terminate()
