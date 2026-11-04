@@ -20,6 +20,8 @@ pointer rests on the title (or when the title is focused or tapped):
 | `url` | link to the artist page (https only) |
 | `license` | license code of your download, if the site gives one |
 
+The files must be readable by the pool (in Docker it runs as user 10001): `chmod 644 music/*` after copying them.
+
 ## Licensing
 
 Check the license of every track before you publish a pool page with it. Free tiers usually require a credit, and many
