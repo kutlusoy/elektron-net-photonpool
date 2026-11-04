@@ -157,7 +157,7 @@ The 105 million per year in 7.1 are only the "created" side, in the worst case (
 | Behaviour of the farm | Outputs of this farm in the set after one day (1,440 blocks) |
 |---|---|
 | never spends | 1,440 |
-| merges all its payouts once a day into one output | 1 (plus the 1,439 that were merged away: net 0 growth over the day) |
+| merges all its payouts once a day into one output | 1 after the merge (1,440 outputs were added during the day and 1,439 of them removed again by the merge) |
 | spends the payouts as they arrive, leaving a change output | about 1 at any time |
 
 If every miner consolidates about as fast as payouts arrive, the set does not grow with time. It then stays near **one output per active payout address**, plus the payouts of the last few blocks that are not merged yet. The growth is therefore bounded by the number of distinct payout addresses, not by the number of blocks.
