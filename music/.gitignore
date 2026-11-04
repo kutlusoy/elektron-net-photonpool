@@ -1,0 +1,7 @@
+# New audio files stay out of git by default (the tracks that are already committed stay tracked): most free music licenses allow using a track on your site,
+# but not passing the file on (a public repository would be passing it on). Copy them to the server by hand.
+*
+!.gitignore
+!README.md
+!playlist.example.json
+!playlist.json

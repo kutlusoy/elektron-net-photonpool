@@ -80,7 +80,7 @@ function demoSource() {
     miners() {
       return miners.map((m) => ({ name: m.name, proto: m.proto, hashrate: m.th * 1e12, diff: m.th * 1e12 * 10 / 4294967296, ok: m.ok, stale: m.stale, dup: m.dup + m.inv, seen: m.seen, unit: m.unit }));
     },
-    blocks() { return st.blocks.slice(0, 12); },
+    blocks(n) { return st.blocks.slice(0, n || 12); },
     events() { const out = st.ev.slice(evCursor); evCursor = st.ev.length; return out; },
   };
 }
@@ -108,7 +108,7 @@ function liveSource(base) {
 
 /* ---------- ui ---------- */
 
-const ui = { src: null, follow: true, minerSort: 'hashrate', minerFilter: '', minerLimit: 40, tty: $('#tty'), log: [] };
+const ui = { src: null, follow: true, minerFilter: '', minerLimit: 40, tty: $('#tty'), log: [] };
 
 function line(html) {
   const d = document.createElement('div');
@@ -125,10 +125,12 @@ function logEvent(e) {
 }
 const out = (html) => line(html);
 
+document.addEventListener('depthchange', () => { try { render(); } catch (_) { /* no data yet */ } });
 function render() {
   const s = ui.src.summary();
   if (!s) return;
   const age = Date.now() / 1000 - s.node.tipTime;
+  trackSeries(s);
   const efficiency = s.shares.total ? s.shares.ok : null;
   $('#statusline').innerHTML = [
     `<span>net <b>ELEKTRON</b></span>`,
@@ -149,7 +151,7 @@ function render() {
   ].join('\n');
   $('#pane-tip').innerHTML = [
     `${span('dim', 'height    ')}${span('hl', num(s.node.height))}`,
-    `${span('dim', 'hash      ')}${link(blockUrl(s.pool.explorerUrl, s.node.tip), short(s.node.tip, 10, 8), 'c1')}`,
+    `${span('dim', 'hash      ')}${link(blockUrl(s.pool.explorerUrl, s.node.tip), wide('tip') ? s.node.tip : short(s.node.tip, 10, 8), 'c1')}`,
     `${span('dim', 'age       ')}${hms(age)} ${bar(age / 60, 14, age > 75 ? 'warn' : 'c1')}`,
     `${span('dim', 'node link ')}${s.node.connected ? span('ok', 'connected') : span('err', 'DOWN')} ${esc(s.node.transport)} rtt ${s.node.rttMs.toFixed(1)}ms`,
     `${span('dim', 'tip>job   ')}p50 ${s.node.p50.toFixed(0)}ms  p95 ${s.node.p95.toFixed(0)}ms  ${span('dim', 'n=' + s.node.samples)}`,
@@ -164,39 +166,135 @@ function render() {
     `${span('dim', 'unit       ')}${span('dim', 'candidate / ntime / slice')}`,
   ].join('\n');
   renderMiners();
-  const blocks = ui.src.blocks();
-  $('#pane-blocks').innerHTML = [span('row-h', pad('HEIGHT', 9) + pad('AGE', 9) + pad('WORKER', 19) + 'STATE')]
+  const bw = wide('blocks');
+  const blocks = sortRows('blocks', bw ? ui.src.blocks(50) : ui.src.blocks(), { height: (b) => b.height, time: (b) => b.time, worker: (b) => b.worker, status: (b) => b.status }, 'height');
+  const bwk = colw(blocks.map((b) => b.worker), 6), bhk = colw(blocks.map((b) => b.hash || ''), 4);
+  $('#pane-blocks').innerHTML = [`<span class="row-h">${hdr('blocks', [['height', 'HEIGHT', 9], ['time', 'AGE', 9], ['worker', 'WORKER', bw ? bwk : 19, false, 1]], 'height')}${bw ? pad('HASH', bhk) : ''}${hdr('blocks', [['status', 'STATE', 8, false, 1]], 'height')}</span>`]
     .concat(blocks.map((b) => {
       const a = Date.now() / 1000 - b.time;
       const cls = b.status === 'found' ? 'ok' : b.status === 'maturing' ? 'c3' : 'dim';
-      return `${linkPad(b.url || blockUrl(s.pool.explorerUrl, b.hash), num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 9)}${pad(trunc(workerLabel(b.worker), 18), 19)}${span(cls, b.status)}`;
+      return `${linkPad(b.url || blockUrl(s.pool.explorerUrl, b.hash), num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 9)}${bw ? pad(b.worker, bwk) : pad(trunc(workerLabel(b.worker), 18), 19)}${bw ? pad(b.hash || '', bhk) : ''}${span(cls, b.status)}`;
     })).join('\n');
+  Extras.tick();
 }
 
+const MINER_KEYS = { name: (m) => m.name, proto: (m) => m.proto, hashrate: (m) => m.hashrate, diff: (m) => m.diff, ok: (m) => m.ok, stale: (m) => m.stale, dup: (m) => m.dup, seen: (m) => m.seen, unit: (m) => m.unit };
 function minerRows() {
   let rows = ui.src.miners();
   if (ui.minerFilter) rows = rows.filter((m) => (m.name + ' ' + m.proto).toLowerCase().includes(ui.minerFilter));
-  const key = { hashrate: (m) => -m.hashrate, name: (m) => m.name, shares: (m) => -m.ok, stale: (m) => -m.stale }[ui.minerSort];
-  return [...rows].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+  return sortRows('miners', rows, MINER_KEYS, 'hashrate');
 }
 function renderMiners() {
   const rows = minerRows();
-  const shown = rows.slice(0, ui.minerLimit);
-  $('#miners-hint').textContent = `${shown.length}/${rows.length} sort:${ui.minerSort}${ui.minerFilter ? ' grep:' + ui.minerFilter : ''}`;
-  $('#pane-miners').innerHTML = [span('row-h', pad('WORKER', 19) + pad('PROTO', 6) + lpad('HASHRATE', 12) + lpad('DIFF', 10) + lpad('OK', 8) + lpad('STALE', 7) + lpad('DUP', 6) + '  ' + pad('LAST', 6) + 'UNIT')]
+  const mw = wide('miners');
+  const shown = rows.slice(0, mw ? Math.max(ui.minerLimit, 200) : ui.minerLimit);
+  const mwk = colw(shown.map((m) => m.name), 6);
+  $('#miners-hint').textContent = `${shown.length}/${rows.length} sort:${sortOf('miners', 'hashrate').k}${sortOf('miners', 'hashrate').d > 0 ? '+' : '-'}${ui.minerFilter ? ' grep:' + ui.minerFilter : ''}`;
+  $('#pane-miners').innerHTML = [`<span class="row-h">${hdr('miners', [['name', 'WORKER', mw ? mwk : 19, false, 1], ['proto', 'PROTO', 6, false, 1], ['hashrate', 'HASHRATE', 12, true], ['diff', 'DIFF', 10, true], ['ok', 'OK', 8, true], ['stale', 'STALE', 7, true], ['dup', 'DUP', 6, true]], 'hashrate')}  ${hdr('miners', [['seen', 'LAST', 6, false, 1], ['unit', 'UNIT', 4, false, 1]], 'hashrate')}</span>`]
     .concat(shown.map((m) => {
       const stale = m.stale / Math.max(1, m.ok + m.stale);
       const seen = m.seen === 0 ? span('ok', 'now   ') : span(m.seen > 5 ? 'warn' : 'dim', pad(m.seen + 's', 6));
-      return `${pad(trunc(workerLabel(m.name), 18), 19)}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', m.unit)}`;
+      return `${mw ? pad(m.name, mwk) : pad(trunc(workerLabel(m.name), 18), 19)}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', m.unit)}`;
     })).join('\n');
 }
+
+
+/* ---------- live series and the extra panels of maximized panes ---------- */
+
+let lastTip = { h: null, t: 0 };
+function trackSeries(s) {
+  Series.seed('hr', s.hashrate.hist);
+  Series.push('hr', s.hashrate.now); Series.push('m1', s.hashrate.m1);
+  Series.push('sps', s.shares.perSec); Series.push('online', s.miners.online);
+  Series.push('p50', s.node.p50); Series.push('p95', s.node.p95);
+  Series.push('units', s.alloc.unitsPerSec); Series.push('epoch', s.alloc.epochUse * 100);
+  if (lastTip.h !== null && s.node.height !== lastTip.h && lastTip.t) Series.push('tipint', s.node.tipTime - lastTip.t, s.node.tipTime);
+  if (s.node.height !== lastTip.h) lastTip = { h: s.node.height, t: s.node.tipTime };
+}
+const card = Extras.card;
+const timeLine = (host, series, fmt, extra = {}) => Neon.line(host, { series, fmt, xfmt: agoLabel, ...extra });
+
+Extras.add('pool', (el) => {
+  const k = card(el, 'live numbers', 'wide'), hr = card(el, 'hashrate: live, 1 minute average (since this page was opened)', 'wide'), sh = card(el, 'share quality'), rt = card(el, 'shares per second'), on = card(el, 'miners online');
+  return () => {
+    const s = ui.src.summary(); if (!s) return;
+    Neon.kpis(k, [
+      { label: 'hashrate', value: s.hashrate.now, fmt: fmtHash }, { label: '1 min avg', value: s.hashrate.m1, fmt: fmtHash, color: 'c2' }, { label: '1 h avg', value: s.hashrate.h1, fmt: fmtHash, color: 'c2' },
+      { label: 'shares / s', value: s.shares.perSec, fmt: (v) => v.toFixed(1), color: 'c3' }, { label: 'valid', value: s.shares.ok * 100, fmt: (v) => v.toFixed(2) + '%', color: 'ok' },
+      { label: 'miners', value: s.miners.online, fmt: num, sub: `of ${num(s.miners.total)}` }]);
+    timeLine(hr, [{ name: 'hashrate', data: Series.get('hr'), color: 'c1' }, { name: '1 min avg', data: Series.get('m1'), color: 'c2' }], fmtHash);
+    Neon.donut(sh, [{ label: 'accepted', value: s.shares.ok, color: 'ok', text: pct(s.shares.ok) }, { label: 'stale', value: s.shares.stale, color: 'warn', text: pct(s.shares.stale) }, { label: 'duplicate', value: s.shares.dup, color: 'c3', text: pct(s.shares.dup) }, { label: 'invalid', value: s.shares.inv, color: 'err', text: pct(s.shares.inv) }], { big: pct(s.shares.ok), sub: 'valid' });
+    timeLine(rt, [{ name: 'shares/s', data: Series.get('sps'), color: 'c2' }], (v) => v.toFixed(1));
+    timeLine(on, [{ name: 'online', data: Series.get('online'), color: 'ok' }], num);
+  };
+});
+
+Extras.add('miners', (el) => {
+  const k = card(el, 'fleet', 'wide'), hist = card(el, 'hashrate distribution (workers per hashrate class)'), pr = card(el, 'protocols'), top = card(el, 'top 10 workers by hashrate'), bad = card(el, 'highest stale ratio');
+  return () => {
+    const all = ui.src.miners(); if (!all.length) return;
+    const hrs = all.map((m) => m.hashrate).sort((a, b) => a - b), total = hrs.reduce((a, b) => a + b, 0);
+    const top10 = hrs.slice(-10).reduce((a, b) => a + b, 0);
+    Neon.kpis(k, [{ label: 'workers', value: all.length, fmt: num }, { label: 'total', value: total, fmt: fmtHash, color: 'c2' }, { label: 'median', value: hrs[Math.floor(hrs.length / 2)], fmt: fmtHash, color: 'c2' },
+      { label: 'top 10 share', value: total ? top10 / total * 100 : 0, fmt: (v) => v.toFixed(1) + '%', color: 'c3' }, { label: 'largest', value: hrs[hrs.length - 1], fmt: fmtHash, color: 'c3' },
+      { label: 'idle (>120 s)', value: all.filter((m) => m.seen > 120).length, fmt: num, color: 'warn' }]);
+    const pos = hrs.filter((h) => h > 0), lo = Math.log10(pos[0] || 1), hi = Math.log10(pos[pos.length - 1] || 10), n = 12, step = (hi - lo || 1) / n;
+    const cnt = Array.from({ length: n }, () => 0); pos.forEach((h) => { cnt[Math.min(n - 1, Math.floor((Math.log10(h) - lo) / step))]++; });
+    Neon.columns(hist, cnt.map((c, i) => ({ key: i, label: fmtHash(10 ** (lo + i * step)).replace(/\.\d+/, ''), value: c, text: `${c} workers`, tip: `${fmtHash(10 ** (lo + i * step))} .. ${fmtHash(10 ** (lo + (i + 1) * step))}` })), {});
+    const cp = {}; all.forEach((m) => { cp[m.proto] = (cp[m.proto] || 0) + 1; });
+    Neon.donut(pr, Object.entries(cp).map(([p, c], i) => ({ label: p, value: c, color: p === 'V2' ? 'c2' : p === 'EDGE' ? 'c3' : 'c1', text: num(c) })), { big: num(all.length), sub: 'workers' });
+    Neon.bars(top, [...all].sort((a, b) => b.hashrate - a.hashrate).slice(0, 10).map((m) => ({ key: m.name, label: trunc(workerLabel(m.name), 22), value: m.hashrate, text: fmtHash(m.hashrate) })));
+    Neon.bars(bad, all.filter((m) => m.ok + m.stale > 20).map((m) => ({ key: m.name, label: trunc(workerLabel(m.name), 22), value: m.stale / (m.ok + m.stale), text: pct(m.stale / (m.ok + m.stale)), color: 'warn' })).sort((a, b) => b.value - a.value).slice(0, 10), { max: 0.05 });
+  };
+});
+
+Extras.add('tip', (el) => {
+  const k = card(el, 'chain and node link', 'wide'), lat = card(el, 'tip to job latency (ms)', 'wide'), iv = card(el, 'seconds between new tips (since this page was opened)', 'wide');
+  return () => {
+    const s = ui.src.summary(); if (!s) return;
+    Neon.kpis(k, [{ label: 'height', value: s.node.height, fmt: num }, { label: 'tip age', value: Date.now() / 1000 - s.node.tipTime, fmt: (v) => hms(v), color: 'c2' }, { label: 'latency p50', value: s.node.p50, fmt: (v) => v.toFixed(0) + ' ms', color: 'c3' },
+      { label: 'latency p95', value: s.node.p95, fmt: (v) => v.toFixed(0) + ' ms', color: 'c3' }, { label: 'rpc rtt', value: s.node.rttMs, fmt: (v) => v.toFixed(1) + ' ms', color: 'c2' }, { label: 'batch rpc', value: s.node.batchMs, fmt: (v) => v.toFixed(0) + ' ms', color: 'c2' }]);
+    timeLine(lat, [{ name: 'p50', data: Series.get('p50'), color: 'c1' }, { name: 'p95', data: Series.get('p95'), color: 'c3' }], (v) => v.toFixed(0));
+    const ti = Series.get('tipint');
+    if (ti.length) Neon.columns(iv, ti.slice(-40).map((p, i) => ({ key: p.x, label: '', value: p.y, text: Math.round(p.y) + ' s', tip: agoLabel(p.x) })), { color: 'c2' });
+    else iv.innerHTML = '<span class="dim">no new tip seen yet, waiting for the next block</span>';
+  };
+});
+
+Extras.add('alloc', (el) => {
+  const k = card(el, 'allocator', 'wide'), u = card(el, 'units per second'), e = card(el, 'epoch use (%)'), g = card(el, 'epoch use');
+  return () => {
+    const s = ui.src.summary(); if (!s) return;
+    Neon.kpis(k, [{ label: 'candidates', value: s.alloc.candidates, fmt: num }, { label: 'units / s', value: s.alloc.unitsPerSec, fmt: num, color: 'c2' }, { label: 'epoch use', value: s.alloc.epochUse * 100, fmt: (v) => v.toFixed(1) + '%', color: 'c3' },
+      { label: 'overlap flagged', value: s.alloc.overlap, fmt: num, color: s.alloc.overlap ? 'err' : 'ok' }]);
+    timeLine(u, [{ name: 'units/s', data: Series.get('units'), color: 'c2' }], num);
+    timeLine(e, [{ name: 'epoch use', data: Series.get('epoch'), color: 'c3' }], (v) => v.toFixed(1) + '%');
+    Neon.donut(g, [{ label: 'used', value: s.alloc.epochUse, color: s.alloc.epochUse > 0.9 ? 'warn' : 'c3', text: pct(s.alloc.epochUse) }, { label: 'free', value: Math.max(0, 1 - s.alloc.epochUse), color: 'c1', text: pct(1 - s.alloc.epochUse) }], { big: pct(s.alloc.epochUse), sub: 'of the epoch' });
+  };
+});
+
+Extras.add('blocks', (el) => {
+  const k = card(el, 'found blocks', 'wide'), gap = card(el, 'minutes between found blocks', 'wide'), st = card(el, 'status'), wk = card(el, 'blocks per worker');
+  return () => {
+    const b = ui.src.blocks(50); if (!b.length) { k.innerHTML = '<span class="dim">no block found yet</span>'; return; }
+    const t = b.map((x) => x.time).sort((a, c) => a - c), gaps = t.slice(1).map((x, i) => (x - t[i]) / 60);
+    Neon.kpis(k, [{ label: 'listed', value: b.length, fmt: num }, { label: 'last found', value: Date.now() / 1000 - t[t.length - 1], fmt: hms, color: 'c2' }, { label: 'avg gap', value: gaps.length ? gaps.reduce((a, c) => a + c, 0) / gaps.length : 0, fmt: (v) => v.toFixed(1) + ' min', color: 'c3' },
+      { label: 'maturing', value: b.filter((x) => x.status === 'maturing').length, fmt: num, color: 'c3' }]);
+    if (gaps.length) Neon.columns(gap, gaps.map((g, i) => ({ key: t[i + 1], label: '', value: g, text: g.toFixed(1) + ' min', tip: agoLabel(t[i + 1]) })), { color: 'c3' });
+    else gap.innerHTML = '<span class="dim">needs at least two blocks</span>';
+    const sc = {}; b.forEach((x) => { sc[x.status] = (sc[x.status] || 0) + 1; });
+    Neon.donut(st, Object.entries(sc).map(([n, c]) => ({ label: n, value: c, color: n === 'found' ? 'ok' : n === 'maturing' ? 'c3' : 'c1', text: num(c) })), { big: num(b.length), sub: 'blocks' });
+    const wc = {}; b.forEach((x) => { wc[x.worker] = (wc[x.worker] || 0) + 1; });
+    Neon.bars(wk, Object.entries(wc).sort((a, c) => c[1] - a[1]).slice(0, 10).map(([n, c]) => ({ key: n, label: trunc(workerLabel(n), 22), value: c, text: num(c) })));
+  };
+});
 
 /* ---------- console ---------- */
 
 const cmds = {
   help() {
     out(span('c1', 'commands'));
-    [['status', 'one-screen summary'], ['tip', 'chain tip and latency'], ['miners [n] [sort k] [grep s] [reset]', 'worker table, k = hashrate|name|shares|stale'],
+    [['status', 'one-screen summary'], ['tip', 'chain tip and latency'], ['miners [n] [sort k] [grep s] [reset]', 'worker table, k = hashrate|name|proto|diff|ok|stale|dup|seen|unit (or click a column header)'],
       ['blocks', 'recent blocks'], ['alloc', 'candidate and unit allocator'], ['log [n]', 'replay last n events'], ['watch', 'toggle log follow'],
       ['theme cyan|amber|green|magenta', 'colour scheme'], ['clear', 'clear console (Ctrl+L)'], ['about', 'what this is']]
       .forEach(([c, d]) => out(`  ${span('c3', pad(c, 38))}${span('dim', d)}`));
@@ -215,12 +313,12 @@ const cmds = {
   miners(a) {
     for (let i = 0; i < a.length; i++) {
       if (/^\d+$/.test(a[i])) ui.minerLimit = Math.min(1000, +a[i]);
-      else if (a[i] === 'sort' && a[i + 1]) { ui.minerSort = ['hashrate', 'name', 'shares', 'stale'].includes(a[i + 1]) ? a[i + 1] : ui.minerSort; i++; }
+      else if (a[i] === 'sort' && a[i + 1]) { const k = a[i + 1] === 'shares' ? 'ok' : a[i + 1]; if (MINER_KEYS[k]) { const s = sortOf('miners', 'hashrate'); s.k = k; s.d = ['name', 'proto', 'unit', 'seen'].includes(k) ? 1 : -1; } i++; }
       else if (a[i] === 'grep') { ui.minerFilter = (a[i + 1] || '').toLowerCase(); i++; }
-      else if (a[i] === 'reset') { ui.minerFilter = ''; ui.minerSort = 'hashrate'; ui.minerLimit = 40; }
+      else if (a[i] === 'reset') { ui.minerFilter = ''; delete SortS.miners; ui.minerLimit = 40; }
     }
     renderMiners();
-    out(span('dim', `miners pane: ${ui.minerLimit} rows, sort ${ui.minerSort}${ui.minerFilter ? ', grep ' + ui.minerFilter : ''}`));
+    out(span('dim', `miners pane: ${ui.minerLimit} rows, sort ${sortOf('miners', 'hashrate').k}${ui.minerFilter ? ', grep ' + ui.minerFilter : ''}`));
   },
   blocks() {
     const base = ui.src.summary().pool.explorerUrl;

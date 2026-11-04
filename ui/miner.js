@@ -47,6 +47,7 @@ function compress(values, n) {
   return Array.from({ length: n }, (_, i) => { const part = values.slice(Math.floor(i * size), Math.floor((i + 1) * size)); return part.reduce((a, b) => a + b, 0) / Math.max(1, part.length); });
 }
 
+document.addEventListener('depthchange', () => { try { render(); } catch (_) { /* no data yet */ } });
 function render() {
   const p = M.pool, a = M.acct;
   if (p) { $('#pool-name').textContent = p.name; document.title = 'MINER | ' + p.name; }
@@ -92,8 +93,9 @@ function render() {
     `${span('dim', 'shares 1h   ')}${esc(sh(a.shares1h))}`,
     `${span('dim', 'shares 24h  ')}${esc(sh(a.shares24h))}`,
   ].join('\n');
-  $('#pane-workers').innerHTML = [span('row-h', pad('WORKER', 16) + pad('MODE', 7) + lpad('HASHRATE', 12) + lpad('DIFF', 9) + lpad('OK', 8) + lpad('STALE', 7) + lpad('BAD', 5) + '  LAST')]
-    .concat(a.workerList.map((w) => `${pad(trunc(w.name, 15), 16)}${span('c2', pad(modeLabel[w.mode] || w.mode, 7))}${lpad(fmtHash(w.hashrate), 12)}${lpad(num(w.difficulty), 9)}${lpad(num(w.accepted), 8)}${span(w.stale > 0 ? 'warn' : 'dim', lpad(num(w.stale), 7))}${lpad(num(w.invalid), 5)}  ${w.seen < 120 ? span('ok', w.seen + 's') : span('dim', ago(Date.now() / 1000 - w.seen))}`))
+  const wwk = colw(a.workerList.map((w) => w.name), 6);
+  $('#pane-workers').innerHTML = [`<span class="row-h">${hdr('workers', [['name', 'WORKER', wide('workers') ? wwk : 16, false, 1], ['mode', 'MODE', 7, false, 1], ['hashrate', 'HASHRATE', 12, true], ['difficulty', 'DIFF', 9, true], ['accepted', 'OK', 8, true], ['stale', 'STALE', 7, true], ['invalid', 'BAD', 5, true]], 'hashrate')}  ${hdr('workers', [['seen', 'LAST', 6, false, 1]], 'hashrate')}</span>`]
+    .concat(sortRows('workers', a.workerList, { name: (w) => w.name, mode: (w) => w.mode, hashrate: (w) => w.hashrate, difficulty: (w) => w.difficulty, accepted: (w) => w.accepted, stale: (w) => w.stale, invalid: (w) => w.invalid, seen: (w) => w.seen }, 'hashrate').map((w) => `${wide('workers') ? pad(w.name, wwk) : pad(trunc(w.name, 15), 16)}${span('c2', pad(modeLabel[w.mode] || w.mode, 7))}${lpad(fmtHash(w.hashrate), 12)}${lpad(num(w.difficulty), 9)}${lpad(num(w.accepted), 8)}${span(w.stale > 0 ? 'warn' : 'dim', lpad(num(w.stale), 7))}${lpad(num(w.invalid), 5)}  ${w.seen < 120 ? span('ok', w.seen + 's') : span('dim', ago(Date.now() / 1000 - w.seen))}`))
     .concat(a.workerList.length ? [] : [span('dim', 'no worker is connected right now')]).join('\n');
   $('#pane-pend').innerHTML = [span('row-h', pad('BLOCK', 9) + pad('AMOUNT', 14) + 'STATE')]
     .concat(a.credits.map((c) => {
@@ -101,13 +103,67 @@ function render() {
       return `${linkPad(c.url, num(c.height), 9)}${pad(coins(c.amount), 14)}${st}`;
     }))
     .concat(a.credits.length ? [] : [span('dim', 'no PPLNS credits yet')]).join('\n');
-  $('#pane-pay').innerHTML = [span('row-h', pad('AGE', 7) + pad('AMOUNT', 14) + 'TX')]
-    .concat(a.payouts.map((x) => `${pad(ago(x.time), 7)}${pad(coins(x.amount), 14)}${link(txUrl(explorer, x.txid), short(x.txid || 'pending', 6, 4), 'c1')}`))
+  $('#pane-pay').innerHTML = [`<span class="row-h">${hdr('pay', [['time', 'AGE', 7], ['amount', 'AMOUNT', 14], ['txid', 'TX', 4, false, 1]], 'time')}</span>`]
+    .concat(sortRows('pay', a.payouts, { time: (x) => x.time, amount: (x) => x.amount, txid: (x) => x.txid || '' }, 'time').map((x) => `${pad(ago(x.time), 7)}${pad(coins(x.amount), 14)}${link(txUrl(explorer, x.txid), wide('pay') ? (x.txid || 'pending') : short(x.txid || 'pending', 6, 4), 'c1')}`))
     .concat(a.payouts.length ? [] : [span('dim', 'nothing paid out yet')]).join('\n');
   $('#pane-found').innerHTML = [span('row-h', pad('BLOCK', 9) + pad('AGE', 7) + pad('MODE', 7) + 'STATE')]
     .concat(a.blocksFound.map((b) => `${linkPad(b.url, num(b.height), 9)}${pad(ago(b.time), 7)}${span('c2', pad(modeLabel[b.mode] || b.mode, 7))}${b.status}`))
     .concat(a.blocksFound.length ? [] : [span('dim', 'no block found by this address')]).join('\n');
+  Extras.tick();
 }
+
+
+/* ---------- extra panels of maximized panes ---------- */
+
+const card = Extras.card;
+const wlabel = (w) => trunc(w.name, 24);
+
+Extras.add('hr', (el) => {
+  const k = card(el, 'your hashrate', 'wide'), c = card(el, 'hashrate, last 24 hours (10 minute steps)', 'wide'), sh = card(el, 'shares in 24 h by mode'), sh1 = card(el, 'shares in 1 h by mode');
+  return () => {
+    const a = M.acct; if (!a) return;
+    const h = a.history.map((x) => ({ x: x.time, y: x.hashrate })), ys = h.map((p) => p.y);
+    Neon.kpis(k, [{ label: 'now', value: a.hashrate, fmt: fmtHash }, { label: '24 h avg', value: ys.length ? ys.reduce((x, y) => x + y, 0) / ys.length : 0, fmt: fmtHash, color: 'c2' }, { label: '24 h peak', value: Math.max(0, ...ys), fmt: fmtHash, color: 'c3' }, { label: 'workers', value: a.workers, fmt: num, color: 'ok' }]);
+    Neon.line(c, { series: [{ name: 'hashrate', data: h, color: 'c1' }], fmt: fmtHash, xfmt: agoLabel });
+    for (const [host, m] of [[sh, a.shares24h], [sh1, a.shares1h]]) {
+      const parts = Object.entries(m).map(([n, v]) => ({ label: modeLabel[n] || n, value: v.count, text: num(v.count) }));
+      Neon.donut(host, parts.length ? parts : [{ label: 'none', value: 1, color: 'c1', text: '0' }], { big: num(parts.reduce((x, p) => x + p.value, 0)), sub: 'shares' });
+    }
+  };
+});
+
+Extras.add('workers', (el) => {
+  const h = card(el, 'hashrate per worker'), s = card(el, 'stale ratio per worker'), m = card(el, 'workers by mode');
+  return () => {
+    const a = M.acct; if (!a || !a.workerList.length) return;
+    Neon.bars(h, [...a.workerList].sort((x, y) => y.hashrate - x.hashrate).slice(0, 12).map((w) => ({ key: w.name, label: wlabel(w), value: w.hashrate, text: fmtHash(w.hashrate) })));
+    Neon.bars(s, a.workerList.filter((w) => w.accepted + w.stale > 0).map((w) => ({ key: w.name, label: wlabel(w), value: w.stale / (w.accepted + w.stale), text: pct(w.stale / (w.accepted + w.stale)), color: 'warn' })).slice(0, 12), { max: 0.05 });
+    const c = {}; a.workerList.forEach((w) => { c[w.mode] = (c[w.mode] || 0) + 1; });
+    Neon.donut(m, Object.entries(c).map(([n, v]) => ({ label: modeLabel[n] || n, value: v, text: num(v) })), { big: num(a.workerList.length), sub: 'workers' });
+  };
+});
+
+Extras.add('pay', (el) => {
+  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins), oldest to newest', 'wide');
+  return () => {
+    const a = M.acct; if (!a) return;
+    if (!a.payouts.length) { k.innerHTML = '<span class="dim">nothing paid out yet</span>'; return; }
+    const tot = a.payouts.reduce((x, y) => x + y.amount, 0);
+    Neon.kpis(k, [{ label: 'payouts', value: a.payouts.length, fmt: num }, { label: 'total', value: tot, fmt: coins, color: 'c2' }, { label: 'average', value: tot / a.payouts.length, fmt: coins, color: 'c2' }]);
+    Neon.columns(c, [...a.payouts].sort((x, y) => x.time - y.time).map((y) => ({ key: y.txid || y.time, label: '', value: y.amount, text: coins(y.amount), tip: agoLabel(y.time) })), { color: 'c2' });
+  };
+});
+
+Extras.add('found', (el) => {
+  const k = card(el, 'blocks found by this address', 'wide'), md = card(el, 'by mode'), st = card(el, 'by status');
+  return () => {
+    const a = M.acct; if (!a || !a.blocksFound.length) { k.innerHTML = '<span class="dim">no block found by this address</span>'; return; }
+    Neon.kpis(k, [{ label: 'blocks', value: a.blocksFound.length, fmt: num }]);
+    const by = (f) => { const o = {}; a.blocksFound.forEach((x) => { o[f(x)] = (o[f(x)] || 0) + 1; }); return Object.entries(o); };
+    Neon.donut(md, by((x) => x.mode).map(([n, v]) => ({ label: modeLabel[n] || n, value: v, text: num(v) })), { big: num(a.blocksFound.length), sub: 'blocks' });
+    Neon.donut(st, by((x) => x.status).map(([n, v]) => ({ label: n, value: v, text: num(v) })), { big: num(a.blocksFound.length), sub: 'blocks' });
+  };
+});
 
 /* ---------- console ---------- */
 

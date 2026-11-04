@@ -147,6 +147,7 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 |---|---|
 | `waiting for the node: node is still syncing` | The node is still in initial block download. Wait. |
 | `waiting for the node: reading cookie /node/.cookie: No such file or directory` | The node has not started (or not yet written its cookie). With Docker: `docker compose ps` and `docker compose logs node`; the pool keeps retrying every 5 s and starts by itself once the cookie exists. |
+| `waiting for the node: reading cookie /home/<user>/.elektron/.cookie ...` while the node runs in Docker | `photond.toml` is the bare-metal example. The compose file now overrides `rpc_url` and `auth` for the container (env `PHOTOND_NODE_RPC_URL`, `PHOTOND_NODE_AUTH`), so `git pull` and `docker compose up -d --build` is enough; or start from `docker/photond.docker.toml` (`rpc_url = "http://node:8332"`, `auth = "cookie:/node/.cookie"`): `cp docker/photond.docker.toml photond.toml`, set the payout addresses, `docker compose up -d --force-recreate photond`. |
 | `exec /usr/local/bin/entrypoint.sh: no such file or directory` (node container) | The script has Windows line endings (`\r`) after a checkout on Windows. The repository now contains a `.gitattributes` and the image strips them; rebuild with `docker compose build --no-cache node`. If it still happens: `git config core.autocrlf false`, delete the clone, clone again. |
 | `node refused the credentials` (HTTP 401) | Wrong `node.auth`. Check `rpcuser`/`rpcpassword` or the cookie path. |
 | `address ... has prefix X, expected be` | An address of another network in `payout_addresses` or as miner account. |
@@ -162,6 +163,10 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 - [ ] `photond check` shows all candidates valid.
 - [ ] Port `3333` reachable from the miners, `8081` only local.
 - [ ] Payout handling decided (see the payout modes guideline) before real miners connect.
+
+## 9a. Background music (optional)
+
+The web pages can play background music. Put audio files (mp3, ogg, opus, m4a, wav, flac) into the `music/` folder next to `docker-compose.yml` (for bare metal: set `music_dir` in `[api]`). The player in the title bar plays them as a looping playlist with play, pause, stop, previous, next and volume; the browser streams the files, so nothing is held in memory. Copy `music/playlist.example.json` to `music/playlist.json` to set titles and the credit that a license asks for; it is shown in a tooltip on the track title. Audio files and `playlist.json` are ignored by git on purpose, because most free licenses allow using a track on your site but not passing the file on: copy them to the server yourself. See [`music/README.md`](music/README.md).
 
 ## 10. Standalone or complete Docker stack
 

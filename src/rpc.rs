@@ -36,7 +36,13 @@ impl NodeRpc {
 
     fn header(auth: &str, cookie: Option<&str>) -> Result<String> {
         let creds = match (cookie, auth.strip_prefix("env:")) {
-            (Some(path), _) => std::fs::read_to_string(path).with_context(|| format!("reading cookie {path} (the node writes it when it starts: is the node running? with Docker: docker compose logs node)"))?.trim().to_string(),
+            (Some(path), _) => std::fs::read_to_string(path).with_context(|| {
+                let mut hint = format!("reading cookie {path} (the node writes it when it starts: is the node running? with Docker: docker compose logs node)");
+                if std::path::Path::new("/.dockerenv").exists() && !path.starts_with("/node/") {
+                    hint.push_str("; inside the Docker setup the cookie is /node/.cookie and rpc_url is http://node:8332 - use docker/photond.docker.toml as photond.toml, not photond.example.toml");
+                }
+                hint
+            })?.trim().to_string(),
             (None, Some(var)) => std::env::var(var).with_context(|| format!("environment variable {var} is not set"))?,
             (None, None) => auth.to_string(),
         };

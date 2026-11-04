@@ -1,5 +1,7 @@
 # photond configuration for a bare-metal install.
 # Copy to photond.toml and adjust: cp photond.example.toml photond.toml
+# This file is for the installation WITHOUT Docker (node on the same host). With Docker use docker/photond.docker.toml instead:
+# there the node is reachable as http://node:8332 and its cookie is /node/.cookie.
 #
 # Every option is listed with its default and the values it accepts ("Options"). Values here are the defaults unless a line says otherwise.
 # Apply a change with `systemctl restart photond`. Check a file without starting the pool: `photond -c photond.toml check`.
@@ -168,6 +170,9 @@ keep_days = 14
 listen = "127.0.0.1:8081"
 # Folder with the web UI files. Options: directory path. Default "ui".
 ui_dir = "ui"
+# Folder with audio files for the optional background music of the web pages (player in the title bar, see music/README.md).
+# Options: directory path; "" uses "music" inside ui_dir. Default "".
+music_dir = ""
 # Optional: base URL of a mempool-style block explorer. Found blocks and the chain tip link to <explorer_url>/block/<hash> in the web UI.
 # Options: "http://..." or "https://..."; "" disables links. Default "".
 explorer_url = "https://mempool.elektron-net.org"

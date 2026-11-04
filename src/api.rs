@@ -20,6 +20,7 @@ struct Limit {
 
 pub fn router(pool: Arc<Pool>) -> Router {
     let ui = pool.cfg.api.ui_dir.clone();
+    let music = crate::music::dir(&pool.cfg.api.music_dir, &ui);
     Router::new()
         .route("/api/v1/summary", get(summary))
         .route("/api/v1/miners", get(miners))
@@ -27,6 +28,8 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/api/v1/events", get(events))
         .route("/api/v1/ledger", get(ledger_view))
         .route("/api/v1/account/:address", get(account))
+        .route("/music/playlist.json", get(|State(p): State<Arc<Pool>>| crate::music::playlist_response(crate::music::dir(&p.cfg.api.music_dir, &p.cfg.api.ui_dir))))
+        .nest_service("/music", crate::music::files(music))
         .fallback_service(ServeDir::new(ui))
         .with_state(pool)
 }

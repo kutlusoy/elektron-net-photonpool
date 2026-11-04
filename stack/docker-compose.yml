@@ -36,6 +36,7 @@ services:
       - "127.0.0.1:8082:8082"          # public pool page, local only (Caddy is the public entry)
     volumes:
       - ./photond.toml:/config/photond.toml:ro
+      - ../music:/app/ui/music:ro      # optional background music, see ../music/README.md
       - ./data/node:/node:ro           # RPC cookie of the node
       - ./data/photon:/data            # ledger database
 

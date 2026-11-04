@@ -4,6 +4,7 @@ mod api;
 mod config;
 mod diff;
 mod ledger;
+mod music;
 mod photon;
 mod pool;
 mod public;

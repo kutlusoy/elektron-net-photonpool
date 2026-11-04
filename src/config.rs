@@ -243,11 +243,14 @@ pub struct ApiCfg {
     /// Base URL of a mempool-style block explorer, used to link found blocks. Empty disables links.
     #[serde(default)]
     pub explorer_url: String,
+    /// Folder with audio files for the optional background music of the web pages. Empty: "music" inside ui_dir.
+    #[serde(default)]
+    pub music_dir: String,
 }
 
 impl Default for ApiCfg {
     fn default() -> Self {
-        Self { listen: d_listen(), ui_dir: d_ui(), explorer_url: String::new() }
+        Self { listen: d_listen(), ui_dir: d_ui(), explorer_url: String::new(), music_dir: String::new() }
     }
 }
 
@@ -345,6 +348,9 @@ impl Config {
 
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let mut cfg: Config = toml::from_str(&std::fs::read_to_string(path)?)?;
+        // The Docker setup knows where its node is; these override a config copied from the bare-metal example.
+        if let Ok(v) = std::env::var("PHOTOND_NODE_RPC_URL") { if !v.is_empty() { cfg.node.rpc_url = v; } }
+        if let Ok(v) = std::env::var("PHOTOND_NODE_AUTH") { if !v.is_empty() { cfg.node.auth = v; } }
         if cfg.pool.payout_addresses.is_empty() && !(cfg.payout.wallet_addresses > 0 && !cfg.payout.wallet.is_empty()) {
             bail!("set pool.payout_addresses, or payout.wallet together with payout.wallet_addresses");
         }
