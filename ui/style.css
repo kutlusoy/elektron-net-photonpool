@@ -268,3 +268,13 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .nks { font-size: 10px; color: var(--dim); min-height: 12px; }
 @media (prefers-reduced-motion: reduce) { .nline, .narea, .ncard, .card::after, .nring, .pane.front .extra { animation: none; stroke-dashoffset: 0; opacity: 1; } .nfill, .nbar, .ndseg { transition: none; } }
 @media (max-width: 720px) { .extra { display: none !important; } }
+
+/* Background music controls in the title bar (music.js) */
+.music { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--line); }
+.music.on { border-color: var(--c1); box-shadow: 0 0 10px color-mix(in srgb, var(--c1) 35%, transparent); }
+.mbtn { font: inherit; font-size: 11px; line-height: 1; padding: 3px 6px; color: var(--c1); background: none; border: 1px solid transparent; cursor: pointer; }
+.mbtn:hover, .mbtn:focus-visible { border-color: var(--c1); outline: none; text-shadow: 0 0 8px var(--glow); }
+.meq { width: 40px; height: 14px; }
+.mvol { width: 70px; accent-color: var(--c1); cursor: pointer; }
+.mtime { font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) { .mtime, .meq { display: none; } .mvol { width: 52px; } }
