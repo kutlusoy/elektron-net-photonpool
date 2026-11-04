@@ -38,5 +38,7 @@ Review and operation
 
 - Gateway: every unit of work gets all 16 version bits (5.5 times less Stratum traffic to the ASICs with a 200-output coinbase: 94 instead of 518 Mbit/s for 1,000 ASICs of 200 TH/s, measured with simulated ASICs), and the number of coinbase variants follows the hash rate of the attached ASICs automatically (`max_variants`).
 
+- Protocol guideline: section 7.2 explains UTXO set growth (created minus spent outputs), when it shrinks (merging payouts), what the plan does to it and what operators can monitor.
+
 Known limits
 - No real ASIC hardware test yet (first one: Bitaxe, see `doc-elektron/guideline-release-and-bitaxe-test.md`), Stratum V2 not implemented, no mainnet-scale benchmark, Docker images not yet built in CI.

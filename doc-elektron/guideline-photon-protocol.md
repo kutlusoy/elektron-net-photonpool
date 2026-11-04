@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.13 (full 16-bit version roll for ASICs, automatic variant count, measured Stratum traffic; everybody is paid, no minimum, parts per billion, turn-taking above the output limit, capacity limits; prior art, placement of the commitment; automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
+- **Version:** 0.14 (UTXO growth explained; full 16-bit version roll for ASICs, automatic variant count, measured Stratum traffic; everybody is paid, no minimum, parts per billion, turn-taking above the output limit, capacity limits; prior art, placement of the commitment; automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -121,7 +121,7 @@ Sizes (60-second blocks, 525,600 blocks per year, pruning window 197,280 blocks 
 - **If it were in the header:** 80 B would become 116 B (36 B: 32 B root plus the 4 B tag), a factor of **1.45** (1.40 without the tag). The header chain, which is never pruned, would grow from 42 MB to 61 MB per year, 19 MB more every year, forever. That is why the body is the better place even apart from consensus.
 - **Pruning:** a pruned node deletes the block bodies, and with them the commitment, after 137 days. That is much longer than anything the commitment is needed for: a miner compares the root with the pool's `EpochCommit` and its own proof when the block is found and paid (maturity is 100 blocks, about 100 minutes). Whoever wants to prove a credit later keeps a receipt (the coinbase transaction, its merkle branch to the header, and the proof of its leaf; a few hundred bytes), because from the header chain alone the commitment cannot be reconstructed after pruning; unpruned nodes and block explorers keep it.
 - **UTXO set and attestation:** the commitment is an `OP_RETURN` output. It is unspendable, never enters the UTXO set and is not part of the attested set. It costs block space only.
-- **The real storage cost is the payout outputs**, not the commitment. Everybody is paid, so a block carries up to `N_max` (200) spendable payout outputs: 4 to 6 KB per block, up to 105 million new outputs per year in the worst case (all 200 slots used in every block), about 1.2 GB of block data in a pruned node (197,280 blocks), and the same number of entries in the UTXO set that every node holds and the attestation covers. This is the accepted price of paying everybody on chain without holding anything back (decision of the project). It is bounded by `N_max`, it grows only with the number of distinct payout addresses, and miners can keep it low by using one address for a whole farm and by spending (consolidating) their payouts. No minimum amount exists to hold it back.
+- **The real storage cost is the payout outputs**, not the commitment. Everybody is paid, so a block carries up to `N_max` (200) spendable payout outputs: 4 to 6 KB per block, up to 105 million new outputs per year in the worst case (all 200 slots used in every block), about 1.2 GB of block data in a pruned node (197,280 blocks), and the same number of entries in the UTXO set that every node holds and the attestation covers. This is the accepted price of paying everybody on chain without holding anything back (decision of the project); section 7.2 explains how the set grows and shrinks. It is bounded by `N_max`, it grows only with the number of distinct payout addresses, and miners can keep it low by using one address for a whole farm and by spending (consolidating) their payouts. No minimum amount exists to hold it back.
 
 ### 6.3 Capacity: what limits the number of outputs
 
@@ -137,6 +137,41 @@ Measured or read from the sources, 60-second blocks, regtest node with the Photo
 | Stratum traffic to the ASICs | every job carries the whole coinbase (13,033 B with 200 outputs against about 700 B with one). With the 12 version bits per unit that the pool-style 16 slices leave to the miner, an ASIC needs a new job after 2^44 hashes. **Measured** with 1,000 simulated ASICs of 200 TH/s each (200 PH/s, `test/measure_stratum_traffic.py`, the hash rate is a test knob, no hardware): slices 4.97 jobs/s per ASIC (the 200 ms job interval floor caps it; unlimited it would be about 14), 64.7 KB/s per ASIC, **64.7 MB/s = 518 Mbit/s** in total. | **fixed in the gateway:** every unit of work gets all 16 BIP 320 version bits (`full_version_roll`, default). 0.90 jobs/s, 11.7 KB/s per ASIC, **11.7 MB/s = 94 Mbit/s**, 5.5 times less (16 times less without the floor). The ASIC negotiates the mask `1fffe000`. |
 | Work space and variants | one variant offers 2^32 x 2^16 x 60 = 1.65e16 hashes per epoch, so the farm needs about `1.5 x hash rate x 60 s / 1.65e16` variants (16 variants cover 4.5 PH/s, 200 PH/s need about 1,100) | **automatic:** the gateway adds up the hash rate of its ASICs, raises the number of variants of a template (between `variants` and `max_variants`, default 16 and 2,048) and rebuilds the template for the same tip when ASICs join later (no clean job). It warns if the work space of a template is used up. At 1,066 variants the node attests in about 3.6 s per tip (3.4 ms per variant at 200 outputs) and the announce is about 7 MB per tip. |
 | UTXO set and block data | see 7.1 | accepted |
+
+### 7.2 UTXO set growth
+
+**What the number is.** The UTXO set is the set of all outputs that exist and have not been spent. Every block changes it in two ways: it **adds** the spendable outputs it creates (here: the payout outputs of the coinbase) and it **removes** the outputs that its transactions spend. The size after a block is
+
+```text
+size(h) = size(h-1) + outputs created in h - outputs spent in h
+```
+
+The 105 million per year in 7.1 are only the "created" side, in the worst case (200 payout outputs in every block, 525,600 blocks per year). Whether the set grows by that much depends on the "spent" side, and the pool does not control it.
+
+**It can shrink.** Spending several outputs in one transaction that creates fewer outputs removes entries. A miner who merges 50 small payouts into one output removes 50 and adds 1, a net change of -49. If more outputs are merged or spent than new payouts arrive, the set gets smaller overall. This is the normal way a UTXO set shrinks, and it is the reason to consolidate.
+
+**It does not shrink by itself.** An output that nobody spends stays in the set forever; maturity (100 blocks, about 100 minutes) only delays when it can be spent. Pruning does not help either: it deletes old block data after 197,280 blocks (137 days), not the UTXO set. Only spending shrinks it, and every merge costs the miner a fee, so it happens only if miners choose to do it.
+
+**Worked example.** A farm with one payout address is in the plan of every block (it is among the largest credits) and receives one output per block.
+
+| Behaviour of the farm | Outputs of this farm in the set after one day (1,440 blocks) |
+|---|---|
+| never spends | 1,440 |
+| merges all its payouts once a day into one output | 1 (plus the 1,439 that were merged away: net 0 growth over the day) |
+| spends the payouts as they arrive, leaving a change output | about 1 at any time |
+
+If every miner consolidates about as fast as payouts arrive, the set does not grow with time. It then stays near **one output per active payout address**, plus the payouts of the last few blocks that are not merged yet. The growth is therefore bounded by the number of distinct payout addresses, not by the number of blocks.
+
+**What the plan does to the number of outputs.** Payouts to the same script are separate outputs (one per block and script), so one address per farm creates far fewer outputs than one address per machine, and a farm with several addresses (several channels of a gateway) creates one set of outputs per address. For credits beyond `N_max` the turn-taking of 6.1 pays a small miner one output per cycle instead of one per block: with 22 groups that is 22 times fewer outputs for the same sum.
+
+**Cost of a large set (not measured here).** Every node has to keep the set (chainstate on disk and the cache in memory); a rough figure is on the order of 100 bytes per entry, which would put the worst case at around 10 GB of additional chainstate per year if nothing were ever spent. The attestation is an incremental accumulator over the set, so each block costs time in proportion to the outputs it creates and spends, not to the size of the set; the size matters for disk, memory and the time to sync, not for the per-block attestation.
+
+**What we can and cannot do.**
+
+- We cannot make miners consolidate. We can tell them to: use one address per farm, merge payouts from time to time (preferably when fees are low), and do not leave many small payouts unspent.
+- `N_max` caps the creation side at 200 per block. Lowering it lowers the worst case but, for more credits than slots, makes the cycles longer.
+- A pool that wants a hard growth bound would have to pay in larger, rarer amounts (custody, a different design); the project has decided to pay everybody on chain without holding anything back, which accepts this growth.
+- To see what really happens, an operator can count the outputs created by the plan per day (`N_max` times blocks found by gateways) and compare with the growth of the node's UTXO set (`gettxoutsetinfo`); the first is an upper bound of the pool's contribution, the second includes everything on the chain.
 
 ## 8. Search space without extranonce limits
 
