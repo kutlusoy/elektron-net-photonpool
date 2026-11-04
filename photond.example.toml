@@ -113,3 +113,18 @@ ui_dir = "ui"
 # Optional: base URL of a mempool-style block explorer. Found blocks and the chain tip
 # link to <explorer_url>/block/<hash> in the web UI. Leave empty to disable links.
 explorer_url = "https://mempool.elektron-net.org"
+
+[photon]
+# Photon protocol for gateways with their own node (non-custodial coinbase payouts, see
+# doc-elektron/guideline-photon-protocol.md). Off by default.
+enabled = false
+listen = "0.0.0.0:3340"
+# Noise static key (created on first start, owner-only permissions). Gateways pin the public key shown in the log and in /api/v1/summary.
+key_file = "photon.key"
+# Fee output of the coinbase plan (default: the first pool payout address).
+# fee_address = "be1q..."
+fee_pct = 1.0
+max_outputs = 128
+# Smallest payout part in parts per million of the block reward; smaller credits carry over.
+min_ppm = 100
+window_factor = 2.0

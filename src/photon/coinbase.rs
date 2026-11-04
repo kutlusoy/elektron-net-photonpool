@@ -101,6 +101,18 @@ pub fn parse(raw: &[u8]) -> Result<ParsedCoinbase> {
     Ok(ParsedCoinbase { script_sig, outputs, locktime })
 }
 
+/// Witness serialisation of a non-witness coinbase (marker, flag and the 32-byte zero witness reserved value).
+pub fn to_witness(nowit: &[u8]) -> Vec<u8> {
+    let mut w = Vec::with_capacity(nowit.len() + 40);
+    w.extend_from_slice(&nowit[..4]);
+    w.extend_from_slice(&[0x00, 0x01]);
+    w.extend_from_slice(&nowit[4..nowit.len() - 4]);
+    w.extend_from_slice(&[0x01, 0x20]);
+    w.extend_from_slice(&[0u8; 32]);
+    w.extend_from_slice(&nowit[nowit.len() - 4..]);
+    w
+}
+
 pub fn scriptnum(mut n: u64) -> Vec<u8> {
     let mut v = vec![];
     while n > 0 {
@@ -235,6 +247,13 @@ mod tests {
         let cb = make(&p, 1_234_567, |_| {});
         assert_eq!(cb.outputs.len(), 4, "one payout, attestation, witness commitment, commitment");
         check_announced(&p, &cb, 2_000_000).unwrap();
+    }
+
+    #[test]
+    fn witness_serialisation_matches_the_tx_builder() {
+        let outs = [TxOutput { value: 5, script: vec![0x51] }];
+        let cb = build_coinbase(&[0x02, 0xe9, 0x03], 1001, &outs);
+        assert_eq!(to_witness(&cb.nowit), cb.wit);
     }
 
     #[test]

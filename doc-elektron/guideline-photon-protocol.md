@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.2 (core implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier; gateway and pool session not yet)
+- **Version:** 0.3 (implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session and a gateway with a CPU miner; Stratum front end for ASICs not yet)
 - **Date:** November 3, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
@@ -200,15 +200,29 @@ Code: `src/photon/` (`wire.rs`, `msg.rs`, `noise.rs`, `merkle.rs`, `plan.rs`, `c
 - **Coinbase:** payouts in plan order (value = floor(reward * ppm / 1e6)), fee output with the remainder (omitted when 0), attestation, witness commitment, `OP_RETURN "PHOT" || root`. The checker (`check_announced`) verifies layout, values, locktime, BIP 34 height, the shape of the attestation and witness commitment outputs and a reward bound. It cannot verify the attestation digest itself; that is the node's spot check (`Trust`: probability 0.5 decaying to 0.02 with clean checks, multiplied by 4 per failure, ban after 3 failures).
 - **Measured end to end** (`step16`): 4 extranonce variants of a 40-miner plan are attested in one node call, accepted by the Rust checker and by the node's validator, one block is accepted by `submitblock` and pays exactly `floor(reward * ppm / 1e6)` per miner with the root on chain.
 
+## 14b. Pool session and gateway (v0.3)
+
+Pool: `[photon] enabled = true` in `photond.toml` (see `photond.example.toml`). The Noise key is created in `photon.key` on first start (owner-only); the public key is logged and shown in `/api/v1/summary` (`photon.publicKey`) and is what gateways pin.
+
+- **Plans:** on every new tip `h` the pool derives the plan for `h+2` from the ledger window of Photon shares (`MODE_PHOTON`, window = `window_factor` x network difficulty) and keeps the plan for `h+1` that it published one block earlier; at startup or after a reorg it derives the missing one late. Both are pushed to every connection (`NewTip`, `PayoutPlan`, `EpochCommit`). `GetProof` returns a Merkle proof for a script; the reference gateway checks its own credit against the committed root.
+- **Channels:** `OpenChannel` accepts witness v0/v1 payout scripts only. The share target is the requested one clamped to the pool limits and then adjusted by vardiff (one share per `share_secs`).
+- **Announces:** `Announced::new` validates every variant against the plan of its height (layout, values, BIP 34 height, locktime, reward bound = subsidy plus `max_reward_over_subsidy_pct`); curtime must be within two hours of the pool's clock. Chunks of one template must agree and not overlap.
+- **Shares:** header rebuilt from the announced coinbase and branch; share target of the channel, network target flags a block; duplicates are filtered per connection and pool-wide by header hash. Shares are credited to the account `hex(payout script)` in the Photon window.
+- **Spot check:** with the probability of the gateway's `Trust` score (0.5 decaying to 0.02) the pool sends `GetTransactions` for a random variant of an announce, assembles the block (zero nonce) and asks the node for `getblocktemplate mode=proposal`, which validates the attestation. While a check runs, shares of that variant are held; they are credited on a pass and dropped on a failure. A failure lowers the trust, three failures end the session. `duplicate` (the node already has this exact block) counts as a pass; `inconclusive-*` (a new tip arrived during the check) is neither pass nor failure.
+- **Gateway:** `photond gateway --gateway-config gateway.toml` (fields in `src/photon/gateway.rs`, `GatewayCfg`). It needs the patched node (`getattestationbatch`). It refuses plans whose fee terms differ from its configuration, builds `variants` coinbases per template through the node, announces them in frames under 48 KB, answers spot checks, submits found blocks to its own node and reports them. `software_miner = true` is a CPU miner for tests and regtest.
+- **Test:** `test/step17_photon_session.py` (regtest, two nodes' worth of roles on one node): an honest gateway mines six blocks that pay the miner directly in the coinbase, carry the commitment and a proof the gateway verifies; spot checks of an honest gateway pass; a gateway that corrupts the attestation is caught by the spot check and disconnected. Passed three times in a row.
+
+Limits of this version: Photon channels form their own window, legacy Stratum miners are not part of the plan (open question 4); a cheater is only caught when a check hits one of its variants and does not finish during a tip change; shares credited before a failed check are not clawed back; there is no Stratum front end yet, so ASICs cannot attach to the gateway.
+
 ## 15. Checklist
 
 - [x] Batch attestation RPC as a node patch, equivalence against the oracle.
 - [x] Coinbase with plan-style outputs, commitment and extranonce accepted by an unmodified validating node on regtest (`test/step14_batch_attestation.py`).
 - [x] Message definitions and first test vectors frozen (`msg.rs`, `merkle.rs`).
 - [x] Plan derivation specified and implemented deterministically (rules v1).
-- [ ] Pool session: listener, channel state, plan publication from the ledger, `TemplateAnnounce` handling, spot-check calls to the node.
-- [ ] Spot check cost and adaptive probability measured.
-- [ ] Gateway with local Stratum V1 for ASICs.
+- [x] Pool session: listener, channel state, plan publication from the ledger, `TemplateAnnounce` handling, spot-check calls to the node (`step17`).
+- [ ] Spot check cost and adaptive probability measured under load.
+- [x] Gateway core with CPU miner; [ ] gateway with local Stratum V1 for ASICs.
 - [ ] Independent review of the Noise handshake and the key certification.
 
 ## 16. Open Questions

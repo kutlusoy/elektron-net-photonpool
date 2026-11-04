@@ -1,0 +1,705 @@
+//! Pool side of the Photon protocol: listener, plan publication, channels, announces, shares and attestation spot checks.
+use super::coinbase::to_witness;
+use super::merkle::{self, AccountingTree};
+use super::msg::*;
+use super::noise::{self, Keypair, NoiseConn};
+use super::plan::{derive_full, Rules};
+use super::verify::{check_share, Announced, Seen, Trust, Verdict, MAX_NTIME_DELTA, VERSION_MASK};
+use super::PROTOCOL_VERSION;
+use crate::accounting::minute_now;
+use crate::config::PhotonCfg;
+use crate::diff::{difficulty_from_target, target_from_difficulty};
+use crate::ledger;
+use crate::pool::{Epoch, Pool};
+use crate::tx::put_varint;
+use anyhow::{anyhow, bail, Context, Result};
+use serde_json::json;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::hash::{BuildHasher, Hasher};
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{watch, Semaphore};
+
+/// Credits of the plan window are expressed in this many units (the sum over all accounts).
+const CREDIT_SCALE: i64 = 1_000_000_000_000;
+const MAX_TEMPLATES: usize = 16;
+const CHECK_TIMEOUT: Duration = Duration::from_secs(20);
+const MAX_STRIKES: u32 = 5;
+
+pub mod code {
+    pub const NOT_READY: u16 = 1;
+    pub const BAD_SCRIPT: u16 = 2;
+    pub const TOO_MANY_CHANNELS: u16 = 3;
+    pub const STALE: u16 = 4;
+    pub const NO_PLAN: u16 = 5;
+    pub const BAD_ANNOUNCE: u16 = 6;
+    pub const UNKNOWN_CHANNEL: u16 = 7;
+    pub const NOT_FOUND: u16 = 8;
+    pub const CHECK_FAILED: u16 = 20;
+    pub const BANNED: u16 = 21;
+    pub const PROTOCOL: u16 = 22;
+}
+
+pub struct PlanEntry {
+    pub plan: PayoutPlan,
+    pub tree: Arc<AccountingTree>,
+}
+
+/// Everything a session needs about the current tip: plans for the block being mined and the next one.
+pub struct PlanBook {
+    pub epoch_id: u64,
+    pub tip: [u8; 32],
+    pub tip_hex: String,
+    pub tip_height: u32,
+    pub plans: BTreeMap<u32, Arc<PlanEntry>>,
+    pub max_reward: u64,
+}
+
+impl PlanBook {
+    pub fn height(&self) -> u32 {
+        self.tip_height + 1
+    }
+}
+
+#[derive(Default)]
+pub struct PhotonStats {
+    pub connections: AtomicU64,
+    pub channels: AtomicU64,
+    pub accepted: AtomicU64,
+    pub rejected: AtomicU64,
+    pub announces: AtomicU64,
+    pub checks_ok: AtomicU64,
+    pub checks_failed: AtomicU64,
+    pub checks_inconclusive: AtomicU64,
+    pub blocks: AtomicU64,
+}
+
+pub struct PhotonService {
+    pub pool: Arc<Pool>,
+    pub cfg: PhotonCfg,
+    key: Keypair,
+    pub book: watch::Sender<Arc<PlanBook>>,
+    pub stats: PhotonStats,
+    rules: Rules,
+    seen: Mutex<HashSet<[u8; 32]>>,
+    recent: Mutex<VecDeque<Arc<PlanEntry>>>,
+}
+
+fn rand64() -> u64 {
+    std::collections::hash_map::RandomState::new().build_hasher().finish()
+}
+
+/// Loads the Noise key (private and public hex on two lines) or creates it with owner-only permissions.
+pub fn load_or_create_key(path: &str) -> Result<Keypair> {
+    if let Ok(s) = std::fs::read_to_string(path) {
+        let mut l = s.lines();
+        let private = hex::decode(l.next().unwrap_or("").trim()).context("photon key file: private key")?;
+        let public: [u8; 32] = hex::decode(l.next().unwrap_or("").trim()).context("photon key file: public key")?.try_into().map_err(|_| anyhow!("photon key file: public key must be 32 bytes"))?;
+        if private.len() != 32 {
+            bail!("photon key file: private key must be 32 bytes");
+        }
+        return Ok(Keypair { private, public });
+    }
+    let kp = noise::generate_keypair()?;
+    let body = format!("{}\n{}\n", hex::encode(&kp.private), hex::encode(kp.public));
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).with_context(|| format!("creating {path}"))?;
+        f.write_all(body.as_bytes())?;
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, body)?;
+    Ok(kp)
+}
+
+pub fn valid_payout_script(s: &[u8]) -> bool {
+    // witness v0 keyhash (22 bytes), v0 scripthash and v1 taproot (34 bytes)
+    (s.len() == 22 && s[0] == 0x00 && s[1] == 0x14) || (s.len() == 34 && ((s[0] == 0x00 && s[1] == 0x20) || (s[0] == 0x51 && s[1] == 0x20)))
+}
+
+/// Next share difficulty so that a channel produces about one share per `goal_secs`.
+pub fn retarget(diff: f64, accepted: u32, secs: f64, goal_secs: f64, min: f64, max: f64) -> Option<f64> {
+    if secs < 30.0 {
+        return None;
+    }
+    let ratio = (accepted.max(1) as f64 / secs) * goal_secs;
+    if (0.67..=1.5).contains(&ratio) {
+        return None;
+    }
+    let next = (diff * ratio.clamp(0.25, 4.0)).clamp(min, max);
+    ((next / diff - 1.0).abs() > 0.05).then_some(next)
+}
+
+impl PhotonService {
+    pub fn new(pool: Arc<Pool>) -> Result<Arc<Self>> {
+        let cfg = pool.cfg.photon.clone();
+        let key = load_or_create_key(&cfg.key_file)?;
+        let net = pool.cfg.network()?;
+        let fee_script = if cfg.fee_address.is_empty() {
+            pool.payouts.first().ok_or_else(|| anyhow!("photon needs a fee address or at least one pool payout address"))?.script.clone()
+        } else {
+            crate::addr::script_for_address(&cfg.fee_address, net.hrp)?
+        };
+        let rules = Rules { n_max: cfg.max_outputs, min_ppm: cfg.min_ppm, fee_ppm: (cfg.fee_pct * 10_000.0).round() as u32, fee_script };
+        rules.validate()?;
+        let empty = Arc::new(PlanBook { epoch_id: 0, tip: [0; 32], tip_hex: String::new(), tip_height: 0, plans: BTreeMap::new(), max_reward: 0 });
+        let (book, _) = watch::channel(empty);
+        Ok(Arc::new(Self { pool, cfg, key, book, stats: PhotonStats::default(), rules, seen: Mutex::new(HashSet::new()), recent: Mutex::new(VecDeque::new()) }))
+    }
+
+    pub fn public_key_hex(&self) -> String {
+        hex::encode(self.key.public)
+    }
+
+    pub async fn run(self: Arc<Self>) -> Result<()> {
+        let listener = TcpListener::bind(&self.cfg.listen).await.with_context(|| format!("binding photon listener {}", self.cfg.listen))?;
+        self.pool.event("info", format!("photon protocol listening on {} (pool key {})", self.cfg.listen, self.public_key_hex()));
+        tokio::spawn(self.clone().plan_loop());
+        let slots = Arc::new(Semaphore::new(self.cfg.max_connections));
+        loop {
+            let (tcp, peer) = listener.accept().await?;
+            let Ok(permit) = slots.clone().try_acquire_owned() else {
+                continue;
+            };
+            let svc = self.clone();
+            tokio::spawn(async move {
+                svc.stats.connections.fetch_add(1, Ordering::Relaxed);
+                if let Err(e) = svc.clone().session(tcp, peer).await {
+                    tracing::debug!("photon session {peer}: {e:#}");
+                }
+                svc.stats.connections.fetch_sub(1, Ordering::Relaxed);
+                drop(permit);
+            });
+        }
+    }
+
+    async fn plan_loop(self: Arc<Self>) {
+        let mut rx = self.pool.epoch.subscribe();
+        let mut last: Option<Arc<PlanBook>> = None;
+        loop {
+            let epoch = rx.borrow_and_update().clone();
+            if let Some(e) = epoch {
+                if last.as_ref().map_or(true, |b| b.tip_hex != e.tip_hex) {
+                    match self.make_book(&e, last.as_ref()).await {
+                        Ok(b) => {
+                            let b = Arc::new(b);
+                            last = Some(b.clone());
+                            self.seen.lock().unwrap().clear();
+                            self.pool.event("info", format!("photon plans for heights {:?} ready (tip {}..)", b.plans.keys().collect::<Vec<_>>(), &b.tip_hex[..12]));
+                            self.book.send_replace(b);
+                        }
+                        Err(err) => self.pool.event("warn", format!("photon plan failed: {err:#}")),
+                    }
+                }
+            }
+            if rx.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
+    async fn make_book(&self, e: &Arc<Epoch>, old: Option<&Arc<PlanBook>>) -> Result<PlanBook> {
+        let cand = e.candidates.first().ok_or_else(|| anyhow!("epoch without candidates"))?;
+        let mut tip: [u8; 32] = hex::decode(&e.tip_hex)?.try_into().map_err(|_| anyhow!("bad tip"))?;
+        tip.reverse();
+        let tip_height = e.height - 1;
+        let mut plans: BTreeMap<u32, Arc<PlanEntry>> = BTreeMap::new();
+        // the plan for the block being mined was published one block ago, if this tip extends the previous one
+        if let Some(o) = old {
+            if o.tip_height + 1 == tip_height {
+                let parent = self.pool.node.call("getblockheader", json!([e.tip_hex])).await?;
+                if parent["previousblockhash"].as_str() == Some(o.tip_hex.as_str()) {
+                    if let Some(p) = o.plans.get(&e.height) {
+                        plans.insert(e.height, p.clone());
+                    }
+                }
+            }
+        }
+        self.pool.flush_shares().await?;
+        let window = self.cfg.window_factor * difficulty_from_target(&cand.target);
+        let rows = self.pool.ledger.call(move |c| ledger::window_split(c, ledger::MODE_PHOTON, window, CREDIT_SCALE)).await?;
+        let credits: Vec<(Vec<u8>, u64)> = rows.into_iter().filter_map(|(a, v)| Some((hex::decode(a).ok()?, v as u64))).collect();
+        for height in [e.height, e.height + 1] {
+            if height == e.height + 1 || !plans.contains_key(&height) {
+                let (plan, tree) = derive_full(&self.rules, tip, height, &credits)?;
+                plans.insert(height, Arc::new(PlanEntry { plan, tree: Arc::new(tree) }));
+            }
+        }
+        {
+            let mut recent = self.recent.lock().unwrap();
+            for p in plans.values() {
+                if !recent.iter().any(|r| r.plan.plan_hash == p.plan.plan_hash) {
+                    recent.push_back(p.clone());
+                }
+            }
+            while recent.len() > 8 {
+                recent.pop_front();
+            }
+        }
+        let subsidy = cand.subsidy().max(0) as f64;
+        let max_reward = ((subsidy * (1.0 + self.cfg.max_reward_over_subsidy_pct / 100.0)) as u64).max(cand.coinbase_value.max(0) as u64);
+        Ok(PlanBook { epoch_id: e.id, tip, tip_hex: e.tip_hex.clone(), tip_height, plans, max_reward })
+    }
+
+    fn credit(&self, account: &str, diff: f64) {
+        let mut m = self.pool.agg.lock().unwrap();
+        let e = m.entry((minute_now(), account.to_string(), ledger::MODE_PHOTON as u8)).or_default();
+        e.0 += diff;
+        e.1 += 1;
+    }
+
+    async fn session(self: Arc<Self>, tcp: TcpStream, peer: SocketAddr) -> Result<()> {
+        tcp.set_nodelay(true).ok();
+        let conn = tokio::time::timeout(Duration::from_secs(10), noise::accept(tcp, &self.key)).await.map_err(|_| anyhow!("handshake timeout"))??;
+        let mut s = Session::new(self.clone(), conn, peer);
+        s.run().await
+    }
+}
+
+struct Chan {
+    script: Vec<u8>,
+    account: String,
+    target: [u8; 32],
+    diff: f64,
+    accepted: u32,
+    window_start: Instant,
+}
+
+struct PendingCheck {
+    template_id: u32,
+    variant: u32,
+    started: Instant,
+    buf: Vec<u8>,
+    next_seq: u32,
+}
+
+struct Session {
+    svc: Arc<PhotonService>,
+    conn: NoiseConn<TcpStream>,
+    peer: SocketAddr,
+    book: Arc<PlanBook>,
+    sent: HashSet<u32>,
+    channels: HashMap<u32, Chan>,
+    next_chan: u32,
+    templates: HashMap<u32, Vec<Announced>>,
+    order: VecDeque<u32>,
+    trust: Trust,
+    seen: Seen,
+    check: Option<PendingCheck>,
+    held: HashMap<(u32, u32), Vec<(String, f64)>>,
+    strikes: u32,
+    last_rx: Instant,
+}
+
+fn find_in(t: &HashMap<u32, Vec<Announced>>, template_id: u32, variant: u32) -> Option<&Announced> {
+    t.get(&template_id)?.iter().find(|a| variant >= a.ann.first_variant && ((variant - a.ann.first_variant) as usize) < a.ann.coinbases.len())
+}
+
+fn reject(code: u16, reason: &str) -> Msg {
+    Msg::Reject(Reject { code, reason: reason.into() })
+}
+
+impl Session {
+    fn new(svc: Arc<PhotonService>, conn: NoiseConn<TcpStream>, peer: SocketAddr) -> Self {
+        let book = svc.book.borrow().clone();
+        Self {
+            svc, conn, peer, book, sent: HashSet::new(), channels: HashMap::new(), next_chan: 1, templates: HashMap::new(), order: VecDeque::new(), trust: Trust::default(), seen: Seen::default(), check: None,
+            held: HashMap::new(), strikes: 0, last_rx: Instant::now(),
+        }
+    }
+
+    async fn send(&mut self, m: Msg) -> Result<()> {
+        self.conn.send(&m.encode()).await
+    }
+
+    async fn disconnect(&mut self, c: u16, reason: &str) -> Result<()> {
+        let _ = self.send(Msg::Disconnect(Reject { code: c, reason: reason.into() })).await;
+        bail!("disconnected: {reason}")
+    }
+
+    async fn run(&mut self) -> Result<()> {
+        let first = tokio::time::timeout(Duration::from_secs(10), self.conn.recv()).await.map_err(|_| anyhow!("no Setup"))??;
+        match Msg::decode(&first)? {
+            Msg::Setup(s) if s.version == PROTOCOL_VERSION => self.send(Msg::SetupAck(Setup { version: PROTOCOL_VERSION, features: 0, max_frame: super::wire::MAX_FRAME as u32 })).await?,
+            Msg::Setup(_) => return self.disconnect(code::PROTOCOL, "unsupported protocol version").await,
+            _ => return self.disconnect(code::PROTOCOL, "Setup expected").await,
+        }
+        let mut book_rx = self.svc.book.subscribe();
+        let mut tick = tokio::time::interval(Duration::from_secs(5));
+        self.push_book().await?;
+        loop {
+            tokio::select! {
+                f = self.conn.recv() => {
+                    let f = f?;
+                    self.last_rx = Instant::now();
+                    let m = Msg::decode(&f)?;
+                    self.handle(m).await?;
+                }
+                r = book_rx.changed() => {
+                    r?;
+                    self.book = book_rx.borrow_and_update().clone();
+                    self.on_new_tip().await?;
+                }
+                _ = tick.tick() => self.on_tick().await?,
+            }
+            if self.strikes >= MAX_STRIKES {
+                return self.disconnect(code::BANNED, "too many invalid messages").await;
+            }
+        }
+    }
+
+    async fn push_book(&mut self) -> Result<()> {
+        if self.book.epoch_id == 0 {
+            return Ok(());
+        }
+        let (tip, height) = (self.book.tip, self.book.height());
+        self.send(Msg::NewTip(NewTip { tip, height: self.book.tip_height })).await?;
+        let plans: Vec<_> = self.book.plans.values().cloned().collect();
+        for p in plans {
+            if self.sent.insert(p.plan.height) {
+                self.send(Msg::PayoutPlan(p.plan.clone())).await?;
+                self.send(Msg::EpochCommit(EpochCommit { height: p.plan.height, root: p.plan.accounting_root, leaves: p.tree.len() as u32 })).await?;
+            }
+        }
+        let _ = height;
+        Ok(())
+    }
+
+    async fn on_new_tip(&mut self) -> Result<()> {
+        self.templates.clear();
+        self.order.clear();
+        self.seen.clear();
+        self.sent.retain(|h| self.book.plans.contains_key(h));
+        if let Some(c) = self.check.take() {
+            self.svc.stats.checks_inconclusive.fetch_add(1, Ordering::Relaxed);
+            self.release((c.template_id, c.variant));
+        }
+        self.push_book().await
+    }
+
+    async fn on_tick(&mut self) -> Result<()> {
+        if self.last_rx.elapsed() > Duration::from_secs(self.svc.cfg.idle_secs) {
+            return self.disconnect(code::PROTOCOL, "idle").await;
+        }
+        if let Some(c) = &self.check {
+            if c.started.elapsed() > CHECK_TIMEOUT {
+                let key = (c.template_id, c.variant);
+                self.check = None;
+                self.fail_check(key, "transactions were not delivered in time").await?;
+            }
+        }
+        let (min, max, goal) = (self.svc.cfg.min_difficulty, self.svc.cfg.max_difficulty, self.svc.cfg.share_secs);
+        let mut updates = vec![];
+        for (id, ch) in self.channels.iter_mut() {
+            let secs = ch.window_start.elapsed().as_secs_f64();
+            if let Some(next) = retarget(ch.diff, ch.accepted, secs, goal, min, max) {
+                ch.diff = next;
+                ch.target = target_from_difficulty(next);
+                updates.push((*id, ch.target));
+            }
+            if secs >= 30.0 {
+                ch.accepted = 0;
+                ch.window_start = Instant::now();
+            }
+        }
+        for (channel, target) in updates {
+            self.send(Msg::SetTarget(SetTarget { channel, target })).await?;
+        }
+        Ok(())
+    }
+
+    async fn handle(&mut self, m: Msg) -> Result<()> {
+        match m {
+            Msg::OpenChannel(m) => self.open_channel(m).await,
+            Msg::TemplateAnnounce(a) => self.announce(a).await,
+            Msg::Shares(s) => self.shares(s).await,
+            Msg::Transactions(t) => self.transactions(t).await,
+            Msg::BlockFound(b) => {
+                self.svc.stats.blocks.fetch_add(1, Ordering::Relaxed);
+                let svc = self.svc.clone();
+                tokio::spawn(async move {
+                    let mut disp = b.hash;
+                    disp.reverse();
+                    let known = svc.pool.node.call("getblockheader", json!([hex::encode(disp)])).await.is_ok();
+                    svc.pool.event(if known { "info" } else { "warn" }, format!("photon block {} at height {} reported by a gateway ({})", hex::encode(disp), b.height, if known { "known to the node" } else { "not known to the node" }));
+                });
+                Ok(())
+            }
+            Msg::GetProof(g) => self.proof(g).await,
+            Msg::Setup(_) | Msg::SetupAck(_) | Msg::Disconnect(_) | Msg::Reject(_) => Ok(()),
+            _ => {
+                self.strikes += 1;
+                self.send(reject(code::PROTOCOL, "message not accepted by the pool")).await
+            }
+        }
+    }
+
+    async fn open_channel(&mut self, m: OpenChannel) -> Result<()> {
+        if self.book.epoch_id == 0 {
+            return self.send(reject(code::NOT_READY, "pool has no plan yet")).await;
+        }
+        if !valid_payout_script(&m.payout_script) {
+            return self.send(reject(code::BAD_SCRIPT, "payout script must be a witness v0/v1 program")).await;
+        }
+        if self.channels.len() >= self.svc.cfg.max_channels_per_connection {
+            return self.send(reject(code::TOO_MANY_CHANNELS, "channel limit reached")).await;
+        }
+        let want = difficulty_from_target(&m.target);
+        let diff = if want.is_finite() && want > 0.0 { want } else { self.svc.cfg.initial_difficulty }.clamp(self.svc.cfg.min_difficulty, self.svc.cfg.max_difficulty);
+        let id = self.next_chan;
+        self.next_chan += 1;
+        let target = target_from_difficulty(diff);
+        self.channels.insert(id, Chan { account: hex::encode(&m.payout_script), script: m.payout_script, target, diff, accepted: 0, window_start: Instant::now() });
+        self.svc.stats.channels.fetch_add(1, Ordering::Relaxed);
+        let plan_height = self.book.height();
+        self.send(Msg::OpenChannelAck(OpenChannelAck { request: m.request, channel: id, target, plan_height })).await
+    }
+
+    async fn announce(&mut self, a: TemplateAnnounce) -> Result<()> {
+        if a.tip != self.book.tip {
+            return self.send(reject(code::STALE, "announce is not for the current tip")).await;
+        }
+        let Some(entry) = self.book.plans.get(&a.height).cloned() else {
+            return self.send(reject(code::NO_PLAN, "no plan for that height")).await;
+        };
+        let template_id = a.template_id;
+        let announced = match Announced::new(a, &self.book.tip, &entry.plan, self.book.max_reward) {
+            Ok(x) => x,
+            Err(e) => {
+                self.strikes += 1;
+                return self.send(reject(code::BAD_ANNOUNCE, &format!("{e:#}").chars().take(200).collect::<String>())).await;
+            }
+        };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+        if (announced.ann.curtime as i64 - now).abs() > MAX_NTIME_DELTA as i64 {
+            self.strikes += 1;
+            return self.send(reject(code::BAD_ANNOUNCE, "curtime is too far from the pool's clock")).await;
+        }
+        if let Some(prev) = self.templates.get(&template_id) {
+            let f = &prev[0].ann;
+            let (n, lo, hi) = (&announced.ann, announced.ann.first_variant as u64, announced.ann.first_variant as u64 + announced.ann.coinbases.len() as u64);
+            let overlap = prev.iter().any(|p| (p.ann.first_variant as u64) < hi && lo < p.ann.first_variant as u64 + p.ann.coinbases.len() as u64);
+            if f.version != n.version || f.bits != n.bits || f.curtime != n.curtime || f.branch != n.branch || f.height != n.height || overlap {
+                self.strikes += 1;
+                return self.send(reject(code::BAD_ANNOUNCE, "chunks of one template disagree or overlap")).await;
+            }
+        } else {
+            if self.templates.len() >= MAX_TEMPLATES {
+                if let Some(old) = self.order.pop_front() {
+                    self.templates.remove(&old);
+                }
+            }
+            self.order.push_back(template_id);
+        }
+        self.svc.stats.announces.fetch_add(1, Ordering::Relaxed);
+        let (first, n) = (announced.ann.first_variant, announced.ann.coinbases.len() as u64);
+        self.templates.entry(template_id).or_default().push(announced);
+        let roll = (rand64() >> 11) as f64 / (1u64 << 53) as f64;
+        if self.check.is_none() && self.trust.should_check(roll) {
+            let variant = first + (rand64() % n) as u32;
+            self.check = Some(PendingCheck { template_id, variant, started: Instant::now(), buf: Vec::new(), next_seq: 0 });
+            self.held.entry((template_id, variant)).or_default();
+            self.send(Msg::GetTransactions(GetTransactions { template_id, variant })).await?;
+        }
+        Ok(())
+    }
+
+    fn find(&self, template_id: u32, variant: u32) -> Option<&Announced> {
+        find_in(&self.templates, template_id, variant)
+    }
+
+    async fn shares(&mut self, m: Shares) -> Result<()> {
+        let Some(ch) = self.channels.get(&m.channel) else {
+            self.strikes += 1;
+            return self.send(reject(code::UNKNOWN_CHANNEL, "unknown channel")).await;
+        };
+        let (target, account, diff) = (ch.target, ch.account.clone(), ch.diff);
+        let mut rejects: Vec<(u32, u8)> = Vec::new();
+        let mut accepted = 0u32;
+        for (i, item) in m.items.iter().enumerate() {
+            let Some(a) = find_in(&self.templates, m.template_id, item.variant) else {
+                rejects.push((i as u32, if self.templates.contains_key(&m.template_id) { reject::UNKNOWN_VARIANT } else { reject::UNKNOWN_TEMPLATE }));
+                continue;
+            };
+            match check_share(a, m.template_id, item, &target, &mut self.seen) {
+                Verdict::Reject(c) => rejects.push((i as u32, c)),
+                Verdict::Share { hash, block } => {
+                    if !self.svc.seen.lock().unwrap().insert(hash) {
+                        rejects.push((i as u32, reject::DUPLICATE));
+                        continue;
+                    }
+                    accepted += 1;
+                    match self.held.get_mut(&(m.template_id, item.variant)) {
+                        Some(h) if h.len() < 100_000 => h.push((account.clone(), diff)),
+                        _ => self.svc.credit(&account, diff),
+                    }
+                    if block {
+                        self.svc.pool.event("info", format!("photon share meets the network target (height {}, channel {})", a.ann.height, m.channel));
+                    }
+                }
+            }
+        }
+        self.svc.stats.accepted.fetch_add(accepted as u64, Ordering::Relaxed);
+        self.svc.stats.rejected.fetch_add(rejects.len() as u64, Ordering::Relaxed);
+        if let Some(c) = self.channels.get_mut(&m.channel) {
+            c.accepted += accepted;
+        }
+        if accepted == 0 && m.items.len() >= 20 {
+            self.strikes += 1;
+        }
+        self.send(Msg::ShareAck(ShareAck { channel: m.channel, template_id: m.template_id, accepted, rejects })).await
+    }
+
+    fn release(&mut self, key: (u32, u32)) {
+        if let Some(h) = self.held.remove(&key) {
+            for (account, diff) in h {
+                self.svc.credit(&account, diff);
+            }
+        }
+    }
+
+    fn check_passed(&mut self, key: (u32, u32)) -> Result<()> {
+        self.trust.record(true);
+        self.svc.stats.checks_ok.fetch_add(1, Ordering::Relaxed);
+        self.release(key);
+        Ok(())
+    }
+
+    async fn fail_check(&mut self, key: (u32, u32), why: &str) -> Result<()> {
+        self.held.remove(&key);
+        self.trust.record(false);
+        self.svc.stats.checks_failed.fetch_add(1, Ordering::Relaxed);
+        self.svc.pool.event("warn", format!("photon spot check failed for {} (template {}, variant {}): {why}", self.peer, key.0, key.1));
+        if self.trust.banned() {
+            return self.disconnect(code::BANNED, "repeated attestation check failures").await;
+        }
+        self.send(reject(code::CHECK_FAILED, &why.chars().take(200).collect::<String>())).await
+    }
+
+    async fn transactions(&mut self, t: Transactions) -> Result<()> {
+        let max = self.svc.cfg.max_check_bytes;
+        let Some(c) = self.check.as_mut() else {
+            return Ok(());
+        };
+        if t.template_id != c.template_id || t.variant != c.variant || t.seq != c.next_seq {
+            return Ok(());
+        }
+        if c.buf.len() + t.data.len() > max {
+            let key = (c.template_id, c.variant);
+            self.check = None;
+            return self.fail_check(key, "transaction data exceeds the limit").await;
+        }
+        c.buf.extend_from_slice(&t.data);
+        c.next_seq += 1;
+        if !t.last {
+            return Ok(());
+        }
+        let c = self.check.take().unwrap();
+        let key = (c.template_id, c.variant);
+        match self.run_check(&c).await {
+            // "duplicate": the node already has exactly this block, which is the strongest possible pass
+            Ok(None) => self.check_passed(key),
+            Ok(Some(reason)) if reason == "duplicate" => self.check_passed(key),
+            Ok(Some(reason)) if reason.contains("inconclusive") => {
+                self.svc.pool.event("info", format!("photon spot check inconclusive for {}: {reason}", self.peer));
+                self.svc.stats.checks_inconclusive.fetch_add(1, Ordering::Relaxed);
+                self.release(key);
+                Ok(())
+            }
+            Ok(Some(reason)) => self.fail_check(key, &reason).await,
+            Err(e) => self.fail_check(key, &format!("{e:#}")).await,
+        }
+    }
+
+    /// Assembles the announced variant with the delivered transactions and lets the node validate it, attestation included.
+    async fn run_check(&self, c: &PendingCheck) -> Result<Option<String>> {
+        let a = self.find(c.template_id, c.variant).ok_or_else(|| anyhow!("template no longer known"))?;
+        let mut txs = Vec::new();
+        let (mut p, mut n) = (0usize, 0u64);
+        while p < c.buf.len() {
+            if p + 4 > c.buf.len() {
+                bail!("transaction stream truncated");
+            }
+            let len = u32::from_le_bytes(c.buf[p..p + 4].try_into().unwrap()) as usize;
+            p += 4;
+            if len == 0 || p + len > c.buf.len() {
+                bail!("transaction record out of range");
+            }
+            txs.extend_from_slice(&c.buf[p..p + len]);
+            p += len;
+            n += 1;
+        }
+        let item = ShareItem { variant: c.variant, nonce: 0, ntime_delta: 0, version_bits: a.ann.version & VERSION_MASK };
+        let header = a.header(&item)?;
+        let cb = &a.ann.coinbases[(c.variant - a.ann.first_variant) as usize];
+        let mut block = Vec::with_capacity(80 + cb.len() + txs.len() + 80);
+        block.extend_from_slice(&header);
+        put_varint(&mut block, 1 + n);
+        block.extend_from_slice(&to_witness(cb));
+        block.extend_from_slice(&txs);
+        self.svc.pool.node.proposal(&hex::encode(block)).await
+    }
+
+    async fn proof(&mut self, g: GetProof) -> Result<()> {
+        let entry = { self.svc.recent.lock().unwrap().iter().rev().find(|e| e.plan.height == g.height).cloned() };
+        let Some(e) = entry else {
+            return self.send(reject(code::NOT_FOUND, "no accounting state for that height")).await;
+        };
+        let Some(idx) = e.tree.index_of(&g.script) else {
+            return self.send(reject(code::NOT_FOUND, "script has no credit in that state")).await;
+        };
+        let (credit, siblings) = (e.tree.credit(idx).unwrap_or(0), e.tree.proof(idx).unwrap_or_default());
+        debug_assert!(merkle::verify(&e.plan.accounting_root, e.tree.len() as u32, idx as u32, &g.script, credit, &siblings));
+        self.send(Msg::Proof(Proof { height: g.height, root: e.plan.accounting_root, leaves: e.tree.len() as u32, index: idx as u32, credit, siblings })).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payout_scripts_are_limited_to_witness_programs() {
+        assert!(valid_payout_script(&[&[0u8, 20][..], &[1u8; 20][..]].concat()));
+        assert!(valid_payout_script(&[&[0u8, 32][..], &[1u8; 32][..]].concat()));
+        assert!(valid_payout_script(&[&[0x51u8, 32][..], &[1u8; 32][..]].concat()));
+        assert!(!valid_payout_script(&[0x6a, 0x01, 0x00]), "OP_RETURN");
+        assert!(!valid_payout_script(&[0x51]), "anyone-can-spend");
+        assert!(!valid_payout_script(&[&[0u8, 21][..], &[1u8; 21][..]].concat()));
+    }
+
+    #[test]
+    fn retarget_follows_the_share_rate() {
+        // 10 s goal; 90 shares in 30 s = ten times too fast -> difficulty x4 (capped step)
+        assert_eq!(retarget(100.0, 90, 30.0, 10.0, 0.001, 1e12), Some(400.0));
+        // 1 share in 60 s is slower than the goal of 6 -> divide
+        let d = retarget(100.0, 1, 60.0, 10.0, 0.001, 1e12).unwrap();
+        assert!(d < 100.0 && d >= 25.0);
+        // on target or too early: unchanged
+        assert_eq!(retarget(100.0, 3, 30.0, 10.0, 0.001, 1e12), None);
+        assert_eq!(retarget(100.0, 90, 10.0, 10.0, 0.001, 1e12), None);
+        // limits
+        assert_eq!(retarget(100.0, 90, 30.0, 10.0, 0.001, 150.0), Some(150.0));
+    }
+
+    #[test]
+    fn the_key_file_is_created_once_and_reloaded() {
+        let dir = std::env::temp_dir().join(format!("photon-key-{}", rand64()));
+        let path = dir.to_str().unwrap().to_string();
+        let a = load_or_create_key(&path).unwrap();
+        let b = load_or_create_key(&path).unwrap();
+        assert_eq!(a.public, b.public);
+        assert_eq!(a.private, b.private);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+}

@@ -37,6 +37,11 @@ enum Cmd {
         #[arg(long)]
         mine: bool,
     },
+    /// Photon gateway (miner side, next to its own patched node); config from --gateway-config.
+    Gateway {
+        #[arg(long)]
+        gateway_config: PathBuf,
+    },
     /// Photon: derive a payout plan and the node candidate from JSON on stdin (cross-language tests).
     PhotonPlan,
     /// Photon: check a coinbase against a plan, JSON on stdin (cross-language tests).
@@ -69,6 +74,7 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        Cmd::Gateway { gateway_config } => photon::gateway::run(toml::from_str(&std::fs::read_to_string(&gateway_config)?)?).await,
         Cmd::PhotonPlan | Cmd::PhotonCheck => unreachable!(),
         Cmd::Check { mine } => check(Pool::connect(config::Config::load(&cli.config)?).await?, mine).await,
     }
@@ -89,6 +95,15 @@ async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
     }
     if pool.cfg.stratum.enabled {
         tokio::spawn(stratum::serve(pool.clone()));
+    }
+    if pool.cfg.photon.enabled {
+        let svc = photon::service::PhotonService::new(pool.clone())?;
+        let _ = pool.photon.set(svc.clone());
+        tokio::spawn(async move {
+            if let Err(e) = svc.clone().run().await {
+                svc.pool.event("err", format!("photon listener stopped: {e:#}"));
+            }
+        });
     }
     axum::serve(listener, api::router(pool)).with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await?;
     Ok(())

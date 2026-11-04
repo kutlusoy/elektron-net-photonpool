@@ -15,6 +15,8 @@ pub struct Config {
     pub ledger: LedgerCfg,
     #[serde(default)]
     pub public: PublicCfg,
+    #[serde(default)]
+    pub photon: PhotonCfg,
 }
 
 /// The public pool page and its read-only API, served on its own listener.
@@ -382,3 +384,67 @@ impl Config {
         })
     }
 }
+
+
+/// Photon protocol listener (gateways with their own node; non-custodial coinbase payouts).
+#[derive(Deserialize, Clone)]
+pub struct PhotonCfg {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "d_ph_listen")]
+    pub listen: String,
+    /// File with the hex-encoded Noise static private key; created on first start. Gateways pin the matching public key.
+    #[serde(default = "d_ph_key")]
+    pub key_file: String,
+    /// Output that receives the pool fee; empty uses the first payout address.
+    #[serde(default)]
+    pub fee_address: String,
+    #[serde(default = "d_ph_fee")]
+    pub fee_pct: f64,
+    #[serde(default = "d_ph_nmax")]
+    pub max_outputs: u16,
+    /// Smallest payout part in parts per million of the reward.
+    #[serde(default = "d_ph_minppm")]
+    pub min_ppm: u32,
+    #[serde(default = "d_ph_window")]
+    pub window_factor: f64,
+    #[serde(default = "d_s_diff")]
+    pub initial_difficulty: f64,
+    #[serde(default = "d_s_min_diff")]
+    pub min_difficulty: f64,
+    #[serde(default = "d_s_max_diff")]
+    pub max_difficulty: f64,
+    /// Target seconds between shares of one channel.
+    #[serde(default = "d_s_share_secs")]
+    pub share_secs: f64,
+    #[serde(default = "d_ph_conn")]
+    pub max_connections: usize,
+    #[serde(default = "d_ph_chan")]
+    pub max_channels_per_connection: usize,
+    /// Announced coinbase value may exceed the subsidy by this many percent (fees).
+    #[serde(default = "d_ph_bound")]
+    pub max_reward_over_subsidy_pct: f64,
+    /// Upper bound of the transaction data accepted for one spot check.
+    #[serde(default = "d_ph_check_bytes")]
+    pub max_check_bytes: usize,
+    #[serde(default = "d_ph_idle")]
+    pub idle_secs: u64,
+}
+
+impl Default for PhotonCfg {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+fn d_ph_listen() -> String { "0.0.0.0:3340".into() }
+fn d_ph_key() -> String { "photon.key".into() }
+fn d_ph_fee() -> f64 { 1.0 }
+fn d_ph_nmax() -> u16 { 128 }
+fn d_ph_minppm() -> u32 { 100 }
+fn d_ph_window() -> f64 { 2.0 }
+fn d_ph_conn() -> usize { 1000 }
+fn d_ph_chan() -> usize { 8 }
+fn d_ph_bound() -> f64 { 100.0 }
+fn d_ph_check_bytes() -> usize { 8 * 1024 * 1024 }
+fn d_ph_idle() -> u64 { 300 }

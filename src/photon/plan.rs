@@ -38,6 +38,11 @@ impl Rules {
 }
 
 pub fn derive(rules: &Rules, tip: [u8; 32], height: u32, credits: &[(Vec<u8>, u64)]) -> Result<PayoutPlan> {
+    derive_full(rules, tip, height, credits).map(|(p, _)| p)
+}
+
+/// Like `derive`, also returning the accounting tree (for proofs).
+pub fn derive_full(rules: &Rules, tip: [u8; 32], height: u32, credits: &[(Vec<u8>, u64)]) -> Result<(PayoutPlan, AccountingTree)> {
     rules.validate()?;
     let tree = AccountingTree::new(credits.iter().filter(|c| c.1 > 0).cloned().collect())?;
     let root = tree.root();
@@ -60,7 +65,7 @@ pub fn derive(rules: &Rules, tip: [u8; 32], height: u32, credits: &[(Vec<u8>, u6
 
     let mut plan = PayoutPlan { tip, height, rules_version: RULES_VERSION, plan_hash: [0; 32], accounting_root: root, outputs, fee_script: rules.fee_script.clone(), fee_ppm: rules.fee_ppm };
     plan.plan_hash = hash(&plan);
-    Ok(plan)
+    Ok((plan, tree))
 }
 
 pub fn hash(p: &PayoutPlan) -> [u8; 32] {

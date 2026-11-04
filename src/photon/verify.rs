@@ -38,8 +38,8 @@ pub struct Announced {
 impl Announced {
     /// Validates the announce against the current tip and plan. `max_reward` bounds subsidy plus plausible fees.
     pub fn new(ann: TemplateAnnounce, tip: &[u8; 32], plan: &PayoutPlan, max_reward: u64) -> Result<Self> {
-        if ann.tip != *tip || plan.tip != *tip || ann.height != plan.height {
-            bail!("announce is not for the current tip and plan");
+        if ann.tip != *tip || ann.height != plan.height {
+            bail!("announce is not for the current tip and the plan of its height");
         }
         if ann.coinbases.is_empty() {
             bail!("announce without variants");

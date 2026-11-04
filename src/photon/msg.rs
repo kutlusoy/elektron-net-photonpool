@@ -12,6 +12,7 @@ pub const MAX_COINBASE: usize = 24_000;
 pub const MAX_SHARES_PER_MSG: usize = 2048;
 pub const MAX_REJECTS: usize = 4096;
 pub const MAX_SIBLINGS: usize = 40;
+pub const MAX_TX_CHUNK: usize = 60_000;
 
 pub mod reject {
     pub const STALE: u8 = 1;
@@ -57,7 +58,7 @@ pub struct PlanOutput {
     pub ppm: u32,
 }
 
-/// Plan for block `height`, derived from the accounting state up to block `height - 2` and published on top of `tip` (= block `height - 1`).
+/// Plan for block `height`. `tip` is the block the plan was derived on: normally block `height - 2` (known one block ahead), or `height - 1` for a plan that had to be derived late (startup, reorg).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayoutPlan {
     pub tip: [u8; 32],
@@ -145,6 +146,23 @@ pub struct Proof {
     pub siblings: Vec<[u8; 32]>,
 }
 
+/// Pool asks the gateway for the transactions of one announced variant (attestation spot check).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GetTransactions {
+    pub template_id: u32,
+    pub variant: u32,
+}
+
+/// One chunk of the transaction stream: records of `u32 length || raw transaction`, in block order, coinbase excluded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Transactions {
+    pub template_id: u32,
+    pub variant: u32,
+    pub seq: u32,
+    pub last: bool,
+    pub data: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reject {
     pub code: u16,
@@ -169,6 +187,8 @@ pub enum Msg {
     Proof(Proof),
     Reject(Reject),
     Disconnect(Reject),
+    GetTransactions(GetTransactions),
+    Transactions(Transactions),
 }
 
 impl Msg {
@@ -190,6 +210,8 @@ impl Msg {
             Msg::Proof(_) => 0x0d,
             Msg::Reject(_) => 0x0e,
             Msg::Disconnect(_) => 0x0f,
+            Msg::GetTransactions(_) => 0x10,
+            Msg::Transactions(_) => 0x11,
         }
     }
 
@@ -260,6 +282,12 @@ impl Msg {
             Msg::Reject(m) | Msg::Disconnect(m) => {
                 w.u16(m.code).bytes16(m.reason.as_bytes());
             }
+            Msg::GetTransactions(m) => {
+                w.u32(m.template_id).u32(m.variant);
+            }
+            Msg::Transactions(m) => {
+                w.u32(m.template_id).u32(m.variant).u32(m.seq).u8(m.last as u8).bytes32(&m.data);
+            }
         }
         Frame { ext: EXT_CORE, ty: self.type_id(), payload: w.buf }
     }
@@ -321,6 +349,16 @@ impl Msg {
                 let m = Reject { code: r.u16()?, reason: String::from_utf8(r.bytes16(256)?)? };
                 if f.ty == 0x0e { Msg::Reject(m) } else { Msg::Disconnect(m) }
             }
+            0x10 => Msg::GetTransactions(GetTransactions { template_id: r.u32()?, variant: r.u32()? }),
+            0x11 => {
+                let (template_id, variant, seq) = (r.u32()?, r.u32()?, r.u32()?);
+                let last = match r.u8()? {
+                    0 => false,
+                    1 => true,
+                    _ => bail!("bad flag"),
+                };
+                Msg::Transactions(Transactions { template_id, variant, seq, last, data: r.bytes32(MAX_TX_CHUNK)? })
+            }
             t => bail!("unknown message type {t}"),
         };
         r.finish()?;
@@ -355,6 +393,8 @@ mod tests {
             Msg::Proof(Proof { height: 1001, root: h(3), leaves: 42, index: 5, credit: 123_456, siblings: vec![h(6), h(7)] }),
             Msg::Reject(Reject { code: 12, reason: "stale".into() }),
             Msg::Disconnect(Reject { code: 1, reason: "bye".into() }),
+            Msg::GetTransactions(GetTransactions { template_id: 5, variant: 11 }),
+            Msg::Transactions(Transactions { template_id: 5, variant: 11, seq: 2, last: true, data: vec![1, 2, 3, 4] }),
         ]
     }
 

@@ -9,6 +9,8 @@ pub const LEPTON: i64 = 100_000_000;
 pub const MODE_SOLO: i64 = 0;
 pub const MODE_PPLNS: i64 = 1;
 pub const MODE_PPS: i64 = 2;
+/// Photon channels (non-custodial coinbase payouts): shares are only used to derive the payout plan.
+pub const MODE_PHOTON: i64 = 3;
 
 pub struct ShareRow {
     pub minute: i64,
@@ -86,8 +88,13 @@ pub fn add_shares(conn: &mut Connection, rows: &[ShareRow], pps: Option<(f64, i6
 
 /// Splits `distributable` over the newest PPLNS shares up to `window_diff` of difficulty.
 pub fn pplns_split(conn: &Connection, window_diff: f64, distributable: i64) -> Result<Vec<(String, i64)>> {
+    window_split(conn, MODE_PPLNS, window_diff, distributable)
+}
+
+/// Same split for the shares of any mode.
+pub fn window_split(conn: &Connection, mode: i64, window_diff: f64, distributable: i64) -> Result<Vec<(String, i64)>> {
     let mut stmt = conn.prepare_cached("SELECT minute, account, diff FROM share_buckets WHERE mode = ?1 ORDER BY minute DESC")?;
-    let mut rows = stmt.query(params![MODE_PPLNS])?;
+    let mut rows = stmt.query(params![mode])?;
     let mut taken: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     let (mut acc_total, mut current_minute, mut group): (f64, Option<i64>, Vec<(String, f64)>) = (0.0, None, Vec::new());
     let flush = |group: &mut Vec<(String, f64)>, acc_total: &mut f64, taken: &mut std::collections::HashMap<String, f64>| -> bool {

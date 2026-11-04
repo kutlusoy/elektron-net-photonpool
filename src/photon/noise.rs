@@ -26,6 +26,7 @@ pub struct NoiseConn<S> {
     io: S,
     st: TransportState,
     dec: Decoder,
+    rbuf: Vec<u8>,
     pub remote_static: [u8; 32],
 }
 
@@ -46,7 +47,7 @@ async fn write_msg<S: AsyncWrite + Unpin>(io: &mut S, msg: &[u8]) -> Result<()> 
 
 fn finish<S>(io: S, hs: HandshakeState, max_frame: usize) -> Result<NoiseConn<S>> {
     let remote: [u8; 32] = hs.get_remote_static().ok_or_else(|| anyhow!("peer sent no static key"))?.try_into().map_err(|_| anyhow!("bad key size"))?;
-    Ok(NoiseConn { io, st: hs.into_transport_mode()?, dec: Decoder::new(max_frame), remote_static: remote })
+    Ok(NoiseConn { io, st: hs.into_transport_mode()?, dec: Decoder::new(max_frame), rbuf: Vec::new(), remote_static: remote })
 }
 
 /// Gateway side. With `pin`, the handshake fails unless the pool presents exactly that static key.
@@ -82,7 +83,7 @@ pub async fn accept<S: AsyncRead + AsyncWrite + Unpin>(mut io: S, key: &Keypair)
     }
     // NX responder: the initiator has no static key, so none is reported
     let st = hs.into_transport_mode()?;
-    Ok(NoiseConn { io, st, dec: Decoder::new(MAX_FRAME), remote_static: [0; 32] })
+    Ok(NoiseConn { io, st, dec: Decoder::new(MAX_FRAME), rbuf: Vec::new(), remote_static: [0; 32] })
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> NoiseConn<S> {
@@ -96,15 +97,25 @@ impl<S: AsyncRead + AsyncWrite + Unpin> NoiseConn<S> {
         Ok(())
     }
 
+    /// Cancel-safe: the only await is a read into an internal buffer, so it may be used inside `select!`.
     pub async fn recv(&mut self) -> Result<Frame> {
         let mut plain = vec![0u8; MAX_NOISE];
         loop {
             if let Some(f) = self.dec.next()? {
                 return Ok(f);
             }
-            let msg = read_msg(&mut self.io).await?;
-            let n = self.st.read_message(&msg, &mut plain).map_err(|e| anyhow!("decryption failed: {e}"))?;
-            self.dec.push(&plain[..n]);
+            if self.rbuf.len() >= 2 {
+                let len = u16::from_le_bytes([self.rbuf[0], self.rbuf[1]]) as usize;
+                if self.rbuf.len() >= 2 + len {
+                    let msg: Vec<u8> = self.rbuf.drain(..2 + len).skip(2).collect();
+                    let n = self.st.read_message(&msg, &mut plain).map_err(|e| anyhow!("decryption failed: {e}"))?;
+                    self.dec.push(&plain[..n]);
+                    continue;
+                }
+            }
+            if self.io.read_buf(&mut self.rbuf).await? == 0 {
+                bail!("connection closed");
+            }
         }
     }
 }

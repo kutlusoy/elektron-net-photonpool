@@ -260,6 +260,7 @@ pub struct Pool {
     /// 0 = batch attestation not tried yet, 1 = supported by the node, 2 = not supported.
     pub batch_state: std::sync::atomic::AtomicU8,
     pub backend_name: Mutex<&'static str>,
+    pub photon: std::sync::OnceLock<Arc<crate::photon::service::PhotonService>>,
 }
 
 impl Pool {
@@ -298,7 +299,7 @@ impl Pool {
             cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
             sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
             pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0),
-            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"),
+            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), photon: std::sync::OnceLock::new(),
         });
         pool.stats.connected.store(true, Ordering::Relaxed);
         Ok(pool)

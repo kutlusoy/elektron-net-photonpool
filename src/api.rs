@@ -70,6 +70,12 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
         "alloc": {"candidates": cands, "unitsPerSec": live.units_per_sec, "epochUse": used as f64 / total_units as f64, "overlap": overlap},
         "found": s.found.lock().unwrap().len(),
         "modes": modes,
+        "photon": p.photon.get().map(|ph| {
+            let st = &ph.stats;
+            let g = |a: &std::sync::atomic::AtomicU64| a.load(Ordering::Relaxed);
+            json!({"enabled": true, "listen": ph.cfg.listen, "publicKey": ph.public_key_hex(), "connections": g(&st.connections), "channels": g(&st.channels), "sharesOk": g(&st.accepted), "sharesRejected": g(&st.rejected),
+                   "announces": g(&st.announces), "checksOk": g(&st.checks_ok), "checksFailed": g(&st.checks_failed), "checksInconclusive": g(&st.checks_inconclusive), "blocks": g(&st.blocks)})
+        }).unwrap_or_else(|| json!({"enabled": false})),
     }))
 }
 
