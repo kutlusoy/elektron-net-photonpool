@@ -27,11 +27,70 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/api/v1/blocks", get(blocks))
         .route("/api/v1/events", get(events))
         .route("/api/v1/ledger", get(ledger_view))
+        .route("/api/v1/devices", get(|State(p): State<Arc<Pool>>| async move { Json(devices_view(&p)) }))
+        .route("/api/v1/history", get(|State(p): State<Arc<Pool>>, Query(q): Query<RangeQ>| async move { Json(history_view(&p, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/api/v1/account/:address", get(account))
         .route("/music/playlist.json", get(|State(p): State<Arc<Pool>>| crate::music::playlist_response(crate::music::dir(&p.cfg.api.music_dir, &p.cfg.api.ui_dir))))
         .nest_service("/music", crate::music::files(music))
         .fallback_service(ServeDir::new(ui))
         .with_state(pool)
+}
+
+#[derive(Deserialize)]
+pub struct RangeQ {
+    pub range: Option<String>,
+}
+
+/// Online devices by type (name, link, open source flag), with the number of working connections, their hash rate and the best share ever seen from that type.
+pub fn devices_view(p: &Arc<Pool>) -> Value {
+    use crate::devices::classify;
+    let now = unix_now();
+    let mut groups: std::collections::HashMap<String, (crate::devices::Device, u64, f64, f64)> = std::collections::HashMap::new();
+    for s in p.sessions.lock().unwrap().values() {
+        if now - get_f64(&s.last_seen) >= 120.0 {
+            continue;
+        }
+        let dev = classify(&s.agent.lock().unwrap());
+        let e = groups.entry(dev.key.clone()).or_insert((dev, 0, 0.0, 0.0));
+        e.1 += 1;
+        e.2 += get_f64(&s.hashrate);
+        e.3 = e.3.max(get_f64(&s.best));
+    }
+    let bests = p.device_best.lock().unwrap().clone();
+    let mut rows: Vec<Value> = groups
+        .into_values()
+        .map(|(d, n, hr, live_best)| {
+            let best = bests.get(&d.key).copied().unwrap_or(0.0).max(live_best);
+            json!({"key": d.key, "name": d.name, "url": d.url, "openSource": d.open_source, "working": n, "hashrate": hr, "best": best})
+        })
+        .collect();
+    rows.sort_by(|a, b| b["hashrate"].as_f64().partial_cmp(&a["hashrate"].as_f64()).unwrap_or(std::cmp::Ordering::Equal));
+    json!({"devices": rows, "workers": rows.iter().map(|r| r["working"].as_u64().unwrap_or(0)).sum::<u64>()})
+}
+
+/// Pool history of the stored statistics: `range` is 1h, 24h, 7d, 30d or all (everything that is kept). Points are [time, hash rate, miners, ok, stale, dup, network difficulty].
+pub async fn history_view(p: &Arc<Pool>, range: &str) -> Value {
+    let keep = p.cfg.ledger.stats_keep_days.max(1) * 1440;
+    let (minutes, slot): (i64, i64) = match range {
+        "1h" => (60, 1),
+        "7d" => (7 * 1440, 30),
+        "30d" => (30 * 1440, 120),
+        "all" => (keep, (keep / 400).max(1)),
+        _ => (1440, 5),
+    };
+    let minutes = minutes.min(keep);
+    let key = format!("{minutes}/{slot}");
+    if let Some((t, v)) = p.hist_cache.lock().unwrap().get(&key) {
+        if t.elapsed() < std::time::Duration::from_secs(20) {
+            return v.clone();
+        }
+    }
+    let since = unix_now() as i64 / 60 - minutes;
+    let rows = p.ledger.call(move |c| crate::ledger::history(c, since, slot)).await.unwrap_or_default();
+    let points: Vec<Value> = rows.into_iter().map(|(m, hr, miners, ok, stale, dup, nd)| json!([m * 60, hr, miners, ok, stale, dup, nd])).collect();
+    let v = json!({"range": range, "minutes": minutes, "stepMinutes": slot, "keepDays": p.cfg.ledger.stats_keep_days, "points": points});
+    p.hist_cache.lock().unwrap().insert(key, (std::time::Instant::now(), v.clone()));
+    v
 }
 
 fn quantile(sorted: &[f64], q: f64) -> f64 {
@@ -97,6 +156,7 @@ async fn miners(State(p): State<Arc<Pool>>, Query(q): Query<Limit>) -> Json<Valu
                 "ok": s.ok.load(Ordering::Relaxed), "stale": s.stale.load(Ordering::Relaxed),
                 "dup": s.dup.load(Ordering::Relaxed) + s.inv.load(Ordering::Relaxed),
                 "seen": (now - get_f64(&s.last_seen)).max(0.0) as u64,
+                "agent": s.agent.lock().unwrap().clone(), "device": crate::devices::classify(&s.agent.lock().unwrap()).name, "best": get_f64(&s.best),
                 "unit": format!("c{:03}/t{:02}/s{:02}", unit >> 16, (unit >> 8) & 0xff, unit & 0xff), "jobMs": get_f64(&s.job_ms),
             })
         })
@@ -166,6 +226,7 @@ pub async fn account_view(p: &Arc<Pool>, address: &str) -> Option<Value> {
                 "name": w, "mode": mode_name(s.mode.load(Ordering::Relaxed) as i64), "hashrate": hr, "difficulty": get_f64(&s.difficulty),
                 "accepted": s.ok.load(Ordering::Relaxed), "stale": s.stale.load(Ordering::Relaxed),
                 "invalid": s.inv.load(Ordering::Relaxed) + s.dup.load(Ordering::Relaxed), "seen": (unix_now() - get_f64(&s.last_seen)).max(0.0) as u64,
+                "device": crate::devices::classify(&s.agent.lock().unwrap()).name, "best": get_f64(&s.best),
             }));
         }
     }

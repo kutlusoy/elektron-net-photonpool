@@ -78,6 +78,10 @@ pub struct SessionStats {
     pub mode: AtomicU64,
     /// Job interval in milliseconds as f64 bits (what the learning chose for this connection).
     pub job_ms: AtomicU64,
+    /// User agent sent with mining.subscribe (printable ASCII, at most 64 characters).
+    pub agent: Mutex<String>,
+    /// Best share difficulty of this connection, as f64 bits.
+    pub best: AtomicU64,
 }
 
 impl SessionStats {
@@ -86,7 +90,7 @@ impl SessionStats {
         set_f64(&now, unix_now());
         Self {
             name: Mutex::new(String::new()), ok: AtomicU64::new(0), stale: AtomicU64::new(0), dup: AtomicU64::new(0), inv: AtomicU64::new(0),
-            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0),
+            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0), agent: Mutex::new(String::new()), best: AtomicU64::new(0),
         }
     }
 }
@@ -245,6 +249,13 @@ impl Epoch {
         }
     }
 
+    /// Difficulty of the block hash of a share (for the best-share statistics).
+    pub fn share_difficulty(&self, c: &Candidate, ntime: u32, version: u32, nonce: u32) -> f64 {
+        let mut h = header_hash(&c.header(version, ntime, nonce));
+        h.reverse();
+        crate::diff::difficulty_from_target(&h)
+    }
+
     pub fn solo_entry(&self, address: &str) -> Option<Arc<SoloEntry>> {
         self.solo.read().unwrap().get(address).cloned()
     }
@@ -279,6 +290,10 @@ pub struct Pool {
     pub active_candidates: AtomicUsize,
     /// Work units per second handed out in the last epochs, as f64 bits.
     pub demand_units: AtomicU64,
+    /// Best share difficulty per device type (key of `devices::classify`), kept in the ledger.
+    pub device_best: Mutex<HashMap<String, f64>>,
+    /// Answers of the history API, cached for a few seconds: range -> (time, json).
+    pub hist_cache: Mutex<HashMap<String, (Instant, serde_json::Value)>>,
     pub photon: std::sync::OnceLock<Arc<crate::photon::service::PhotonService>>,
 }
 
@@ -313,13 +328,14 @@ impl Pool {
             .collect::<Result<Vec<_>>>()?;
         let active = if cfg.pool.autoscale_candidates { cfg.pool.min_candidates.clamp(1, payouts.len().max(1)) } else { payouts.len() };
         let ledger = Ledger::open(&cfg.ledger.path).with_context(|| format!("opening ledger {}", cfg.ledger.path))?;
+        let bests: HashMap<String, f64> = ledger.call(|c| crate::ledger::device_bests(c)).await.unwrap_or_default().into_iter().collect();
         let (events, _) = broadcast::channel(1024);
         let (epoch, _) = watch::channel(None);
         let pool = Arc::new(Pool {
             cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
             sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
             pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0),
-            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), active_candidates: AtomicUsize::new(active), demand_units: AtomicU64::new(0), photon: std::sync::OnceLock::new(),
+            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), active_candidates: AtomicUsize::new(active), demand_units: AtomicU64::new(0), device_best: Mutex::new(bests), hist_cache: Mutex::new(HashMap::new()), photon: std::sync::OnceLock::new(),
         });
         pool.stats.connected.store(true, Ordering::Relaxed);
         Ok(pool)
@@ -457,6 +473,31 @@ impl Pool {
             }
         }
         Ok((candidates, height))
+    }
+
+    /// Records a share difficulty for the best-share figures of a device type; the ledger is only written when the record is beaten.
+    pub fn note_best(self: &Arc<Self>, agent: &str, difficulty: f64) {
+        if !difficulty.is_finite() || difficulty <= 0.0 {
+            return;
+        }
+        let dev = crate::devices::classify(agent);
+        let beaten = {
+            let mut m = self.device_best.lock().unwrap();
+            let old = m.get(&dev.key).copied().unwrap_or(0.0);
+            if difficulty > old {
+                m.insert(dev.key.clone(), difficulty);
+                true
+            } else {
+                false
+            }
+        };
+        if beaten {
+            let pool = self.clone();
+            tokio::spawn(async move {
+                let (key, name) = (dev.key, dev.name);
+                let _ = pool.ledger.call(move |c| crate::ledger::bump_device_best(c, &key, &name, difficulty, unix_now() as i64)).await;
+            });
+        }
     }
 
     /// Sets how many candidates the next epoch uses from how fast the work units of the last one were used up.
