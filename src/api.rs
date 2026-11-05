@@ -11,7 +11,7 @@ use std::convert::Infallible;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio_stream::wrappers::BroadcastStream;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Deserialize)]
 struct Limit {
@@ -21,6 +21,7 @@ struct Limit {
 pub fn router(pool: Arc<Pool>) -> Router {
     let ui = pool.cfg.api.ui_dir.clone();
     let music = crate::music::dir(&pool.cfg.api.music_dir, &ui);
+    let shell = std::path::Path::new(&ui).join("index.html");
     Router::new()
         .route("/api/v1/summary", get(summary))
         .route("/api/v1/miners", get(miners))
@@ -33,8 +34,15 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/api/v1/account/:address", get(account))
         .route("/music/playlist.json", get(|State(p): State<Arc<Pool>>| crate::music::playlist_response(crate::music::dir(&p.cfg.api.music_dir, &p.cfg.api.ui_dir))))
         .nest_service("/music", crate::music::files(music))
+        .with_state(pool.clone())
+        .merge(crate::public::data_router(pool))
+        // the one-page app: every view path answers with the shell, the files are served from the ui directory (ops.js only here)
+        .route_service("/engine", ServeFile::new(shell.clone()))
+        .route_service("/ops", ServeFile::new(shell.clone()))
+        .route_service("/miner", ServeFile::new(shell.clone()))
+        .route_service("/miner.html", ServeFile::new(shell.clone()))
+        .route_service("/miner/*address", ServeFile::new(shell))
         .fallback_service(ServeDir::new(ui))
-        .with_state(pool)
 }
 
 #[derive(Deserialize)]
@@ -137,6 +145,11 @@ fn quantile(sorted: &[f64], q: f64) -> f64 {
 }
 
 async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
+    Json(summary_value(&p, false))
+}
+
+/// The pool summary for the operator (`public = false`) or for the public page (`public = true`: the same numbers, but nothing about the Photon listener).
+pub fn summary_value(p: &Arc<Pool>, public: bool) -> Value {
     let epoch = p.epoch.borrow().clone();
     let mut lat: Vec<f64> = p.stats.tip_ready_ms.lock().unwrap().iter().copied().collect();
     lat.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -154,7 +167,7 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
         .filter(|m| p.cfg.payout.offers(**m))
         .map(|m| json!({"mode": m.as_str(), "fee": p.cfg.payout.fee(*m), "available": p.mode_available(*m).is_ok()}))
         .collect();
-    Json(json!({
+    let mut v = json!({
         "pool": {"name": "photon", "version": env!("CARGO_PKG_VERSION"), "uptime": p.started.elapsed().as_secs_f64(), "mode": "core", "explorerUrl": p.cfg.api.explorer_url},
         "node": {
             "height": height, "tip": tip, "tipTime": tip_time, "connected": s.connected.load(Ordering::Relaxed), "transport": "http-rpc",
@@ -175,7 +188,11 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
                    "announces": g(&st.announces), "checksOk": g(&st.checks_ok), "checksFailed": g(&st.checks_failed), "checksInconclusive": g(&st.checks_inconclusive), "blocks": g(&st.blocks),
                    "checkTotalUs": g(&st.check_total_us), "checkMaxUs": g(&st.check_max_us), "checkNodeUs": g(&st.check_node_us), "checkBytes": g(&st.check_bytes), "checkTimed": g(&st.check_timed), "checksSkipped": g(&st.checks_skipped), "trustEntries": ph.trust.lock().unwrap().len(), "sumP": ph.sum_p()})
         }).unwrap_or_else(|| json!({"enabled": false})),
-    }))
+    });
+    if public {
+        v["photon"] = json!({"enabled": p.photon.get().is_some()});
+    }
+    v
 }
 
 async fn miners(State(p): State<Arc<Pool>>, Query(q): Query<Limit>) -> Json<Value> {

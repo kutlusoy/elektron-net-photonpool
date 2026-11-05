@@ -4,40 +4,31 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PHOTON POOL</title>
-<meta name="description" content="Photon pool operator terminal for Elektron Net">
-<link rel="stylesheet" href="style.css">
+<meta name="description" content="Photon mining pool for Elektron Net: pool statistics, engine, miner lookup">
+<link rel="stylesheet" href="/style.css">
 </head>
 <body data-theme="cyan">
 <div class="fx" aria-hidden="true"></div>
-<div class="window" id="window">
+<div class="window spa" id="window">
   <header class="titlebar">
     <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-    <span class="wtitle">photon@elektron-net:~ <b id="mode-tag" class="tag">...</b></span>
+    <span class="wtitle"><span id="who">photon</span>@<span id="pool-name">pool</span>:~ <b id="mode-tag" class="tag">...</b></span>
+    <a class="lnk minerlink" data-nav="pool" href="/">POOL</a>
+    <a class="lnk minerlink" data-nav="engine" href="/engine">ENGINE</a>
+    <a class="lnk minerlink" data-nav="miner" href="/miner">MINER</a>
+    <a class="lnk minerlink" data-nav="ops" href="/ops" hidden>OPS</a>
     <span class="clock" id="clock">--:--:--</span>
   </header>
-  <div class="statusline" id="statusline" role="status" aria-live="off"></div>
-  <main class="grid">
-    <section class="pane p-pool" aria-label="Pool"><h2><span>POOL</span></h2><pre id="pane-pool"></pre></section>
-    <section class="pane p-tip" aria-label="Chain tip"><h2><span>TIP</span></h2><pre id="pane-tip"></pre></section>
-    <section class="pane p-alloc" aria-label="Allocator"><h2><span>ALLOCATOR</span></h2><pre id="pane-alloc"></pre></section>
-    <section class="pane p-history" aria-label="History"><h2><span>HISTORY</span><em class="rng"></em></h2><div class="chartpane"></div></section>
-    <section class="pane p-devices" aria-label="Devices"><h2><span>DEVICES</span></h2><pre id="pane-devices"></pre></section>
-    <section class="pane p-miners" aria-label="Miners"><h2><span>MINERS</span><em id="miners-hint"></em></h2><pre id="pane-miners"></pre></section>
-    <section class="pane p-blocks" aria-label="Blocks"><h2><span>BLOCKS</span></h2><pre id="pane-blocks"></pre></section>
-    <section class="pane p-tty" aria-label="Console"><h2><span>TTY</span><em>type <kbd>help</kbd></em></h2>
-      <div class="tty" id="tty" tabindex="-1"></div>
-      <form class="prompt" id="prompt" autocomplete="off">
-        <label for="cmd"><span class="u">photon</span><span class="at">@</span><span class="h">elektron</span><span class="sep">:~$</span></label>
-        <input id="cmd" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="command line">
-      </form>
-    </section>
-  </main>
+  <div id="view" class="view"></div>
 </div>
-<script src="common.js"></script>
-<script src="charts.js"></script>
-<script src="stats.js"></script>
-<script src="music.js"></script>
-<script src="depth.js"></script>
-<script src="app.js"></script>
+<script src="/common.js"></script>
+<script src="/spa.js"></script>
+<script src="/charts.js"></script>
+<script src="/stats.js"></script>
+<script src="/music.js"></script>
+<script src="/depth.js"></script>
+<script src="/public.js"></script>
+<script src="/engine.js"></script>
+<script src="/miner.js"></script>
 </body>
 </html>

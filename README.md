@@ -51,7 +51,7 @@ See [`doc-elektron/guideline-daemon-core.md`](doc-elektron/guideline-daemon-core
 
 ## Operator UI
 
-`ui/` contains a dependency-free terminal-style dashboard (no build step). The public pages are a single-page app: changing between the pool and the miner view does not reload the page, so the optional background music keeps playing. The pool view lists the connected miners by device type (Bitaxe, NerdMiner, cpuminer, ... with links to the open source projects) and draws the stored pool history; the pool keeps that history for `ledger.stats_keep_days` (default 60) days. Open `ui/index.html` in a browser for the simulated demo (marked `DEMO DATA`), or serve the folder next to the pool admin API at `/api/v1`. See [`doc-elektron/guideline-admin-api-and-ui.md`](doc-elektron/guideline-admin-api-and-ui.md).
+`ui/` contains a dependency-free terminal-style dashboard (no build step). The public pages are a single-page app: changing between the pool and the miner view does not reload the page, so the optional background music keeps playing. The pool view lists the connected miners by device type (Bitaxe, NerdMiner, cpuminer, ... with links to the open source projects) and draws the stored pool history; the pool keeps that history for `ledger.stats_keep_days` (default 60) days. The same app runs on both ports: POOL, ENGINE (chain tip, allocator, share quality, a sanitized live event feed) and MINER are public and read only aggregated data; on the operator port (8081) an extra OPS view appears (workers with full names, blocks, ledger, console). See [`doc-elektron/guideline-admin-api-and-ui.md`](doc-elektron/guideline-admin-api-and-ui.md).
 
 ## Links
 

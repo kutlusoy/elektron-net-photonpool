@@ -10,13 +10,13 @@
 
 ## 1. Purpose
 
-The operator UI (`ui/`) is a terminal-style single page: static HTML, CSS and JavaScript without dependencies and without a build step. The pool daemon serves it as static files and the page reads the read-only admin API below. The daemon MUST run fully without the UI.
+The web UI (`ui/`) is one terminal-style single-page app: static HTML, CSS and JavaScript without dependencies and without a build step. The same files are served on the public listener and on the operator listener. Views: **POOL**, **ENGINE** and **MINER** read only the public data API (`/public/v1/`) and exist on both ports; the **OPS** view (workers with full names, blocks, ledger, console) exists only where the read-only admin API below answers, i.e. on the operator listener. The pool daemon serves the files; it MUST run fully without the UI.
 
 ## 2. UI behaviour
 
-- Panes: pool, chain tip, allocator, miners, blocks and a console (TTY) with a command line. With `api.explorer_url` set, the chain tip hash and the block heights in the blocks pane (and the output of `tip` and `blocks`) are links to the explorer.
+- OPS view panes: miners, blocks, ledger and a console (TTY) with a command line. The chain tip and allocator numbers, the share quality and a sanitized event feed (epoch, tip, candidates ready in N ms, blocks found with a masked address) are in the ENGINE view, which is public. With `api.explorer_url` set, the chain tip hash and the block heights in the blocks pane (and the output of `tip` and `blocks`) are links to the explorer.
 - Commands: `help`, `status`, `tip`, `miners [n] [sort k] [grep s] [reset]`, `blocks`, `alloc`, `log [n]`, `watch`, `theme cyan|amber|green|magenta`, `clear`, `about`. Tab completes, Up and Down recall history, Ctrl+L clears.
-- On load the page probes `/api/v1/summary`. If it is unreachable, or the page is opened from `file://`, it switches to a simulated engine and marks this with a blinking `DEMO DATA` tag in the title bar. Simulated numbers MUST NOT be shown without that tag. `?demo` forces demo mode.
+- On load the shell probes `/api/v1/summary`. Only if it answers, `ops.js` is loaded and the OPS entry appears in the title bar; on the public listener the probe gets 404 and `ops.js` is not served at all, so the operator view cannot be reached there. Opening `/ops` on the public port falls back to the pool view.
 - The layout follows the viewport (three columns on wide screens, stacked on phones). Animations stop with `prefers-reduced-motion`. Theme choice is kept in `localStorage` when available.
 - The UI never sends commands that change pool state. All commands are local views.
 
@@ -44,6 +44,7 @@ Units: hashrate in hashes per second, times as Unix seconds (`tipTime`, `time`, 
 4. The server SHOULD send a strict `Content-Security-Policy` (`default-src 'self'`) and `X-Content-Type-Options: nosniff`.
 5. Worker names and other miner-supplied text are untrusted. The UI escapes all dynamic text before rendering.
 6. The event stream and `limit` parameters MUST be bounded server-side.
+8. The public listener MUST NOT serve the admin API or `ops.js`. What it shows of the engine is aggregated (numbers) or whitelisted text (the event feed, `Pool::public_message`: no worker names, no unmasked addresses, no node errors); `step26` proves that no worker name, address or node detail appears in `/public/v1/`.
 7. `api.explorer_url` MUST start with `http://` or `https://` and contain no quotes, angle brackets or spaces (checked at start-up). The UI additionally renders a link only for `http(s)` URLs and opens it with `rel="noopener noreferrer"`, so a bad value can never become a script URL.
 
 ## 5. Checklist

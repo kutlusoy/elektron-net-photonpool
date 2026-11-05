@@ -71,8 +71,7 @@ struct Limit {
     limit: Option<usize>,
 }
 
-pub fn router(pool: Arc<Pool>) -> Router {
-    let st = St { limiter: Arc::new(Limiter::new(pool.cfg.public.rate_per_min)), pool: pool.clone() };
+fn data_routes() -> Router<St> {
     Router::new()
         .route("/public/v1/pool", get(pool_view))
         .route("/public/v1/blocks", get(blocks))
@@ -81,16 +80,47 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/public/v1/history/devices", get(|State(s): State<St>, Query(q): Query<crate::api::RangeQ>| async move { Json(crate::api::device_history_view(&s.pool, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/public/v1/history", get(|State(s): State<St>, Query(q): Query<crate::api::RangeQ>| async move { Json(crate::api::history_view(&s.pool, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/public/v1/account/:address", get(account))
-        .route("/", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
+        .route("/public/v1/engine", get(|State(s): State<St>| async move { Json(crate::api::summary_value(&s.pool, true)) }))
+        .route("/public/v1/events", get(public_events))
+}
+
+/// The data API of the public page without the page itself and without the rate limit, for the operator listener (which then serves the same pages).
+pub fn data_router(pool: Arc<Pool>) -> Router {
+    let st = St { limiter: Arc::new(Limiter::new(u32::MAX)), pool };
+    data_routes().with_state(st)
+}
+
+#[derive(Deserialize)]
+struct SinceQ {
+    since: Option<u64>,
+}
+
+/// Events that are fit for the public page, newer than `since` (sequence number), at most 100.
+async fn public_events(State(st): State<St>, Query(q): Query<SinceQ>) -> Json<Value> {
+    let since = q.since.unwrap_or(0);
+    let q = st.pool.public_events.lock().unwrap();
+    let events: Vec<Value> = q.iter().filter(|e| e.0 > since).rev().take(100).collect::<Vec<_>>().into_iter().rev().map(|(seq, t, lvl, msg)| json!({"seq": seq, "t": t, "lvl": lvl, "msg": msg})).collect();
+    let last = q.back().map(|e| e.0).unwrap_or(0);
+    Json(json!({"events": events, "last": last}))
+}
+
+pub fn router(pool: Arc<Pool>) -> Router {
+    let st = St { limiter: Arc::new(Limiter::new(pool.cfg.public.rate_per_min)), pool: pool.clone() };
+    Router::new()
+        .merge(data_routes())
+        .route("/", get(|State(s): State<St>| file(s, "index.html", "text/html; charset=utf-8")))
         .route("/style.css", get(|State(s): State<St>| file(s, "style.css", "text/css; charset=utf-8")))
         .route("/common.js", get(|State(s): State<St>| file(s, "common.js", "text/javascript; charset=utf-8")))
         .route("/music.js", get(|State(s): State<St>| file(s, "music.js", "text/javascript; charset=utf-8")))
         .route("/charts.js", get(|State(s): State<St>| file(s, "charts.js", "text/javascript; charset=utf-8")))
         .route("/depth.js", get(|State(s): State<St>| file(s, "depth.js", "text/javascript; charset=utf-8")))
         .route("/public.js", get(|State(s): State<St>| file(s, "public.js", "text/javascript; charset=utf-8")))
-        .route("/miner.html", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
-        .route("/miner", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
-        .route("/miner/*address", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
+        .route("/engine", get(|State(s): State<St>| file(s, "index.html", "text/html; charset=utf-8")))
+        .route("/ops", get(|State(s): State<St>| file(s, "index.html", "text/html; charset=utf-8")))
+        .route("/engine.js", get(|State(s): State<St>| file(s, "engine.js", "text/javascript; charset=utf-8")))
+        .route("/miner.html", get(|State(s): State<St>| file(s, "index.html", "text/html; charset=utf-8")))
+        .route("/miner", get(|State(s): State<St>| file(s, "index.html", "text/html; charset=utf-8")))
+        .route("/miner/*address", get(|State(s): State<St>| file(s, "index.html", "text/html; charset=utf-8")))
         .route("/stats.js", get(|State(s): State<St>| file(s, "stats.js", "text/javascript; charset=utf-8")))
         .route("/spa.js", get(|State(s): State<St>| file(s, "spa.js", "text/javascript; charset=utf-8")))
         .route("/miner.js", get(|State(s): State<St>| file(s, "miner.js", "text/javascript; charset=utf-8")))
