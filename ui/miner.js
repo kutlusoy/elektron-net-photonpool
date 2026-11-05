@@ -209,16 +209,15 @@ async function setAddress(addr) {
 const cmds = {
   help() {
     out(span('c1', 'commands'));
-    [['go <address>', 'show another address (or just paste it)'], ['refresh', 'reload now'], ['theme cyan|amber|green|magenta', 'colour scheme'], ['clear', 'clear console']]
+    [['go <address>', 'show another address (or just paste it)'], ['refresh', 'reload now'], ['theme [name]', 'list or set the colour theme (default cyan)'], ['clear', 'clear console']]
       .forEach(([c, d]) => out(`  ${span('c3', pad(c, 34))}${span('dim', d)}`));
   },
   go(a) { return a[0] ? setAddress(a[0]) : out(span('warn', 'usage: go <address>')); },
   async refresh() { try { await load(); render(); out(span('dim', 'refreshed')); } catch (e) { out(span('err', e.message)); } },
   theme(a) {
     const t = a[0];
-    if (!['cyan', 'amber', 'green', 'magenta'].includes(t)) return out(span('warn', 'usage: theme cyan|amber|green|magenta'));
-    document.body.dataset.theme = t;
-    try { localStorage.setItem('photon-theme', t); } catch (_) { /* storage unavailable */ }
+    if (!t) return Themes.listHtml().split('\n').forEach((l) => out(l));
+    if (!Themes.set(t)) return out(span('warn', 'usage: theme ' + Themes.list().join('|')));
   },
   clear() { tty.innerHTML = ''; },
 };
@@ -242,7 +241,6 @@ on(document, 'keydown', (e) => { if (!e.ctrlKey && !e.metaKey && !e.altKey && e.
 /* ---------- boot ---------- */
 
 async function boot0() {
-  try { const t = localStorage.getItem('photon-theme'); if (t) document.body.dataset.theme = t; } catch (_) { /* storage unavailable */ }
   const params = new URLSearchParams(location.search);
   M.demo = params.has('demo') || location.protocol === 'file:';
   $('#who').textContent = 'miner';

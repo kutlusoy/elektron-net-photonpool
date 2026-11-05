@@ -82,3 +82,31 @@ document.addEventListener('click', (e) => {
 
 // Long hashes in a log line: short while the pane is small, complete while it is maximized (both are in the line, CSS picks one).
 const hashSpans = (text) => esc(text).replace(/\b([0-9a-f]{12})([0-9a-f]{52})\b/g, '<span class="h-short">$1..</span><span class="h-full">$1$2</span>');
+
+// Color themes, from cool and technical to dangerous and hacker-like. The palette lives in style.css (body[data-theme]); the swatches here only draw the menu.
+const THEMES = [
+  { id: 'cyan', name: 'TECH', mood: 'cool and clean', sw: ['#00e5ff', '#ff2bd6', '#f9f002'] },
+  { id: 'ice', name: 'ARCTIC', mood: 'calm, icy blue', sw: ['#7cc7ff', '#b9a8ff', '#eaf6ff'] },
+  { id: 'abyss', name: 'ABYSS', mood: 'deep sea, bioluminescent', sw: ['#00ffd5', '#2f7bff', '#b6fff0'] },
+  { id: 'magenta', name: 'SYNTHWAVE', mood: 'neon night drive', sw: ['#ff2bd6', '#00e5ff', '#f9f002'] },
+  { id: 'amber', name: 'RETRO', mood: 'old phosphor terminal', sw: ['#ffb000', '#ff6a00', '#ffe08a'] },
+  { id: 'gold', name: 'GOLD', mood: 'black and gold, luxury', sw: ['#f5c542', '#fff0b0', '#ff8a3d'] },
+  { id: 'candy', name: 'CANDY', mood: 'bubblegum, pastel pop', sw: ['#ff7ac8', '#7ad8ff', '#ffe27a'] },
+  { id: 'toxic', name: 'BIOHAZARD', mood: 'acid green, warning stripes', sw: ['#c6ff00', '#ff00e6', '#00ffd0'] },
+  { id: 'crimson', name: 'DANGER', mood: 'red alert', sw: ['#ff2a3d', '#ff7a00', '#ffd400'] },
+  { id: 'matrix', name: 'MATRIX', mood: 'green on black, hacker', sw: ['#00ff41', '#00b32c', '#b6ff9e'] },
+  { id: 'mono', name: 'GHOST', mood: 'monochrome, one red wire', sw: ['#f2f2f2', '#ff3b3b', '#9aa0a6'] },
+  { id: 'green', name: 'FOREST', mood: 'green with cyan', sw: ['#39ff88', '#00e5ff', '#d6ff3d'] },
+];
+const Themes = (() => {
+  // Themes are chosen in the terminal (`theme <name>`, `theme` lists them). The default is always cyan: nothing is stored, the choice lasts until the page is reloaded.
+  const has = (id) => THEMES.some((t) => t.id === id);
+  function set(id) {
+    if (!has(id)) return false;
+    document.body.dataset.theme = id;
+    document.dispatchEvent(new Event('themechange'));
+    return true;
+  }
+  const listHtml = () => THEMES.map((t) => `${span(document.body.dataset.theme === t.id ? 'ok' : 'c1', pad(t.id, 9))}${span('dim', t.mood)}`).join('\n');
+  return { set, list: () => THEMES.map((t) => t.id), listHtml };
+})();

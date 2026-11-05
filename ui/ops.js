@@ -171,7 +171,7 @@ const cmds = {
     out(span('c1', 'commands'));
     [['status', 'one-screen summary'], ['tip', 'chain tip and latency'], ['miners [n] [sort k] [grep s] [reset]', 'worker table, k = hashrate|name|proto|diff|ok|stale|dup|seen|unit (or click a column header)'],
       ['blocks', 'recent blocks'], ['alloc', 'candidate and unit allocator'], ['log [n]', 'replay last n events'], ['watch', 'toggle log follow'],
-      ['theme cyan|amber|green|magenta', 'colour scheme'], ['clear', 'clear console (Ctrl+L)'], ['about', 'what this is']]
+      ['theme [name]', 'list or set the colour theme (default cyan)'], ['clear', 'clear console (Ctrl+L)'], ['about', 'what this is']]
       .forEach(([c, d]) => out(`  ${span('c3', pad(c, 38))}${span('dim', d)}`));
   },
   status() {
@@ -208,9 +208,8 @@ const cmds = {
   watch() { ui.follow = !ui.follow; out(span('dim', 'follow ' + (ui.follow ? 'on' : 'off'))); },
   theme(a) {
     const t = a[0];
-    if (!['cyan', 'amber', 'green', 'magenta'].includes(t)) return out(span('warn', 'usage: theme cyan|amber|green|magenta'));
-    document.body.dataset.theme = t;
-    try { localStorage.setItem('photon-theme', t); } catch (_) { /* storage unavailable */ }
+    if (!t) return Themes.listHtml().split('\n').forEach((l) => out(l));
+    if (!Themes.set(t)) return out(span('warn', 'usage: theme ' + Themes.list().join('|')));
   },
   clear() { ui.tty.innerHTML = ''; },
   about() {
