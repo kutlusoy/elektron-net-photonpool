@@ -11,7 +11,7 @@ const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-liv
     <section class="pane p-alloc" aria-label="Allocator"><h2><span>ALLOCATOR</span></h2><pre id="pane-alloc"></pre></section>
     <section class="pane p-shares" aria-label="Shares"><h2><span>SHARES</span></h2><pre id="pane-shares"></pre></section>
     <section class="pane p-events" aria-label="Events"><h2><span>EVENTS</span><em>public feed, no miner data</em></h2><div class="tty" id="events" tabindex="-1"></div></section>
-    <section class="pane p-flow" aria-label="Engine flow"><h2><span>FLOW</span><em>real rates, schematic particles</em></h2><div class="flowbox"><canvas id="flow"></canvas></div></section>
+    <section class="pane p-flow" aria-label="Engine flow"><h2><span>PHOTON CORE</span><em title="Rates and counts are live from the pool; the single particles are illustrative">the engine, live</em></h2><div class="flowbox"><canvas id="flow"></canvas></div></section>
   </main>`;
 let flow = null;
 const view = { s: null, seq: 0, lastTip: { h: null, t: 0 }, follow: true };
@@ -29,15 +29,15 @@ async function startFlow() {
   } catch (_) { /* fall back to the 2D scene */ }
   if (!$('#flow')) return; // the view was left while loading
   try { flow = (make || Flow).create(canvas); } catch (_) { flow = Flow.create(canvas); }
-  flow.start(); if (view.s) { const s = view.s; flow.feed({ jobs: s.net ? s.net.jobsPerSec : 0, shares: s.shares.perSec, cands: s.alloc.candidates, miners: s.miners.online, ok: s.shares.okN, stale: s.shares.staleN, bad: s.shares.dupN + s.shares.invN, epochUse: s.alloc.epochUse, batchMs: s.node.batchMs }); flow.tip(s.node.height); }
+  flow.start(); if (view.s) { const s = view.s; flow.feed({ modes: s.modes, jobs: s.net ? s.net.jobsPerSec : 0, shares: s.shares.perSec, cands: s.alloc.candidates, miners: s.miners.online, ok: s.shares.okN, stale: s.shares.staleN, bad: s.shares.dupN + s.shares.invN, epochUse: s.alloc.epochUse, batchMs: s.node.batchMs }); flow.tip(s.node.height); }
 }
 
 const get = async (p) => { const r = await fetch(p, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); };
 
 // A found block: a banner over the scene (also with the 2D fallback) and a highlighted line in the feed.
-function banner(h) {
+function banner(h, mode) {
   const box = document.querySelector('.flowbox'); if (!box) return;
-  const b = document.createElement('div'); b.className = 'flowbanner'; b.textContent = 'BLOCK FOUND' + (h ? ' ' + h : '');
+  const b = document.createElement('div'); b.className = 'flowbanner'; b.textContent = 'BLOCK FOUND' + (h ? ' ' + h : '') + (mode ? ' \u00b7 ' + mode.toUpperCase() : '');
   box.appendChild(b); setTimeout(() => b.remove(), 5200);
 }
 
@@ -93,8 +93,8 @@ async function refresh() {
   Series.push('sps', s.shares.perSec);
   if (view.lastTip.h !== null && n.height !== view.lastTip.h && view.lastTip.t) Series.push('tipint', n.tipTime - view.lastTip.t, n.tipTime);
   if (n.height !== view.lastTip.h) view.lastTip = { h: n.height, t: n.tipTime };
-  if (flow) { flow.feed({ jobs: s.net ? s.net.jobsPerSec : 0, shares: s.shares.perSec, units: s.alloc.unitsPerSec, cands: s.alloc.candidates, hr: s.hashrate.now, miners: s.miners.online, ok: s.shares.okN, stale: s.shares.staleN, bad: s.shares.dupN + s.shares.invN, epochUse: s.alloc.epochUse, batchMs: n.batchMs, backend: n.backend, units: s.alloc.unitsPerSec, tipTime: n.tipTime, rtt: n.rttMs, p50: n.p50, p95: n.p95, connected: n.connected, ...photonRates(s) }); flow.tip(n.height); }
-  (ev.events || []).forEach((x) => { addEvent(x); if (x.lvl === 'blk') { const h = (/BLOCK FOUND (\d+)/.exec(x.msg) || [])[1]; if (flow) flow.block(h); banner(h); } });
+  if (flow) { flow.feed({ jobs: s.net ? s.net.jobsPerSec : 0, shares: s.shares.perSec, units: s.alloc.unitsPerSec, cands: s.alloc.candidates, hr: s.hashrate.now, miners: s.miners.online, ok: s.shares.okN, stale: s.shares.staleN, bad: s.shares.dupN + s.shares.invN, epochUse: s.alloc.epochUse, batchMs: n.batchMs, backend: n.backend, modes: s.modes, units: s.alloc.unitsPerSec, tipTime: n.tipTime, rtt: n.rttMs, p50: n.p50, p95: n.p95, connected: n.connected, ...photonRates(s) }); flow.tip(n.height); }
+  (ev.events || []).forEach((x) => { addEvent(x); if (x.lvl === 'blk') { const h = (/BLOCK FOUND (\d+)/.exec(x.msg) || [])[1], mode = (/\[(solo|pplns|pps)\]/.exec(x.msg) || [])[1]; if (flow) flow.block(h, mode); banner(h, mode); } });
   if (typeof ev.last === 'number') view.seq = ev.last;
 }
 
