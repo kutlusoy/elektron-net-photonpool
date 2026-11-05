@@ -452,9 +452,9 @@ impl Pool {
                     }
                     return Ok(r);
                 }
-                Err(e) if mode == "auto" && self.batch_state.load(Relaxed) == 0 && e.to_string().contains("Method not found") => {
+                Err(e) if mode == "auto" && self.batch_state.load(Relaxed) == 0 && (e.to_string().contains("Method not found") || e.to_string().contains("getattestationbatch is disabled")) => {
                     self.batch_state.store(2, Relaxed);
-                    self.event("info", "node has no getattestationbatch, using one getblocktemplate call per address".into());
+                    self.event("info", "node has no getattestationbatch (missing or not enabled with enableattestationbatch=1), using one getblocktemplate call per address".into());
                 }
                 Err(e) => return Err(e),
             }

@@ -98,7 +98,13 @@ vout[2]   witness commitment      (shared)
 vout[3..] extra_outputs, verbatim, last
 ```
 
-### 3.5 As built: the Photon node patch
+### 3.5 As built: the `photonpool` branch of the node (and the patch file)
+
+The RPC is part of the branch `photonpool` of `elektron-net` (commits "rpc: add getattestationbatch for mining pools" and the test and guideline commit, see `doc-elektron/guideline-attestation-batch-rpc.md` there). On that branch it is off unless the node runs with `-enableattestationbatch=1`; the Docker setups of this repository build the node from that branch (`ELEKTRON_REF=photonpool`) and enable it in the node configuration. When the code is merged to `main`, change `ELEKTRON_REF` back to `main`. `docker/node/patches/0001-photon-getattestationbatch.patch` is the same code without the enable option and is kept for the tests of the patch file (`check_patch_scope.py`); it does not apply to the `photonpool` branch.
+
+The text below describes the implementation.
+
+
 
 The interface exists as a patch that is applied when the node image is built (`docker/node/patches/0001-photon-getattestationbatch.patch`, `PHOTON_NODE_PATCHES=false` by default until the review is complete, set it to `true` to build the patched node; `NODE_PATCHES` in the stack). It adds three functions and one RPC and changes no existing code path of the node:
 

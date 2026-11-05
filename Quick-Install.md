@@ -75,7 +75,7 @@ What the compose file does:
 | `node` | Elektron Net node, config in `docker/elektron.conf`, data in the volume `node-data` | `8333` public. RPC `8332` stays inside the Docker network. |
 | `photond` | Pool daemon, config from `./photond.toml` | `3333` public, `8081` on `127.0.0.1` only |
 
-The pool authenticates to the node with the RPC cookie in the shared volume, so no password has to be configured. To pin a node version, set `ELEKTRON_REF` (tag or branch) in `docker-compose.yml`.
+The pool authenticates to the node with the RPC cookie in the shared volume, so no password has to be configured. The node is built from the branch `photonpool` of `elektron-net` (it contains the `getattestationbatch` RPC, enabled in `docker/elektron.conf`); to pin a node version or to switch to `main` later, set `ELEKTRON_REF` (tag or branch) in `docker-compose.yml`.
 
 Update:
 
@@ -90,12 +90,13 @@ Stop: `docker compose down` (keeps the blockchain volume). Remove everything inc
 
 ### 4.1 Node
 
-Install and sync an Elektron Net node as described in the [`elektron-net`](https://github.com/kutlusoy/elektron-net) repository. A minimal `~/.elektron/elektron.conf` for the pool:
+Install and sync an Elektron Net node as described in the [`elektron-net`](https://github.com/kutlusoy/elektron-net) repository. Until the `getattestationbatch` RPC is on its `main` branch, build the node from the branch `photonpool` (`git clone --branch photonpool https://github.com/kutlusoy/elektron-net.git`); `enableattestationbatch=1` below switches the RPC on, without it the pool asks the node once per payout address. A minimal `~/.elektron/elektron.conf` for the pool:
 
 ```ini
 server=1
 rpcbind=127.0.0.1
 rpcallowip=127.0.0.1
+enableattestationbatch=1
 rpcuser=photon
 rpcpassword=CHANGE_ME_TO_A_LONG_RANDOM_PASSWORD
 ```

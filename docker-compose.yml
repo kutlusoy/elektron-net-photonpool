@@ -6,7 +6,7 @@ services:
     build:
       context: ./docker/node
       args:
-        ELEKTRON_REF: main
+        ELEKTRON_REF: photonpool
         # Options: true | false (default). true builds the node with the Photon patch (getattestationbatch); set it in the shell or in a .env file.
         PHOTON_NODE_PATCHES: ${PHOTON_NODE_PATCHES:-false}
     restart: unless-stopped
