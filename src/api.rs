@@ -193,7 +193,15 @@ pub fn summary_value(p: &Arc<Pool>, public: bool) -> Value {
         }).unwrap_or_else(|| json!({"enabled": false})),
     });
     if public {
-        v["photon"] = json!({"enabled": p.photon.get().is_some()});
+        // aggregates only: no listen address, no key, no timings
+        v["photon"] = match p.photon.get() {
+            Some(ph) => {
+                let st = &ph.stats;
+                let g = |a: &std::sync::atomic::AtomicU64| a.load(Ordering::Relaxed);
+                json!({"enabled": true, "connections": g(&st.connections), "channels": g(&st.channels), "sharesOk": g(&st.accepted), "sharesRejected": g(&st.rejected), "checksOk": g(&st.checks_ok), "checksFailed": g(&st.checks_failed), "blocks": g(&st.blocks)})
+            }
+            None => json!({"enabled": false}),
+        };
     }
     v
 }
