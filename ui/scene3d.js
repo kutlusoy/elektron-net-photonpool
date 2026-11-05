@@ -192,11 +192,11 @@ window.Flow3D = (() => {
 
     // found block and tip rings
     const ringGeo = track(new T.RingGeometry(0.9, 1, 48)), rings = [];
-    const ring = (c) => { const m = new T.Mesh(ringGeo, track(new T.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.9, side: T.DoubleSide, blending: T.AdditiveBlending, depthWrite: false }))); m.rotation.x = -Math.PI / 2; m.position.set(X.node, -1.6, 0); add(m); rings.push({ m, t: 0 }); };
+    const ring = (c, x = X.node, delay = 0) => { const m = new T.Mesh(ringGeo, track(new T.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.9, side: T.DoubleSide, blending: T.AdditiveBlending, depthWrite: false }))); m.rotation.x = -Math.PI / 2; m.position.set(x, -1.6, 0); add(m); rings.push({ m, t: -delay }); };
     let gold = null, assemble = 1, heightLabel = label('', '#' + col.c3.getHexString(), 0.9);
     heightLabel.position.set(X.tpl, 1.7, 0); add(heightLabel); track(heightLabel.material);
 
-    const st = { hov: -2, cnt: { ok: 0, stale: 0, bad: 0 }, tipTime: 0, rtt: 0, p50: 0, p95: 0, connected: true, units: 0, hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
+    const st = { shake: 0, flash: 0, goldT: 0, bLabel: null, hov: -2, cnt: { ok: 0, stale: 0, bad: 0 }, tipTime: 0, rtt: 0, p50: 0, p95: 0, connected: true, units: 0, hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     // Quality levels. 0: the small pane (few particles, no bloom), 1: maximized on a modest device, 2: maximized (bloom, streaks, many particles).
     // Every level draws every display frame (smooth motion) as long as the device keeps up and at most 25 miners are online; beyond that, or when the frame
@@ -236,7 +236,10 @@ window.Flow3D = (() => {
       if (st.gw > 0) { st.accG += dt * q.rate * (0.5 + 6 * Math.log10(1 + st.pshares * 4)); while (st.accG >= 1) { st.accG -= 1; spawnShare(true); } st.accG = Math.min(st.accG, 2); }
       // camera sways slowly around the scene
       const k = st.t * 0.12, intro = Math.min(1, (performance.now() - st.t0) / 2200), dolly = (1 + 0.45 * Math.pow(1 - intro, 3)) * Math.min(1.75, Math.max(1, 1.85 / (st.w / st.h))); // the camera glides in when the view opens and keeps the whole scene in narrow panes
-      cam.position.set((1 + Math.sin(k) * 2.2 * q.sway) * dolly, (5.8 + Math.sin(k * 1.7) * 0.5 * q.sway) * dolly, (17 + Math.cos(k * 0.8) * 0.6 * q.sway) * dolly); cam.lookAt(0.5, -0.2, -2);
+      cam.position.set((1 + Math.sin(k) * 2.2 * q.sway) * dolly, (5.8 + Math.sin(k * 1.7) * 0.5 * q.sway) * dolly, (17 + Math.cos(k * 0.8) * 0.6 * q.sway) * dolly); if (st.shake > 0.01) cam.position.add(new T.Vector3(Math.sin(st.t * 53) * 0.35, Math.sin(st.t * 61) * 0.25, 0).multiplyScalar(st.shake * q.sway));
+      cam.lookAt(0.5, -0.2, -2);
+      const fov = 52 - 7 * st.flash; if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }
+      st.shake = Math.max(0, st.shake - dt * 1.1); st.flash = Math.max(0, st.flash - dt * 0.8); st.goldT = Math.max(0, st.goldT - dt);
       core.rotation.y += dt * 0.8; core.scale.setScalar(1 + 0.06 * Math.sin(st.t * 2.4));
 
       // template assembly
@@ -305,14 +308,14 @@ window.Flow3D = (() => {
       trails.commit(); shares.instanceMatrix.needsUpdate = true; if (recolor && shares.instanceColor) shares.instanceColor.needsUpdate = true;
 
       // photon fire
-      fireAcc += dt * q.rate * (70 + 70 * Math.log10(1 + st.hr / 1e5) + 40 * Math.log10(1 + st.jobs) + 320 * flare);
+      fireAcc += dt * q.rate * (70 + 70 * Math.log10(1 + st.hr / 1e5) + 40 * Math.log10(1 + st.jobs) + 320 * flare) * (1 + 3 * Math.min(1, st.goldT));
       for (let i = 0; i < q.fire; i++) {
         if (fl[i] <= 0) { if (fireAcc >= 1) { fireAcc -= 1; emit(i); } else { fp[i * 3 + 1] = -50; continue; } }
         fl[i] -= dt; const k = 1 - Math.max(0, fl[i]) / fm[i], o = i * 3;
         fv[o + 1] += (0.3 + Math.sin(st.t * 7 + i) * 0.6) * dt; // flames flicker upward
         fp[o] += fv[o] * dt * (1 - 0.15 * k); fp[o + 1] += fv[o + 1] * dt; fp[o + 2] += fv[o + 2] * dt;
         if (fp[o] > X.gate) { fl[i] = 0; fp[o + 1] = -50; continue; } // burnt out at the share check
-        tmp.copy(k < 0.25 ? white : k < 0.6 ? col.c1 : col.c2); const b = k < 0.8 ? 1 : (1 - k) * 5; fc[o] = tmp.r * b; fc[o + 1] = tmp.g * b; fc[o + 2] = tmp.b * b;
+        tmp.copy(st.goldT > 0 ? (k < 0.3 ? white : k < 0.65 ? col.warn : col.err) : k < 0.25 ? white : k < 0.6 ? col.c1 : col.c2); const b = k < 0.8 ? 1 : (1 - k) * 5; fc[o] = tmp.r * b; fc[o + 1] = tmp.g * b; fc[o + 2] = tmp.b * b;
       }
       fg.attributes.position.needsUpdate = true; fg.attributes.color.needsUpdate = true;
       // node glimmer
@@ -337,12 +340,18 @@ window.Flow3D = (() => {
       if (st.hov >= 0) halos[st.hov].material.opacity = Math.min(1, halos[st.hov].material.opacity + 0.35);
       // chain, rings, found block
       chain.forEach((c) => { c.m.position.x += (c.tx - c.m.position.x) * (1 - Math.exp(-dt * 4)); c.m.scale.setScalar(Math.min(1, c.m.scale.x + dt * 2)); c.m.rotation.y += dt * 0.3; });
-      for (const r of rings) { r.t += dt; r.m.scale.setScalar(1 + r.t * 5); r.m.material.opacity = Math.max(0, 0.9 - r.t * 0.7); }
-      for (let i = rings.length - 1; i >= 0; i--) if (rings[i].t > 1.4) { world.remove(rings[i].m); rings.splice(i, 1); }
+      for (const r of rings) { r.t += dt; r.m.visible = r.t >= 0; if (r.t >= 0) { r.m.scale.setScalar(1 + r.t * 7); r.m.material.opacity = Math.max(0, 0.9 - r.t * 0.6); } }
+      for (let i = rings.length - 1; i >= 0; i--) if (rings[i].t > 1.9) { world.remove(rings[i].m); rings.splice(i, 1); }
       if (gold) {
         gold.t += dt * 0.45;
         const k = ease(gold.t); gold.m.position.set(X.miners + (X.node - X.miners) * k, -0.2 + Math.sin(k * Math.PI) * 3, 0); gold.m.rotation.y += dt * 3; gold.m.scale.setScalar(1.4 - 0.4 * k);
-        if (gold.t >= 1) { world.remove(gold.m); gold = null; pushBlock(true); ring(col.warn); }
+        if (q.trails && gold.px !== undefined) { tail.set(gold.px, gold.py, gold.pz); trails.add(tail, gold.m.position, col.warn, 3, 0, 1); trails.add(tail, gold.m.position, col.warn, 14, 0, 0.3); }
+        gold.px = gold.m.position.x; gold.py = gold.m.position.y; gold.pz = gold.m.position.z;
+        if (gold.t >= 1) {
+          world.remove(gold.m); gold = null; pushBlock(true);
+          // arrival at the node: three rings one after the other, a flash of the whole scene, the sparks and rays flare up
+          ring(col.warn); ring(col.ok, X.node, 0.25); ring(col.c1, X.node, 0.5); flare = 1; st.flash = 1; st.shake = Math.max(st.shake, 0.8); st.goldT = 3;
+        }
       }
     }
     // Tooltips: the real numbers behind a station while the mouse is near it (an HTML label over the canvas, positioned from the projected station).
@@ -415,7 +424,7 @@ window.Flow3D = (() => {
       matBlur.uniforms.t.value = rtB.texture; matBlur.uniforms.dir.value.set(0, 1 / rtA.height); full(matBlur, rtA);
       matBlur.uniforms.t.value = rtA.texture; matBlur.uniforms.dir.value.set(2 / rtA.width, 0); full(matBlur, rtB); // a second, wider round for a soft halo
       matBlur.uniforms.t.value = rtB.texture; matBlur.uniforms.dir.value.set(0, 2 / rtA.height); full(matBlur, rtA);
-      matMix.uniforms.t.value = rtS.texture; matMix.uniforms.b.value = rtA.texture; matMix.uniforms.k.value = 1.15; full(matMix, null);
+      matMix.uniforms.t.value = rtS.texture; matMix.uniforms.b.value = rtA.texture; matMix.uniforms.k.value = 1.15 + 1.6 * st.flash; full(matMix, null);
     }
     function setLevel(l) {
       if (l === st.lv) return;
@@ -473,7 +482,11 @@ window.Flow3D = (() => {
         }
         st.tip = height;
       },
-      block() { if (gold) return; const m = new T.Mesh(chainGeo, track(new T.MeshBasicMaterial({ color: col.warn }))); m.position.set(X.miners, -0.2, 0); add(m); gold = { m, t: 0 }; ring(col.warn); },
+      block(height) {
+        if (gold) return;
+        const m = new T.Mesh(chainGeo, track(new T.MeshBasicMaterial({ color: col.warn }))); m.position.set(X.miners, -0.2, 0); add(m); gold = { m, t: 0 };
+        ring(col.warn, X.miners); st.goldT = 4; st.shake = 0.5; st.flash = Math.max(st.flash, 0.5);
+      },
     };
   }
   return { create, supported: () => { try { const c = document.createElement('canvas'); return !!(window.THREE && (c.getContext('webgl2') || c.getContext('webgl'))); } catch (_) { return false; } } };
