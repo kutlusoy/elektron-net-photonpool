@@ -11,8 +11,24 @@ const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-liv
     <section class="pane p-alloc" aria-label="Allocator"><h2><span>ALLOCATOR</span></h2><pre id="pane-alloc"></pre></section>
     <section class="pane p-shares" aria-label="Shares"><h2><span>SHARES</span></h2><pre id="pane-shares"></pre></section>
     <section class="pane p-events" aria-label="Events"><h2><span>EVENTS</span><em>public feed, no miner data</em></h2><div class="tty" id="events" tabindex="-1"></div></section>
+    <section class="pane p-flow" aria-label="Engine flow"><h2><span>FLOW</span><em>jobs out, shares back</em></h2><div class="flowbox"><canvas id="flow"></canvas></div></section>
   </main>`;
+let flow = null;
 const view = { s: null, seq: 0, lastTip: { h: null, t: 0 }, follow: true };
+
+// The 3D scene needs Three.js (served from the pool itself, loaded only here); without WebGL or when loading fails the light 2D scene is used.
+const loadScript = (src) => new Promise((ok, no) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = no; document.head.append(s); });
+async function startFlow() {
+  const canvas = $('#flow'); if (!canvas) return;
+  let make = null;
+  try {
+    const gl = (() => { try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); } catch (_) { return false; } })();
+    if (gl) { await loadScript('/vendor/three.min.js'); await loadScript('/scene3d.js'); if (window.Flow3D) make = Flow3D; }
+  } catch (_) { /* fall back to the 2D scene */ }
+  if (!$('#flow')) return; // the view was left while loading
+  try { flow = (make || Flow).create(canvas); } catch (_) { flow = Flow.create(canvas); }
+  flow.start(); if (view.s) { const s = view.s; flow.feed({ jobs: s.net ? s.net.jobsPerSec : 0, shares: s.shares.perSec, cands: s.alloc.candidates, miners: s.miners.online, ok: s.shares.okN, stale: s.shares.staleN, bad: s.shares.dupN + s.shares.invN, epochUse: s.alloc.epochUse, batchMs: s.node.batchMs }); flow.tip(s.node.height); }
+}
 
 const get = async (p) => { const r = await fetch(p, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); };
 
@@ -21,10 +37,20 @@ function addEvent(e) {
   if (!box) return;
   const d = document.createElement('div');
   const t = new Date(e.t * 1000).toTimeString().slice(0, 8), lv = String(e.lvl || 'info').toLowerCase().replace(/[^a-z]/g, '');
-  d.innerHTML = `<span class="t">${t}</span> <span class="lv lv-${lv}">${esc(lv.toUpperCase().padEnd(5))}</span>${esc(e.msg)}`;
+  d.innerHTML = `<span class="t">${t}</span> <span class="lv lv-${lv}">${esc(lv.toUpperCase().padEnd(5))}</span>${hashSpans(e.msg)}`;
   box.appendChild(d);
   while (box.childElementCount > 300) box.firstChild.remove();
   if (view.follow) box.scrollTop = box.scrollHeight;
+}
+
+// Photon gateways: counters of the public engine data turned into rates between two polls
+let pPrev = null;
+function photonRates(s) {
+  const p = s.photon; if (!p || !p.enabled) { pPrev = null; return { photon: false }; }
+  const now = performance.now(), r = { photon: true, gateways: p.connections || 0, channels: p.channels || 0 };
+  if (pPrev && now > pPrev.t) { const dt = (now - pPrev.t) / 1000; r.pshares = Math.max(0, ((p.sharesOk || 0) + (p.sharesRejected || 0)) - pPrev.sh) / dt; const tot = Math.max(1, ((p.sharesOk || 0) + (p.sharesRejected || 0)) - pPrev.sh); r.pRej = Math.max(0, (p.sharesRejected || 0) - pPrev.rej) / tot; r.checks = Math.max(0, ((p.checksOk || 0) + (p.checksFailed || 0)) - pPrev.ck) / dt; }
+  pPrev = { t: now, sh: (p.sharesOk || 0) + (p.sharesRejected || 0), rej: p.sharesRejected || 0, ck: (p.checksOk || 0) + (p.checksFailed || 0) };
+  return r;
 }
 
 async function refresh() {
@@ -37,7 +63,8 @@ async function refresh() {
   Series.push('sps', s.shares.perSec);
   if (view.lastTip.h !== null && n.height !== view.lastTip.h && view.lastTip.t) Series.push('tipint', n.tipTime - view.lastTip.t, n.tipTime);
   if (n.height !== view.lastTip.h) view.lastTip = { h: n.height, t: n.tipTime };
-  (ev.events || []).forEach(addEvent);
+  if (flow) { flow.feed({ jobs: s.net ? s.net.jobsPerSec : 0, shares: s.shares.perSec, units: s.alloc.unitsPerSec, cands: s.alloc.candidates, hr: s.hashrate.now, miners: s.miners.online, ok: s.shares.okN, stale: s.shares.staleN, bad: s.shares.dupN + s.shares.invN, epochUse: s.alloc.epochUse, batchMs: n.batchMs, backend: n.backend, ...photonRates(s) }); flow.tip(n.height); }
+  (ev.events || []).forEach((x) => { addEvent(x); if (flow && x.lvl === 'blk') flow.block(); });
   if (typeof ev.last === 'number') view.seq = ev.last;
 }
 
@@ -70,10 +97,10 @@ function render() {
   ].join('\n');
   $('#pane-shares').innerHTML = [
     `${span('dim', 'shares/s  ')}${s.shares.perSec.toFixed(1)}`,
-    `${span('dim', 'accepted  ')}${span('ok', pct(s.shares.ok))}`,
-    `${span('dim', 'stale     ')}${span('warn', pct(s.shares.stale))}`,
-    `${span('dim', 'duplicate ')}${pct(s.shares.dup)}`,
-    `${span('dim', 'invalid   ')}${span('err', pct(s.shares.inv))}`,
+    `${span('dim', 'accepted  ')}${span('ok', pct(s.shares.ok))}  ${num(s.shares.okN)}`,
+    `${span('dim', 'stale     ')}${span('warn', pct(s.shares.stale))}  ${num(s.shares.staleN)}`,
+    `${span('dim', 'duplicate ')}${pct(s.shares.dup)}  ${num(s.shares.dupN)}`,
+    `${span('dim', 'invalid   ')}${span('err', pct(s.shares.inv))}  ${num(s.shares.invN)}`,
     `${span('dim', 'total     ')}${num(s.shares.total)}`,
   ].join('\n');
   Extras.tick();
@@ -83,7 +110,7 @@ const card = Extras.card;
 const timeLine = (host, series, fmt, extra = {}) => Neon.line(host, { series, fmt, xfmt: agoLabel, ...extra });
 
 Extras.add('tip', (el) => {
-  const k = card(el, 'chain and node link', 'wide'), lat = card(el, 'tip to job latency (ms)', 'wide'), iv = card(el, 'seconds between new tips (since this page was opened)', 'wide');
+  const k = card(el, 'chain and node link', 'wide'), lat = card(el, 'tip to job latency (ms)', 'wide'), iv = card(el, 'seconds between new tips', 'wide');
   return () => {
     const s = view.s; if (!s) return;
     Neon.kpis(k, [{ label: 'height', value: s.node.height, fmt: num }, { label: 'tip age', value: Date.now() / 1000 - s.node.tipTime, fmt: (v) => hms(v), color: 'c2' }, { label: 'latency p50', value: s.node.p50, fmt: (v) => v.toFixed(0) + ' ms', color: 'c3' },
@@ -111,9 +138,9 @@ Extras.add('shares', (el) => {
   const k = card(el, 'share quality', 'wide'), q = card(el, 'share outcome'), r = card(el, 'shares per second');
   return () => {
     const s = view.s; if (!s) return;
-    Neon.kpis(k, [{ label: 'shares / s', value: s.shares.perSec, fmt: (v) => v.toFixed(1), color: 'c3' }, { label: 'accepted', value: s.shares.ok * 100, fmt: (v) => v.toFixed(2) + '%', color: 'ok' },
-      { label: 'stale', value: s.shares.stale * 100, fmt: (v) => v.toFixed(2) + '%', color: 'warn' }, { label: 'total', value: s.shares.total, fmt: num, color: 'c2' }]);
-    Neon.donut(q, [{ label: 'accepted', value: s.shares.ok, color: 'ok', text: pct(s.shares.ok) }, { label: 'stale', value: s.shares.stale, color: 'warn', text: pct(s.shares.stale) }, { label: 'duplicate', value: s.shares.dup, color: 'c3', text: pct(s.shares.dup) }, { label: 'invalid', value: s.shares.inv, color: 'err', text: pct(s.shares.inv) }], { big: pct(s.shares.ok), sub: 'accepted' });
+    Neon.kpis(k, [{ label: 'shares / s', value: s.shares.perSec, fmt: (v) => v.toFixed(1), color: 'c3' }, { label: 'accepted', value: s.shares.ok * 100, fmt: (v) => v.toFixed(2) + '%', color: 'ok', sub: num(s.shares.okN) + ' shares' },
+      { label: 'stale', value: s.shares.stale * 100, fmt: (v) => v.toFixed(2) + '%', color: 'warn', sub: num(s.shares.staleN) + ' shares' }, { label: 'duplicate / invalid', value: s.shares.dupN + s.shares.invN, fmt: num, color: 'c3', sub: `${num(s.shares.dupN)} duplicate, ${num(s.shares.invN)} invalid` }, { label: 'total', value: s.shares.total, fmt: num, color: 'c2', sub: 'shares since start' }]);
+    Neon.donut(q, [{ label: 'accepted', value: s.shares.ok, color: 'ok', text: pct(s.shares.ok) + '  ' + num(s.shares.okN) }, { label: 'stale', value: s.shares.stale, color: 'warn', text: pct(s.shares.stale) + '  ' + num(s.shares.staleN) }, { label: 'duplicate', value: s.shares.dup, color: 'c3', text: pct(s.shares.dup) + '  ' + num(s.shares.dupN) }, { label: 'invalid', value: s.shares.inv, color: 'err', text: pct(s.shares.inv) + '  ' + num(s.shares.invN) }], { big: num(s.shares.total), sub: 'shares' });
     timeLine(r, [{ name: 'shares/s', data: Series.get('sps'), color: 'c2' }], (v) => v.toFixed(1));
   };
 });
@@ -126,10 +153,11 @@ async function mount(root) {
   const box = $('#events');
   on(box, 'scroll', () => { view.follow = box.scrollTop + box.clientHeight >= box.scrollHeight - 6; });
   on(document, 'depthchange', () => { try { render(); } catch (_) { /* no data yet */ } });
+  startFlow();
   const tick = async () => { try { await refresh(); render(); } catch (e) { if (!view.s) $('#pane-tip').textContent = 'pool API not reachable: ' + e.message; } };
   await tick();
   timers.push(setInterval(tick, 2000));
 }
-function unmount() { timers.splice(0).forEach(clearInterval); offs.splice(0).forEach((f) => f()); }
+function unmount() { if (flow) { flow.stop(); flow = null; } timers.splice(0).forEach(clearInterval); offs.splice(0).forEach((f) => f()); }
 return { mount, unmount };
 })();

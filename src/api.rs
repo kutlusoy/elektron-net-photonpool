@@ -165,7 +165,7 @@ pub fn summary_value(p: &Arc<Pool>, public: bool) -> Value {
     let modes: Vec<Value> = [crate::config::Mode::Solo, crate::config::Mode::Pplns, crate::config::Mode::Pps]
         .iter()
         .filter(|m| p.cfg.payout.offers(**m))
-        .map(|m| json!({"mode": m.as_str(), "fee": p.cfg.payout.fee(*m), "available": p.mode_available(*m).is_ok()}))
+        .map(|m| json!({"mode": m.as_str(), "fee": p.cfg.payout.fee(*m), "available": p.mode_available(*m).is_ok(), "online": live.by_mode[*m as usize].0, "hashrate": live.by_mode[*m as usize].1}))
         .collect();
     let mut v = json!({
         "pool": {"name": "photon", "version": env!("CARGO_PKG_VERSION"), "uptime": p.started.elapsed().as_secs_f64(), "mode": "core", "explorerUrl": p.cfg.api.explorer_url},
@@ -177,8 +177,11 @@ pub fn summary_value(p: &Arc<Pool>, public: bool) -> Value {
         },
         "hashrate": {"now": live.hashrate, "m1": live.m1, "h1": live.h1, "hist": if live.hist.is_empty() { vec![0.0] } else { live.hist.iter().copied().collect() }},
         "miners": {"online": live.online, "total": live.total, "v1": live.total, "v2": 0, "edge": 0},
-        "shares": {"perSec": live.shares_per_sec, "ok": frac(ok), "stale": frac(stale), "dup": frac(dup), "inv": frac(inv), "total": total},
+        "shares": {"perSec": live.shares_per_sec, "ok": frac(ok), "stale": frac(stale), "dup": frac(dup), "inv": frac(inv), "total": total, "okN": ok, "staleN": stale, "dupN": dup, "invN": inv},
         "alloc": {"candidates": cands, "unitsPerSec": live.units_per_sec, "epochUse": used as f64 / total_units as f64, "overlap": overlap},
+        "net": {"connections": live.total, "inBps": live.in_bps, "outBps": live.out_bps, "jobsPerSec": live.jobs_per_sec, "connectsPerSec": live.connects_per_sec,
+                "accepted": crate::stratum::NET.accepted.load(Ordering::Relaxed), "closed": crate::stratum::NET.closed.load(Ordering::Relaxed), "refused": crate::stratum::NET.refused.load(Ordering::Relaxed),
+                "bytesIn": crate::stratum::NET.bytes_in.load(Ordering::Relaxed), "bytesOut": crate::stratum::NET.bytes_out.load(Ordering::Relaxed)},
         "found": s.found.lock().unwrap().len(),
         "modes": modes,
         "photon": p.photon.get().map(|ph| {
@@ -190,7 +193,15 @@ pub fn summary_value(p: &Arc<Pool>, public: bool) -> Value {
         }).unwrap_or_else(|| json!({"enabled": false})),
     });
     if public {
-        v["photon"] = json!({"enabled": p.photon.get().is_some()});
+        // aggregates only: no listen address, no key, no timings
+        v["photon"] = match p.photon.get() {
+            Some(ph) => {
+                let st = &ph.stats;
+                let g = |a: &std::sync::atomic::AtomicU64| a.load(Ordering::Relaxed);
+                json!({"enabled": true, "connections": g(&st.connections), "channels": g(&st.channels), "sharesOk": g(&st.accepted), "sharesRejected": g(&st.rejected), "checksOk": g(&st.checks_ok), "checksFailed": g(&st.checks_failed), "blocks": g(&st.blocks)})
+            }
+            None => json!({"enabled": false}),
+        };
     }
     v
 }

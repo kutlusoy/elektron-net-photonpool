@@ -67,12 +67,16 @@ const Neon = (() => {
       st.sx = sx; st.x0 = x0; st.x1 = x1;
       grid.textContent = '';
       const fy = o.fmt || ((v) => String(+v.toPrecision(3)));
+      let prevLabel = null;
       for (const t of ticks) {
         svg('line', { x1: m.l, x2: W - m.r, y1: sy(t), y2: sy(t), class: 'ngrid' }, grid);
-        svg('text', { x: m.l - 6, y: sy(t) + 3.5, class: 'ntxt', 'text-anchor': 'end' }, grid).textContent = fy(t);
+        const lab = fy(t);
+        if (lab !== prevLabel) svg('text', { x: m.l - 6, y: sy(t) + 3.5, class: 'ntxt', 'text-anchor': 'end' }, grid).textContent = lab; // a repeated label (integer format of a flat series) adds nothing
+        prevLabel = lab;
       }
       const fx = o.xfmt || ((x) => String(Math.round(x)));
-      [[x0, 'start'], [(x0 + x1) / 2, 'middle'], [x1, 'end']].forEach(([x, a]) => svg('text', { x: sx(x), y: H - 5, class: 'ntxt', 'text-anchor': a }, grid).textContent = fx(x));
+      let prevX = null;
+      [[x0, 'start'], [(x0 + x1) / 2, 'middle'], [x1, 'end']].forEach(([x, a]) => { const lab = fx(x); if (lab !== prevX || a === 'end') svg('text', { x: sx(x), y: H - 5, class: 'ntxt', 'text-anchor': a }, grid).textContent = lab; prevX = lab; });
       sets.forEach((pts, i) => {
         const e = st.els[i]; if (!pts.length) return;
         const d = pts.map((p, k) => `${k ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join('');
@@ -169,7 +173,7 @@ const Neon = (() => {
       host._donut = { c, mid, sub, segs: new Map(), legend: html('nleg', host) };
     }
     const d = host._donut, C = 2 * Math.PI * 44, total = parts.reduce((a, p) => a + p.value, 0) || 1;
-    const show = (p) => { d.mid.textContent = p ? `${(p.value / total * 100).toFixed(p.value / total < 0.1 ? 1 : 0)}%` : (o.big ?? ''); d.sub.textContent = p ? p.label : (o.sub ?? ''); d.c.classList.toggle('hov', !!p); d.segs.forEach((e) => e.circle.classList.toggle('on', !!p && e.key === p.key)); };
+    const show = (p) => { d.mid.textContent = p ? `${(p.value / total * 100).toFixed(p.value / total < 0.1 ? 1 : 0)}%` : (o.big ?? ''); d.mid.style.fontSize = Math.min(15, 62 / (Math.max(1, d.mid.textContent.length) * 0.62)) + 'px'; d.sub.textContent = p ? p.label : (o.sub ?? ''); d.c.classList.toggle('hov', !!p); d.segs.forEach((e) => e.circle.classList.toggle('on', !!p && e.key === p.key)); };
     let cum = 0; const keep = new Set();
     parts.forEach((p, i) => {
       const key = p.key ?? p.label; keep.add(key); p.key = key;
@@ -230,7 +234,8 @@ const Extras = (() => {
   const reg = {};
   return {
     add(id, build) { reg[id] = { build, up: null }; },
-    card(parent, title, cls = '') { const c = document.createElement('section'); c.className = 'card ' + cls; const h = document.createElement('h3'); h.textContent = title; const b = document.createElement('div'); b.className = 'cbody'; c.append(h, b); parent.append(c); return b; },
+    row(parent) { const r = document.createElement('div'); r.className = 'crow'; parent.append(r); return r; },
+    card(parent, title, cls = '') { const c = document.createElement('section'); c.className = 'card ' + cls; const h = document.createElement('h3'); h.textContent = title; h.title = title; const b = document.createElement('div'); b.className = 'cbody'; c.append(h, b); parent.append(c); return b; },
     tick() {
       for (const id in reg) {
         const p = document.querySelector('.p-' + id); if (!p) continue;
@@ -242,4 +247,33 @@ const Extras = (() => {
       }
     },
   };
+})();
+
+// A card in a row whose text is cut off grows while the mouse is over it; the other cards of the row shrink a little to make room.
+(() => {
+  const cut = (card) => card.scrollWidth > card.clientWidth + 1 || [...card.querySelectorAll('*')].some((e) => e.clientWidth && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== 'visible');
+  document.addEventListener('mouseover', (ev) => {
+    const card = ev.target.closest && ev.target.closest('.crow > .card');
+    if (!card) return;
+    const row = card.parentElement;
+    if (row._grown === card || getComputedStyle(row).display !== 'grid') return;
+    const cols = getComputedStyle(row).gridTemplateColumns.split(' ').map(parseFloat);
+    const kids = [...row.children];
+    if (cols.length !== kids.length || kids.some((k) => k.offsetLeft > 0 && k.offsetTop !== kids[0].offsetTop) || !cut(card)) return;
+    clearTimeout(row._t);
+    const i = kids.indexOf(card), total = cols.reduce((a, b) => a + b, 0), want = Math.min(total * 0.6, cols[i] * 1.5);
+    const rest = total - cols[i], scale = (total - want) / rest;
+    if (!row._orig) { row._orig = cols; row._inline = row.style.gridTemplateColumns; }
+    row.style.gridTemplateColumns = cols.map((w, k) => (k === i ? want : w * scale) + 'px').join(' ');
+    row._grown = card;
+  });
+  document.addEventListener('mouseout', (ev) => {
+    const card = ev.target.closest && ev.target.closest('.crow > .card');
+    if (!card || (ev.relatedTarget && card.contains(ev.relatedTarget))) return;
+    const row = card.parentElement;
+    if (row._grown !== card) return;
+    row._grown = null;
+    row.style.gridTemplateColumns = row._orig.map((w) => w + 'px').join(' ');
+    row._t = setTimeout(() => { row.style.gridTemplateColumns = row._inline; row._orig = null; }, 300);
+  });
 })();

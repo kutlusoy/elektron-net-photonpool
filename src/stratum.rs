@@ -80,16 +80,21 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
                 continue;
             }
         };
-        let Ok(permit) = permits.clone().try_acquire_owned() else { continue };
+        let Ok(permit) = permits.clone().try_acquire_owned() else {
+            NET.refused.fetch_add(1, Ordering::Relaxed);
+            continue;
+        };
         let _ = stream.set_nodelay(true);
         let (pool, cfg, port) = (pool.clone(), cfg.clone(), port.clone());
         tokio::spawn(async move {
             let _permit = permit;
             let id = pool.session_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            NET.accepted.fetch_add(1, Ordering::Relaxed);
             let stats = Arc::new(SessionStats::new());
             pool.sessions.lock().unwrap().insert(id, stats.clone());
             let res = Session::new(pool.clone(), cfg, port, stats, id).run(stream).await;
             pool.sessions.lock().unwrap().remove(&id);
+            NET.closed.fetch_add(1, Ordering::Relaxed);
             if let Err(e) = res {
                 tracing::debug!("session {id} {peer} closed: {e}");
             }
@@ -160,7 +165,20 @@ struct Req<'a> {
     params: Value,
 }
 
+/// Process-wide network counters of the miner-facing listeners, sampled once a second into rates for the engine view.
+use std::sync::atomic::AtomicU64;
+pub struct Net {
+    pub bytes_in: AtomicU64,
+    pub bytes_out: AtomicU64,
+    pub accepted: AtomicU64,
+    pub closed: AtomicU64,
+    pub refused: AtomicU64,
+    pub jobs: AtomicU64,
+}
+pub static NET: Net = Net { bytes_in: AtomicU64::new(0), bytes_out: AtomicU64::new(0), accepted: AtomicU64::new(0), closed: AtomicU64::new(0), refused: AtomicU64::new(0), jobs: AtomicU64::new(0) };
+
 async fn send(wr: &mut OwnedWriteHalf, data: &[u8]) -> Result<()> {
+    NET.bytes_out.fetch_add(data.len() as u64, Ordering::Relaxed);
     timeout(WRITE_TIMEOUT, wr.write_all(data)).await.map_err(|_| anyhow!("write timeout"))??;
     Ok(())
 }
@@ -171,6 +189,7 @@ async fn read_chunk(rd: &mut BufReader<OwnedReadHalf>, buf: &mut Vec<u8>) -> Res
     }
     let limit = (MAX_LINE + 1 - buf.len()) as u64;
     let n = (&mut *rd).take(limit).read_until(b'\n', buf).await?;
+    NET.bytes_in.fetch_add(n as u64, Ordering::Relaxed);
     if n == 0 {
         return Ok(None);
     }
@@ -438,6 +457,7 @@ impl Session {
         let mut msg = String::with_capacity(1024);
         cand.write_notify(&mut msg, id, version, ntime, clean);
         send(wr, msg.as_bytes()).await?;
+        NET.jobs.fetch_add(1, Ordering::Relaxed);
         self.last_job = Instant::now();
         self.stats.unit.store(((unit.0 as u64) << 16) | ((unit.2 as u64) << 8) | unit.1 as u64, Ordering::Relaxed);
         self.jobs.push_back(JobRef { id, epoch, src, n, version, sent: Instant::now() });
@@ -621,7 +641,7 @@ impl Session {
                     if let Err(e) = pool.record_block(height, reward, subsidy, net_diff, hash.clone(), account, worker.clone(), mode).await {
                         pool.event("err", format!("ledger could not record block {height}: {e}"));
                     }
-                    pool.event("blk", format!("BLOCK FOUND {height} {}.. by {worker} [{}] -> submitblock: accepted", &hash[..16], mode.as_str()));
+                    pool.event("blk", format!("BLOCK FOUND {height} {hash} by {worker} [{}] -> submitblock: accepted", mode.as_str()));
                 }
                 Ok(Some(r)) => pool.event("err", format!("block {height} by {worker} rejected by node: {r}")),
                 Err(e) => pool.event("err", format!("submitblock failed for {height}: {e}")),
@@ -634,6 +654,8 @@ impl Session {
 async fn stats_task(pool: Arc<Pool>) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let (mut prev_shares, mut prev_units, mut prev_epoch) = (0u64, 0u64, 0u64);
+    let mut prev_net = (0u64, 0u64, 0u64, 0u64);
+    let (mut told_online, mut told_at) = (0u64, Instant::now());
     // one history sample per minute for the public statistics
     let (mut hist_minute, mut hist_sum, mut hist_n, mut hist_base) = (unix_now() as i64 / 60, 0.0f64, 0u32, (0u64, 0u64, 0u64));
     // per device type: (name, summed hash rate of the seconds, seconds, peak working connections), written once per device_history_minutes
@@ -645,10 +667,16 @@ async fn stats_task(pool: Arc<Pool>) {
         let sessions: Vec<Arc<SessionStats>> = pool.sessions.lock().unwrap().values().cloned().collect();
         let now = unix_now();
         let (mut hr, mut online, mut shares, mut pps_hr) = (0.0, 0u64, 0u64, 0.0);
+        let mut by_mode = [(0u64, 0.0f64); 3];
         for s in &sessions {
             hr += get_f64(&s.hashrate);
             if s.mode.load(Ordering::Relaxed) == Mode::Pps as u64 {
                 pps_hr += get_f64(&s.hashrate);
+            }
+            if get_f64(&s.difficulty) > 0.0 {
+                let m = (s.mode.load(Ordering::Relaxed) as usize).min(2);
+                by_mode[m].0 += 1;
+                by_mode[m].1 += get_f64(&s.hashrate);
             }
             // a connected miner is online even while it hashes without finding a share (CPU miners can take minutes per share)
             if get_f64(&s.difficulty) > 0.0 {
@@ -668,6 +696,21 @@ async fn stats_task(pool: Arc<Pool>) {
         live.hist.push_back(hr);
         if live.hist.len() > 60 {
             live.hist.pop_front();
+        }
+        let net = (NET.bytes_in.load(Ordering::Relaxed), NET.bytes_out.load(Ordering::Relaxed), NET.jobs.load(Ordering::Relaxed), NET.accepted.load(Ordering::Relaxed));
+        live.in_bps = net.0.saturating_sub(prev_net.0) as f64;
+        live.out_bps = net.1.saturating_sub(prev_net.1) as f64;
+        live.jobs_per_sec = net.2.saturating_sub(prev_net.2) as f64;
+        live.connects_per_sec = net.3.saturating_sub(prev_net.3) as f64;
+        prev_net = net;
+        live.by_mode = by_mode;
+        // a changed number of connected miners is worth a line in the feed, at most one every 30 seconds
+        if online != told_online && told_at.elapsed() >= Duration::from_secs(30) {
+            let d = online as i64 - told_online as i64;
+            told_online = online;
+            told_at = Instant::now();
+            let p = pool.clone();
+            p.event("info", format!("miners online: {online} ({}{d})", if d >= 0 { "+" } else { "" }));
         }
         live.online = online;
         live.total = sessions.len() as u64;

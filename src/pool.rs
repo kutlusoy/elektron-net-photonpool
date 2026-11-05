@@ -108,6 +108,13 @@ pub struct Live {
     pub online: u64,
     pub total: u64,
     pub pps_hashrate: f64,
+    /// Network rates of the last second: bytes in and out, jobs sent, new connections.
+    pub in_bps: f64,
+    pub out_bps: f64,
+    pub jobs_per_sec: f64,
+    pub connects_per_sec: f64,
+    /// Started connections and their summed hash rate per payout mode (index: solo, pplns, pps).
+    pub by_mode: [(u64, f64); 3],
 }
 
 pub struct Unit {
@@ -612,7 +619,7 @@ impl Pool {
                             q.pop_front();
                         }
                     }
-                    self.event("info", format!("epoch {} height {} tip {}.. {} candidates ready in {:.0} ms", e.id, e.height, &e.tip_hex[..12], e.candidates.len(), ms));
+                    self.event("info", format!("epoch {} height {} tip {} {} candidates ready in {:.0} ms", e.id, e.height, e.tip_hex, e.candidates.len(), ms));
                     last_tip = e.tip_hex.clone();
                     last_build = Instant::now();
                     let e = Arc::new(e);
@@ -633,7 +640,7 @@ fn mask_account(a: &str) -> String {
 }
 
 /// The text of an event as the public page may show it, or None when it is not for the public: only epochs, the work space, the candidate backend,
-/// the node link and found blocks (with the finder masked, no worker name). Share, job, error and start-up lines never leave the operator view.
+/// the node link, block status changes, PPS availability, payouts (count and txid only), the number of connected miners and found blocks (with the finder masked, no worker name). Share, job, error and start-up lines never leave the operator view.
 pub fn public_message(lvl: &str, msg: &str) -> Option<String> {
     if msg.starts_with("epoch ") && msg.contains(" candidates ready in ") || msg.starts_with("work space:") || msg.starts_with("candidate backend:") {
         return Some(msg.to_string());
@@ -641,7 +648,11 @@ pub fn public_message(lvl: &str, msg: &str) -> Option<String> {
     if msg.starts_with("node link lost") {
         return Some("node link lost".into());
     }
-    if msg.starts_with("node link restored") {
+    if msg.starts_with("node link restored") || msg.starts_with("PPS is now ") || msg.starts_with("miners online: ") {
+        return Some(msg.to_string());
+    }
+    // block status changes ("block <hash> is mature"), credits of a pool block and broadcast payouts (hashes and txids are public chain data, no account)
+    if (msg.starts_with("block ") && (msg.contains(" is ") || msg.ends_with(" PPLNS credits recorded"))) || (msg.starts_with("payout ") && msg.contains(" accounts, tx ")) {
         return Some(msg.to_string());
     }
     if lvl == "blk" && msg.starts_with("BLOCK FOUND ") {
@@ -673,6 +684,11 @@ mod tests {
         assert_eq!(public_message("info", ok).as_deref(), Some(ok));
         assert_eq!(public_message("info", "work space: 16 -> 40 candidates (4000 units/s used, 512 available)").is_some(), true);
         assert_eq!(public_message("warn", "node link lost: connection refused to http://127.0.0.1:8332 (cookie /node/.cookie)").as_deref(), Some("node link lost"));
+        assert!(public_message("info", "block 0123456789abcdef is mature").is_some());
+        assert!(public_message("info", "PPS is now paused").is_some());
+        assert!(public_message("info", "payout 7: 3 accounts, tx 00ff").is_some());
+        assert!(public_message("info", "dry run: would pay 3 accounts, 1.5 coins in total").is_none());
+        assert!(public_message("info", "miners online: 5 (+1)").is_some());
         let blk = public_message("blk", "BLOCK FOUND 131 0123456789abcdef.. by be1qxym6egwr7esxryrayg2fdnnprl9zfepvc9p6z2.bitaxe3 [solo] -> submitblock: accepted").unwrap();
         assert_eq!(blk, "BLOCK FOUND 131 0123456789abcdef.. by be1qxy..p6z2 [solo] -> submitblock: accepted");
         assert!(!blk.contains("bitaxe3"));

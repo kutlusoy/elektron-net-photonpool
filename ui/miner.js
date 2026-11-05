@@ -140,7 +140,7 @@ const card = Extras.card;
 const wlabel = (w) => trunc(w.name, 24);
 
 Extras.add('hr', (el) => {
-  const k = card(el, 'your hashrate', 'wide'), c = card(el, 'hashrate, last 24 hours (10 minute steps)', 'wide'), sh = card(el, 'shares in 24 h by mode'), sh1 = card(el, 'shares in 1 h by mode');
+  const k = card(el, 'your hashrate', 'wide'), c = card(el, 'hashrate, last 24 hours', 'wide'), sh = card(el, 'shares in 24 h by mode'), sh1 = card(el, 'shares in 1 h by mode');
   return () => {
     const a = M.acct; if (!a) return;
     const h = a.history.map((x) => ({ x: x.time, y: x.hashrate })), ys = h.map((p) => p.y);
@@ -158,14 +158,14 @@ Extras.add('workers', (el) => {
   return () => {
     const a = M.acct; if (!a || !a.workerList.length) return;
     Neon.bars(h, [...a.workerList].sort((x, y) => y.hashrate - x.hashrate).slice(0, 12).map((w) => ({ key: w.name, label: wlabel(w), value: w.hashrate, text: fmtHash(w.hashrate) })));
-    Neon.bars(s, a.workerList.filter((w) => w.accepted + w.stale > 0).map((w) => ({ key: w.name, label: wlabel(w), value: w.stale / (w.accepted + w.stale), text: pct(w.stale / (w.accepted + w.stale)), color: 'warn' })).slice(0, 12), { max: 0.05 });
+    Neon.bars(s, a.workerList.filter((w) => w.accepted + w.stale > 0).map((w) => ({ key: w.name, label: wlabel(w), value: w.stale / (w.accepted + w.stale), text: pct(w.stale / (w.accepted + w.stale)) + `  ${num(w.stale)} of ${num(w.accepted + w.stale)}`, color: 'warn' })).slice(0, 12), { max: 0.05 });
     const c = {}; a.workerList.forEach((w) => { c[w.mode] = (c[w.mode] || 0) + 1; });
     Neon.donut(m, Object.entries(c).map(([n, v]) => ({ label: modeLabel[n] || n, value: v, text: num(v) })), { big: num(a.workerList.length), sub: 'workers' });
   };
 });
 
 Extras.add('pay', (el) => {
-  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins), oldest to newest', 'wide');
+  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins)', 'wide');
   return () => {
     const a = M.acct; if (!a) return;
     if (!a.payouts.length) { k.innerHTML = '<span class="dim">nothing paid out yet</span>'; return; }

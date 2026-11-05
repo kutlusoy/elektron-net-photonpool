@@ -73,6 +73,8 @@ async def main(h):
     h.check("the engine data says nothing about the Photon listener", eng["photon"] == {"enabled": False}, str(eng["photon"]))
     h.check("the public engine data has nothing about the node's address or credentials", "127.0.0.1" not in json.dumps(eng) and ".cookie" not in json.dumps(eng))
 
+    net = eng.get("net", {})
+    h.check("the engine data carries aggregate network counters", {"connections", "inBps", "outBps", "jobsPerSec", "accepted", "closed", "refused", "bytesIn", "bytesOut"} <= set(net) and net["bytesOut"] > 0 and net["accepted"] >= 1, str(net))
     # the operator listener serves the public API as well, and the admin API stays on it only
     h.check("the operator listener serves the public API too", get(API, "/public/v1/engine")["alloc"]["candidates"] == 4 and "events" in get(API, "/public/v1/events?since=0"))
     for path in ("/", "/engine", "/ops", "/miner", "/miner/" + ACCOUNT):
