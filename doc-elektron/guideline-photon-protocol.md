@@ -1,7 +1,7 @@
 # Elektron Net: `elektron-net-photonpool` Photon Protocol Guideline
 
-- **Version:** 0.15 (attestation cost measured against the set size; UTXO growth explained; full 16-bit version roll for ASICs, automatic variant count, measured Stratum traffic; everybody is paid, no minimum, parts per billion, turn-taking above the output limit, capacity limits; prior art, placement of the commitment; automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
-- **Date:** November 3, 2026
+- **Version:** 0.16 (first hardware test with a Bitaxe: a header covers about 2^37 hashes, not 2^44, so units are used up far faster; the pool adapts job interval and work space by itself; attestation cost measured against the set size; UTXO growth explained; full 16-bit version roll for ASICs, automatic variant count, measured Stratum traffic; everybody is paid, no minimum, parts per billion, turn-taking above the output limit, capacity limits; prior art, placement of the commitment; automatic reconnect of the gateway; several channels per gateway; trust memory and proportional spot check selection; spot check budget, measured under load; implemented in `src/photon/`: codec, messages, Noise transport, plan, accounting tree, coinbase check, share verifier, pool session, gateway with Stratum V1 front end for ASICs and a CPU miner for tests)
+- **Date:** November 5, 2026
 - **Audience:** Protocol, node and pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ExtractCoinbaseUTXOAttestation`), `src/node/miner.cpp` (`BlockAssembler::CreateNewBlock`), `src/rpc/mining.cpp` (`getblocktemplate`) - treat as ground truth for anything the doc references
 - **See also:** [`guideline-photon-architecture.md`](./guideline-photon-architecture.md), [`guideline-batch-attestation-rpc.md`](./guideline-batch-attestation-rpc.md), [`guideline-payout-modes.md`](./guideline-payout-modes.md), [`guideline-stratum-v1.md`](./guideline-stratum-v1.md)
@@ -137,7 +137,7 @@ Measured or read from the sources, 60-second blocks, regtest node with the Photo
 | RPC request size | one candidate with 128 outputs is about 19 KB of JSON; the node accepts 32 MB per request (about 1,500 variants) | `attest_all` splits larger requests |
 | Wire frames | plan with 200 outputs about 6 KB, an announced coinbase 6.4 KB, announces are cut at 48 KB (7 variants) | within the 64 KB frame limit |
 | Stratum traffic to the ASICs | every job carries the whole coinbase (13,033 B with 200 outputs against about 700 B with one). With the 12 version bits per unit that the pool-style 16 slices leave to the miner, an ASIC needs a new job after 2^44 hashes. **Measured** with 1,000 simulated ASICs of 200 TH/s each (200 PH/s, `test/measure_stratum_traffic.py`, the hash rate is a test knob, no hardware): slices 4.97 jobs/s per ASIC (the 200 ms job interval floor caps it; unlimited it would be about 14), 64.7 KB/s per ASIC, **64.7 MB/s = 518 Mbit/s** in total. | **fixed in the gateway:** every unit of work gets all 16 BIP 320 version bits (`full_version_roll`, default). 0.90 jobs/s, 11.7 KB/s per ASIC, **11.7 MB/s = 94 Mbit/s**, 5.5 times less (16 times less without the floor). The ASIC negotiates the mask `1fffe000`. |
-| Work space and variants | one variant offers 2^32 x 2^16 x 60 = 1.65e16 hashes per epoch, so the farm needs about `1.5 x hash rate x 60 s / 1.65e16` variants (16 variants cover 4.5 PH/s, 200 PH/s need about 1,100) | **automatic:** the gateway adds up the hash rate of its ASICs, raises the number of variants of a template (between `variants` and `max_variants`, default 16 and 2,048) and rebuilds the template for the same tip when ASICs join later (no clean job). It warns if the work space of a template is used up. At 1,066 variants the node attests in about 3.6 s per tip (3.4 ms per variant at 200 outputs) and the announce is about 7 MB per tip. |
+| Work space and variants | **Corrected by the first hardware test (14g):** a Bitaxe uses up five units per second, so one candidate (960 units per 20 s epoch) serves about ten of them. The pool now sizes its candidates by itself from the measured unit demand (`autoscale_candidates`, 1,940 candidates for 15,000 simulated Bitaxes, no overlapping units). The figures in this row assume miners that sweep the whole 2^48 of a unit: one variant offers 2^32 x 2^16 x 60 = 1.65e16 hashes per epoch, so the farm needs about `1.5 x hash rate x 60 s / 1.65e16` variants (16 variants cover 4.5 PH/s, 200 PH/s need about 1,100) | **automatic:** the gateway adds up the hash rate of its ASICs, raises the number of variants of a template (between `variants` and `max_variants`, default 16 and 2,048) and rebuilds the template for the same tip when ASICs join later (no clean job). It warns if the work space of a template is used up. At 1,066 variants the node attests in about 3.6 s per tip (3.4 ms per variant at 200 outputs) and the announce is about 7 MB per tip. |
 | UTXO set and block data | see 7.1 | accepted |
 
 ### 7.2 UTXO set growth
@@ -185,7 +185,7 @@ The cost of a block of the same shape stays the same while the set grows 31-fold
 
 ## 8. Search space without extranonce limits
 
-Today the fixed coinbase leaves about 2^44 header values per candidate and nTime step, which does not suffice for large farms. With an own node a gateway creates **coinbase variants**:
+Today the fixed coinbase leaves about 2^44 header values per candidate and nTime step, which does not suffice for large farms. **Correction after the first hardware test (14g):** this number assumes that a miner sweeps all granted version bits for one header. A Bitaxe (BM1370, ESP-Miner 2.9.0) sweeps only about 2^37 hashes per header (a pass of about 160 ms at 1 TH/s), so a unit lasts 128 times shorter than assumed, and the figures below that are derived from 2^44 are lower bounds on the work space that is needed. With an own node a gateway creates **coinbase variants**:
 
 - Variant id `v` is placed in the scriptSig after the BIP 34 prefix (a few bytes). Each variant changes the coinbase txid and therefore needs its own attestation.
 - The gateway asks its node for a batch of variants at once (batch attestation RPC with `script_sig_suffix`, `payout_script` and `extra_outputs` per candidate) and gets one attestation per variant.
@@ -376,6 +376,22 @@ The gateway keeps its state outside the pool connection (`Gw`): node link, plans
 
 Limits: an outage longer than the known plans (about one block) stops the work, because the gateway cannot build a coinbase without a plan; a restart of the gateway itself is not covered (run it under a supervisor); the pool does not yet tell the gateway how long it will be away.
 
+## 14g. First hardware test and self-adjusting pool (v0.9)
+
+The first run against real hardware (one Bitaxe Gamma, BM1370, ESP-Miner 2.9.0, through the Stratum V1 front end of the pool, solo mode) found three things that the simulated tests could not show:
+
+1. **`extranonce2_size = 0` makes ESP-Miner queue identical jobs.** The firmware keeps up to ten jobs ahead, each with `extranonce2 + 1`, which is the same job when there is no extranonce space. The chip sweeps the same header again and again
+   (the same hit every 163 ms; recomputed from the job, the logged hits are real), new work waits behind the queue for up to 5 s, and results arrive for jobs the pool no longer knows. First result: 98.8 % duplicates, later 83 % "job not found".
+2. **The space of a header is about 2^37 hashes**, not 2^44 (section 8).
+3. **Fix and result:** every fresh job is marked clean for ESP-Miner (`clean_work_agents`), jobs are sent about every 200 ms, jobs are kept 10 s for late shares. Result with one Bitaxe: 37 shares and one duplicate, one block found, stable.
+
+Consequences for the pool, all measured with simulated Bitaxes (`test/bench_bitaxe_profile.py`, `test/bench_dynamic_growth.py`, see `guideline-stratum-v1.md`):
+- 15,000 connections at five jobs per second: 74,000 jobs/s, 316 Mbit/s, 85 % of one core, 205 MB.
+- **Work space adapts by itself.** Candidates in use follow the unit demand (`autoscale_candidates`): 115 for 1,000 miners, 657 for 5,000, 1,950 for 15,000, back to the minimum when the miners leave; an exhausted epoch is rebuilt at once. No overlapping units during growth or shrinking.
+- **Job interval adapts per connection** (`adaptive_jobs`) from the duplicate and stale shares.
+
+What this does not settle: the behaviour of other firmware and of larger ASICs (open question 7), and whether the Photon gateway, which creates its headers locally, can serve a Bitaxe-like miner with the same cadence over its Stratum front end.
+
 ## 15. Checklist
 
 - [x] Batch attestation RPC as a node patch, equivalence against the oracle.
@@ -384,7 +400,9 @@ Limits: an outage longer than the known plans (about one block) stops the work, 
 - [x] Plan derivation specified and implemented deterministically (rules v1).
 - [x] Pool session: listener, channel state, plan publication from the ledger, `TemplateAnnounce` handling, spot-check calls to the node (`step17`).
 - [x] Spot check cost measured under load (14c); [ ] mainnet-sized blocks with several hundred real gateways on separate machines.
-- [x] Gateway core with CPU miner and local Stratum V1 front end ([ ] tested with real ASIC firmware).
+- [x] Gateway core with CPU miner and local Stratum V1 front end ([ ] tested with real ASIC firmware: the pool's own Stratum port was tested with one Bitaxe, see 14g; the gateway was not).
+- [x] First hardware test (one Bitaxe, pool Stratum port): shares accepted, block found; [ ] larger ASICs, [ ] other firmware, [ ] Photon channel with real hardware.
+- [x] Dynamic load (miners joining and leaving in waves) with self-adjusting work space, simulated.
 - [ ] Independent review of the Noise handshake and the key certification.
 
 ## 16. Open Questions
@@ -395,3 +413,5 @@ Limits: an outage longer than the known plans (about one block) stops the work, 
 4. How legacy ledger miners and Photon channels share one block reward in the plan.
 5. Whether the accounting commitment should cover the share log as well as the credits.
 6. Share chain design for a later pool-less mode.
+7. How many header values a miner of each firmware really sweeps per job, and how often it needs a new header (Bitaxe: about 2^37, new job about every 160 ms at 1 TH/s; larger ASICs unknown). The adaptive pool measures it per connection; a profile per firmware could set it from the start.
+8. Whether a miner without extranonce space can be served at a lower job rate, for example by an own extranonce2 range that stays inside a pre-attested set of coinbases (the txid of the coinbase is attested, so every extranonce value needs its own attestation).

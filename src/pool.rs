@@ -471,8 +471,8 @@ impl Pool {
         }
         let rate = prev.next_unit.load(Ordering::Relaxed) as f64 / age;
         let old = get_f64(&self.demand_units);
-        // up at once, down slowly
-        let demand = if rate > old { rate } else { old * 0.9 + rate * 0.1 };
+        // up at once, down by half per epoch
+        let demand = if rate > old { rate } else { old * 0.5 + rate * 0.5 };
         set_f64(&self.demand_units, demand);
         let horizon = if self.cfg.pool.refresh_secs > 0 { self.cfg.pool.refresh_secs as f64 } else { 60.0 };
         let want = candidates_needed(demand, horizon, prev.slices, self.cfg.pool.min_candidates, self.payouts.len());
@@ -512,6 +512,14 @@ impl Pool {
         Ok(Epoch::new(id, best, height, candidates))
     }
 
+    /// The current epoch has used up (nearly) all its work units although more candidates are available: build a bigger one now instead of waiting for the refresh.
+    fn epoch_exhausted(&self, since_build: Duration) -> bool {
+        if !self.cfg.pool.autoscale_candidates || since_build < Duration::from_secs(3) || self.active_candidates.load(Ordering::Relaxed) >= self.payouts.len() {
+            return false;
+        }
+        self.epoch.borrow().as_ref().map_or(false, |e| e.units_used() * 10 >= e.units_total() * 9)
+    }
+
     pub async fn run_tip_loop(self: Arc<Self>) {
         let poll = Duration::from_millis(self.cfg.node.poll_ms);
         let refresh = Duration::from_secs(self.cfg.pool.refresh_secs);
@@ -536,7 +544,7 @@ impl Pool {
             }
             self.stats.connected.store(true, Ordering::Relaxed);
             let tip_changed = best != last_tip;
-            if !tip_changed && !(refresh.as_secs() > 0 && last_build.elapsed() >= refresh) {
+            if !tip_changed && !(refresh.as_secs() > 0 && last_build.elapsed() >= refresh) && !self.epoch_exhausted(last_build.elapsed()) {
                 continue;
             }
             let detected = Instant::now();
@@ -570,7 +578,9 @@ impl Pool {
 pub fn candidates_needed(units_per_sec: f64, horizon_secs: f64, slices: u64, min: usize, max: usize) -> usize {
     let per_candidate = (slices * NTIME_SLOTS) as f64;
     let want = (units_per_sec * horizon_secs * 1.25 / per_candidate).ceil() as usize;
-    want.clamp(min.max(1), max.max(1)).min(max.max(1))
+    let max = max.max(1);
+    // fewer addresses than `min_candidates` is fine: use all of them (clamp would panic when min > max)
+    want.clamp(min.clamp(1, max), max)
 }
 
 #[cfg(test)]
@@ -586,6 +596,9 @@ mod tests {
         assert_eq!(candidates_needed(1.0e6, 20.0, 16, 16, 512), 512);
         // never more than there are, never fewer than one
         assert_eq!(candidates_needed(0.0, 20.0, 16, 0, 0), 1);
+        // a pool with fewer addresses than the minimum uses all of them (this once panicked in the epoch loop)
+        assert_eq!(candidates_needed(0.0, 60.0, 16, 16, 2), 2);
+        assert_eq!(candidates_needed(1.0e6, 60.0, 16, 16, 8), 8);
     }
 
     fn dummy(n: usize, target: u8) -> Epoch {

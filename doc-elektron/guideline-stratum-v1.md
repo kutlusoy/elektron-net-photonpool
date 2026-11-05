@@ -113,6 +113,24 @@ Two things adapt to the load now:
 Without autoscaling the same load with 64 candidates overlapped by 438,560 units at 5,000 connections. With a node without the batch patch every candidate costs one `getblocktemplate` call (about 0.7 ms),
 1,900 candidates then take over a second per epoch: build the node with `NODE_PATCHES=true` for pools of this size.
 
+### Dynamic load: miners joining and leaving
+
+`test/bench_dynamic_growth.py` (batch node, 2,000 addresses, 20 s epochs, one 4-core machine for the daemon, the load generator and the node): 1,000 simulated Bitaxes at t = 0, 4,000 more after 40 s, 10,000 more after 80 s, then the groups leave one by one.
+
+| Time | Miners | Candidates in use | Demand (units/s) | Overlapping units | Node time per epoch | Daemon memory | Daemon CPU |
+|---|---|---|---|---|---|---|---|
+| 6 s | 1,000 | 115 | 4,395 | 0 | 6 ms | 21 MB | 7 % of one core |
+| 54 s | 5,000 | 657 | 25,224 | 0 | 35 ms | 70 MB | 29 % |
+| 104 s | 15,000 | 1,950 | 74,873 | 0 | 117 ms | 191 MB | 84 % |
+| 134 s | 14,000 | 1,946 | 74,707 | 0 | 111 ms | 192 MB | 92 % |
+| 209 s | 222 | 1,854 | 71,193 | 0 | 97 ms | 209 MB | 63 % |
+| 269 s | 0 | 954 | 36,611 | 0 | 47 ms | 192 MB | 1 % |
+| 299 s | 0 | 239 | 9,153 | 0 | 12 ms | 188 MB | 1 % |
+| 359 s | 0 | 30 | 1,144 | 0 | 2 ms | 188 MB | 0 % |
+
+The candidates grow within one to two epochs and an exhausted epoch is rebuilt at once, so no unit is handed out twice. When the miners have left, the demand halves per epoch and the candidates follow it down to `min_candidates`.
+Observation: the memory of the process stays at its peak after the miners left (the allocator keeps it); it did not grow in a second wave.
+
 ## 7. Known gaps
 
 - No accounting, payout or persistence yet; shares are only counted.
