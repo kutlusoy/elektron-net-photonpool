@@ -122,15 +122,18 @@ function glass() {
   document.body.append(svg); document.body.classList.add('refract');
 }
 const Themes = (() => {
-  // Themes are chosen in the terminal (`theme <name>`, `theme` lists them). The default is always cyan: nothing is stored, the choice lasts until the page is reloaded.
+  // Themes are chosen in the terminal (`theme <name>`, `theme` lists them). The default is cyan; the choice is remembered in this browser (localStorage).
   const has = (id) => THEMES.some((t) => t.id === id);
   function set(id) {
     if (!has(id)) return false;
     document.body.dataset.theme = id;
+    try { localStorage.setItem('photon-theme', id); } catch (_) { /* storage unavailable */ }
     if (id === 'candy') glass(); // the refraction map is only built when candy is chosen
     document.dispatchEvent(new Event('themechange'));
     return true;
   }
+  // apply the remembered theme as early as possible (this script runs before the views are drawn)
+  try { const s = localStorage.getItem('photon-theme'); if (s && has(s)) { const apply = () => { document.body.dataset.theme = s; if (s === 'candy') glass(); }; if (document.body) apply(); else document.addEventListener('DOMContentLoaded', apply); } } catch (_) { /* storage unavailable */ }
   const listHtml = () => THEMES.map((t) => `${span(document.body.dataset.theme === t.id ? 'ok' : 'c1', pad(t.id, 9))}${span('dim', t.mood)}`).join('\n');
   return { set, list: () => THEMES.map((t) => t.id), listHtml };
 })();
