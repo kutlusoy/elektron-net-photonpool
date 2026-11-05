@@ -8,6 +8,8 @@ const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-liv
     <section class="pane p-pool" aria-label="Pool"><h2><span>POOL</span></h2><pre id="pane-pool"></pre></section>
     <section class="pane p-connect" aria-label="Connect"><h2><span>CONNECT</span></h2><pre id="pane-connect"></pre></section>
     <section class="pane p-modes" aria-label="Payout modes"><h2><span>MODES</span></h2><pre id="pane-modes"></pre></section>
+    <section class="pane p-history" aria-label="History"><h2><span>HISTORY</span><em class="rng"></em></h2><div class="chartpane"></div></section>
+    <section class="pane p-devices" aria-label="Devices"><h2><span>DEVICES</span></h2><pre id="pane-devices"></pre></section>
     <section class="pane p-blocks" aria-label="Blocks"><h2><span>BLOCKS</span></h2><pre id="pane-blocks"></pre></section>
     <section class="pane p-payouts" aria-label="Payouts"><h2><span>PAYOUTS</span></h2><pre id="pane-payouts"></pre></section>
     <section class="pane p-tty" aria-label="Console"><h2><span>TTY</span><em>try <kbd>account &lt;your address&gt;</kbd> or <kbd>help</kbd></em></h2>
@@ -27,7 +29,8 @@ const modeText = {
   pps: 'fixed payment per share, paid by the pool',
 };
 
-const view = { src: null, pool: null, blocks: [], payouts: [] };
+const view = { src: null, pool: null, blocks: [], payouts: [], devices: [] };
+let histCtl = null;
 
 /* ---------- data ---------- */
 
@@ -35,7 +38,7 @@ function liveSource() {
   const get = async (p) => { const r = await fetch('/public/v1' + p, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); };
   return {
     demo: false,
-    async refresh() { [view.pool, view.blocks, view.payouts] = await Promise.all([get('/pool'), get('/blocks?limit=12'), get('/payouts?limit=8')]); },
+    async refresh() { let d; [view.pool, view.blocks, view.payouts, d] = await Promise.all([get('/pool'), get('/blocks?limit=12'), get('/payouts?limit=8'), get('/devices').catch(() => ({ devices: [] }))]); view.devices = d.devices; },
     async account(addr) { const r = await fetch('/public/v1/account/' + encodeURIComponent(addr), { cache: 'no-store' }); if (!r.ok) throw new Error(r.status === 400 ? 'not a valid address for this network' : 'HTTP ' + r.status); return r.json(); },
   };
 }
@@ -49,6 +52,7 @@ function demoSource() {
   return {
     demo: true,
     async refresh() {
+      view.devices = Stats.demoDevices();
       hist.push(9.4e16 + r() * 4e15); hist.shift();
       view.pool = {
         name: 'Photon Demo', version: '0.1.0-demo', network: 'mainnet', explorerUrl: '', uptime: 3 * 86400 + 4000,
@@ -127,6 +131,8 @@ function render() {
       const a = Date.now() / 1000 - x.time;
       return `${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 8)}${pad(coins(x.amount), 15)}${link(txUrl(p.explorerUrl, x.txid), wide('payouts') ? (x.txid || '') : short(x.txid || '', 6, 4), 'c1')}`;
     })).join('\n') || span('dim', 'no payouts yet');
+  Stats.S.devices = view.devices;
+  $('#pane-devices').innerHTML = Stats.devicesHtml(view.devices || []);
   Extras.tick();
 }
 
@@ -273,6 +279,7 @@ async function boot0() {
   view.src = src || demoSource();
   if (!src) await view.src.refresh();
   $('#who').textContent = 'photon';
+  histCtl = Stats.historyPane($('.p-history'), '/public/v1', view.src.demo);
   const tag = $('#mode-tag');
   tag.textContent = view.src.demo ? 'DEMO DATA' : 'LIVE';
   tag.className = 'tag ' + (view.src.demo ? 'demo' : 'live');
@@ -292,6 +299,7 @@ async function mount(root) {
   boot0().catch((e) => out(span('err', 'could not start: ' + e.message)));
 }
 function unmount() {
+  if (histCtl) { histCtl.destroy(); histCtl = null; }
   timers.splice(0).forEach(clearInterval);
   offs.splice(0).forEach((f) => f());
 }

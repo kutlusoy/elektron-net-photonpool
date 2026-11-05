@@ -27,7 +27,9 @@ All responses are JSON. Authentication and binding are described in section 4.
 | Endpoint | Content |
 |---|---|
 | `GET /api/v1/summary` | `pool {name, version, uptime, mode, explorerUrl}`, `node {height, tip, tipTime, connected, transport, rttMs, p50, p95, samples, batchMs}`, `hashrate {now, m1, h1, hist[]}`, `miners {online, total, v1, v2, edge}`, `shares {perSec, ok, stale, dup, inv, total}`, `alloc {candidates, unitsPerSec, epochUse, overlap}`, `found` |
-| `GET /api/v1/miners?limit=n` | array of `{name, proto, hashrate, diff, ok, stale, dup, seen, unit}` |
+| `GET /api/v1/miners?limit=n` | array of `{name, proto, hashrate, diff, ok, stale, dup, seen, unit, agent, device, best, jobMs}` (`agent` is the user agent sent with `mining.subscribe`, `device` its display name, `best` the best share difficulty of the connection, `jobMs` the job interval the pool chose for it) |
+| `GET /api/v1/devices` | the same device list as the public API (`devices[]` with `name`, `url`, `openSource`, `working`, `hashrate`, `best`) |
+| `GET /api/v1/history?range=1h\|24h\|7d\|30d\|all` | stored pool statistics, the same as the public API |
 | `GET /api/v1/blocks?limit=n` | array of `{height, hash, time, worker, status, url?}` with status `found`, `maturing` or `mature`; `url` is `<explorer_url>/block/<hash>` and only present when `api.explorer_url` is configured |
 | `GET /api/v1/events` | Server-Sent Events, each event a JSON object `{t, lvl, msg}` with `lvl` one of `info`, `share`, `job`, `warn`, `err`, `blk` |
 

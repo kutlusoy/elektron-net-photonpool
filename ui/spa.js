@@ -19,14 +19,14 @@ window.SPA = (() => {
     const swap = () => {
       if (mine !== token) return;
       if (current) { try { Views[current].unmount(); } catch (_) { /* view already gone */ } }
-      if (window.Depth) Depth.detach();
+      if (typeof Depth !== 'undefined') Depth.detach();
       const r = root();
       r.textContent = '';
       r.className = 'view v-' + name;
       current = name;
       document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === name));
       Views[name].mount(r);
-      if (window.Depth) Depth.attach();
+      if (typeof Depth !== 'undefined') Depth.attach();
       cascade(r);
     };
     if (!instant && current && document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {

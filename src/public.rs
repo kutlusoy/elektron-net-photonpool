@@ -90,6 +90,7 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/miner.html", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
         .route("/miner", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
         .route("/miner/*address", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
+        .route("/stats.js", get(|State(s): State<St>| file(s, "stats.js", "text/javascript; charset=utf-8")))
         .route("/spa.js", get(|State(s): State<St>| file(s, "spa.js", "text/javascript; charset=utf-8")))
         .route("/miner.js", get(|State(s): State<St>| file(s, "miner.js", "text/javascript; charset=utf-8")))
         .route("/music/playlist.json", get(|State(s): State<St>| crate::music::playlist_response(crate::music::dir(&s.pool.cfg.api.music_dir, &s.pool.cfg.api.ui_dir))))

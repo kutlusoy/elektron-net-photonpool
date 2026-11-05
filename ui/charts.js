@@ -223,7 +223,7 @@ const Series = (() => {
     seed(name, ys, step = 1) { if (Series.empty(name)) { const now = Date.now() / 1000; ys.forEach((y, i) => Series.push(name, y, now - (ys.length - 1 - i) * step)); } },
   };
 })();
-const agoLabel = (x) => { const d = Math.max(0, Date.now() / 1000 - x); return d < 3 ? 'now' : d < 90 ? `-${Math.round(d)}s` : d < 5400 ? `-${Math.round(d / 60)}m` : `-${(d / 3600).toFixed(1)}h`; };
+const agoLabel = (x) => { const d = Math.max(0, Date.now() / 1000 - x); return d < 3 ? 'now' : d < 90 ? `-${Math.round(d)}s` : d < 5400 ? `-${Math.round(d / 60)}m` : d < 172800 ? `-${(d / 3600).toFixed(1)}h` : `-${(d / 86400).toFixed(1)}d`; };
 
 // Extra panels of a maximized pane: Extras.add('miners', (el) => { ...build once...; return () => { ...update... }; })
 const Extras = (() => {
