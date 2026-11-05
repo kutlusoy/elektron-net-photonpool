@@ -173,7 +173,7 @@ const Neon = (() => {
       host._donut = { c, mid, sub, segs: new Map(), legend: html('nleg', host) };
     }
     const d = host._donut, C = 2 * Math.PI * 44, total = parts.reduce((a, p) => a + p.value, 0) || 1;
-    const show = (p) => { d.mid.textContent = p ? `${(p.value / total * 100).toFixed(p.value / total < 0.1 ? 1 : 0)}%` : (o.big ?? ''); d.sub.textContent = p ? p.label : (o.sub ?? ''); d.c.classList.toggle('hov', !!p); d.segs.forEach((e) => e.circle.classList.toggle('on', !!p && e.key === p.key)); };
+    const show = (p) => { d.mid.textContent = p ? `${(p.value / total * 100).toFixed(p.value / total < 0.1 ? 1 : 0)}%` : (o.big ?? ''); d.mid.style.fontSize = Math.min(15, 62 / (Math.max(1, d.mid.textContent.length) * 0.62)) + 'px'; d.sub.textContent = p ? p.label : (o.sub ?? ''); d.c.classList.toggle('hov', !!p); d.segs.forEach((e) => e.circle.classList.toggle('on', !!p && e.key === p.key)); };
     let cum = 0; const keep = new Set();
     parts.forEach((p, i) => {
       const key = p.key ?? p.label; keep.add(key); p.key = key;

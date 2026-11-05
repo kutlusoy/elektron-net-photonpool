@@ -347,3 +347,18 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .cbody > div { margin: 2px 0; }
 .crow { transition: grid-template-columns .25s ease; }
 .card h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crow .ndsvg { width: 120px; height: 120px; }
+.crow .ndonut { gap: 6px; }
+
+/* spacing of cards and their contents: one rhythm for all views */
+.extra { padding: 14px; gap: 14px; }
+.crow { gap: 14px; }
+.card { padding: 0 0 10px; }
+.card h3 { padding: 4px 14px; }
+.cbody { padding: 12px 14px 4px; }
+.cbody > div { margin: 3px 0; }
+.ndonut { padding: 6px 14px 4px; box-sizing: border-box; }
+.nleg { padding: 0; }
+.nchart { margin: 0 -4px; }
+.nkpis { gap: 12px; }
+.nrow { padding: 1px 0; }
