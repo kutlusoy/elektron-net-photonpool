@@ -224,8 +224,11 @@ impl Session {
                 }
                 _ = sleep_until(next_job), if started => {
                     self.send_job(&mut wr, false).await?;
-                    // a slow miner (CPU, tiny device) finds no share at all at a high difficulty, so vardiff must also run without shares
-                    self.vardiff(&mut wr).await?;
+                    // a slow miner (CPU, tiny device) finds no share at all at a high difficulty, so vardiff must also run without shares;
+                    // only for a connection that has never had a valid share, so the difficulty of an established miner is never touched here
+                    if self.stats.ok.load(Ordering::Relaxed) == 0 {
+                        self.vardiff(&mut wr).await?;
+                    }
                 }
                 _ = sleep_until(TokioInstant::from_std(deadline)) => bail!("idle timeout"),
             }
