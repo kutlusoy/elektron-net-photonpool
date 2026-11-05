@@ -376,3 +376,8 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .flowtip { position: absolute; z-index: 5; pointer-events: none; max-width: 240px; padding: 6px 10px; font-size: 11px; line-height: 1.4; color: var(--fg); background: rgba(2, 6, 12, .93); border: 1px solid var(--c1); box-shadow: 0 0 18px color-mix(in srgb, var(--c1) 35%, transparent); }
 .flowtip b { color: var(--c1); letter-spacing: .12em; font-size: 10px; }
 .flowtip div { color: var(--dim); white-space: nowrap; }
+.flowbanner { position: absolute; left: 0; right: 0; top: 14%; text-align: center; pointer-events: none; z-index: 4; font-size: clamp(18px, 3.2vw, 34px); font-weight: 700; letter-spacing: .3em; color: var(--warn); text-shadow: 0 0 18px var(--warn), 0 0 42px color-mix(in srgb, var(--warn) 60%, transparent); animation: banner 5s ease-out forwards; }
+@keyframes banner { 0% { opacity: 0; transform: scale(1.5); letter-spacing: .8em; } 10% { opacity: 1; transform: scale(1); letter-spacing: .3em; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-14px); } }
+.blkrow { animation: blkrow 4s ease-out; }
+@keyframes blkrow { 0% { background: color-mix(in srgb, var(--warn) 45%, transparent); } 100% { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .flowbanner { animation: none; } .blkrow { animation: none; } }

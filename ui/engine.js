@@ -23,7 +23,9 @@ async function startFlow() {
   let make = null;
   try {
     const gl = (() => { try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); } catch (_) { return false; } })();
-    if (gl) { await loadScript('/vendor/three.min.js'); await loadScript('/scene3d.js'); if (window.Flow3D) make = Flow3D; }
+    // phones and other touch-only devices get the light 2D scene (no WebGL, no 600 KB library)
+    const phone = matchMedia('(pointer: coarse) and (hover: none)').matches || matchMedia('(max-width: 720px)').matches;
+    if (gl && !phone) { await loadScript('/vendor/three.min.js'); await loadScript('/scene3d.js'); if (window.Flow3D) make = Flow3D; }
   } catch (_) { /* fall back to the 2D scene */ }
   if (!$('#flow')) return; // the view was left while loading
   try { flow = (make || Flow).create(canvas); } catch (_) { flow = Flow.create(canvas); }
@@ -32,12 +34,20 @@ async function startFlow() {
 
 const get = async (p) => { const r = await fetch(p, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); };
 
+// A found block: a banner over the scene (also with the 2D fallback) and a highlighted line in the feed.
+function banner(h) {
+  const box = document.querySelector('.flowbox'); if (!box) return;
+  const b = document.createElement('div'); b.className = 'flowbanner'; b.textContent = 'BLOCK FOUND' + (h ? ' ' + h : '');
+  box.appendChild(b); setTimeout(() => b.remove(), 5200);
+}
+
 function addEvent(e) {
   const box = $('#events');
   if (!box) return;
   const d = document.createElement('div');
   const t = new Date(e.t * 1000).toTimeString().slice(0, 8), lv = String(e.lvl || 'info').toLowerCase().replace(/[^a-z]/g, '');
   d.innerHTML = `<span class="t">${t}</span> <span class="lv lv-${lv}">${esc(lv.toUpperCase().padEnd(5))}</span>${hashSpans(e.msg)}`;
+  if (String(e.lvl) === 'blk') d.className = 'blkrow';
   box.appendChild(d);
   while (box.childElementCount > 300) box.firstChild.remove();
   settle();
@@ -84,7 +94,7 @@ async function refresh() {
   if (view.lastTip.h !== null && n.height !== view.lastTip.h && view.lastTip.t) Series.push('tipint', n.tipTime - view.lastTip.t, n.tipTime);
   if (n.height !== view.lastTip.h) view.lastTip = { h: n.height, t: n.tipTime };
   if (flow) { flow.feed({ jobs: s.net ? s.net.jobsPerSec : 0, shares: s.shares.perSec, units: s.alloc.unitsPerSec, cands: s.alloc.candidates, hr: s.hashrate.now, miners: s.miners.online, ok: s.shares.okN, stale: s.shares.staleN, bad: s.shares.dupN + s.shares.invN, epochUse: s.alloc.epochUse, batchMs: n.batchMs, backend: n.backend, units: s.alloc.unitsPerSec, tipTime: n.tipTime, rtt: n.rttMs, p50: n.p50, p95: n.p95, connected: n.connected, ...photonRates(s) }); flow.tip(n.height); }
-  (ev.events || []).forEach((x) => { addEvent(x); if (flow && x.lvl === 'blk') flow.block(); });
+  (ev.events || []).forEach((x) => { addEvent(x); if (x.lvl === 'blk') { const h = (/BLOCK FOUND (\d+)/.exec(x.msg) || [])[1]; if (flow) flow.block(h); banner(h); } });
   if (typeof ev.last === 'number') view.seq = ev.last;
 }
 
