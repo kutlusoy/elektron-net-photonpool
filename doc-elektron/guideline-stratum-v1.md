@@ -93,6 +93,25 @@ The network is the limit before the CPU is. The work units are used up much fast
 so with five jobs per second per miner and a 20 s epoch one candidate serves about ten Bitaxes, and the 64 candidates of the benchmark about 600 (the allocator reported 38,560 overlapping units at 1,000 and 438,560 at 5,000 connections;
 the reading at 15,000 came right after an epoch change and says nothing). Overlapping units mean two miners get the same header, which shows up as duplicates between miners. 15,000 Bitaxes need about 1,600 candidates.
 
+### Self-adjusting pool (per connection and work space)
+
+Two things adapt to the load now:
+
+- **Job interval per connection** (`[stratum] adaptive_jobs`): the pool counts the duplicate shares and the shares for jobs it no longer knows (not the ones after a new block) of each connection. More than a tenth of them: the
+  interval shrinks by 40 % (down to `adaptive_min_interval_ms`, default 50 ms) and, if that does not help, jobs become clean for that connection. Fewer than two in a hundred: it grows by 15 % per round again, never above the interval that the hash rate
+  estimate calls for. The chosen interval is shown per miner (column JOB ms) and in `/api/v1/miners` as `jobMs`.
+- **Candidates in use** (`[pool] autoscale_candidates`, `min_candidates`): the pool measures how fast the work units of the last epoch were handed out (one unit per job) and builds the next epoch with
+  `ceil(units per second x epoch seconds x 1.25 / 960)` candidates, between `min_candidates` (default 16) and the number of configured addresses. It grows at once and shrinks slowly. The node builds and attests only the candidates in use.
+
+`test/bench_bitaxe_profile.py` with `AUTOSCALE=true ADDRS=2000 CONNS=...` (batch node, 20 s epochs, one 4-core machine for everything):
+
+| Connections | Candidates in use after the first epochs | Overlapping units | Node time to build all candidates of an epoch | Daemon memory | Daemon CPU |
+|---|---|---|---|---|---|
+| 5,000 | 651 (of 2,000) | 0 | not sampled | 77 MB | 30 % of one core |
+| 15,000 | 1,940 (of 2,000) | 0 | 90 to 109 ms | 205 MB | 85 % of one core |
+
+Without autoscaling the same load with 64 candidates overlapped by 438,560 units at 5,000 connections. With a node without the batch patch every candidate costs one `getblocktemplate` call (about 0.7 ms),
+1,900 candidates then take over a second per epoch: build the node with `NODE_PATCHES=true` for pools of this size.
 
 ## 7. Known gaps
 

@@ -6,7 +6,7 @@ use crate::template::{header_hash, meets_target, BatchTemplate, Candidate, Gbt, 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, watch};
@@ -76,6 +76,8 @@ pub struct SessionStats {
     pub last_seen: AtomicU64,
     pub unit: AtomicU64,
     pub mode: AtomicU64,
+    /// Job interval in milliseconds as f64 bits (what the learning chose for this connection).
+    pub job_ms: AtomicU64,
 }
 
 impl SessionStats {
@@ -84,7 +86,7 @@ impl SessionStats {
         set_f64(&now, unix_now());
         Self {
             name: Mutex::new(String::new()), ok: AtomicU64::new(0), stale: AtomicU64::new(0), dup: AtomicU64::new(0), inv: AtomicU64::new(0),
-            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1),
+            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0),
         }
     }
 }
@@ -273,6 +275,10 @@ pub struct Pool {
     /// 0 = batch attestation not tried yet, 1 = supported by the node, 2 = not supported.
     pub batch_state: std::sync::atomic::AtomicU8,
     pub backend_name: Mutex<&'static str>,
+    /// Candidates in use (the first ones of `payouts`); grows and shrinks with the work demand when autoscaling is on.
+    pub active_candidates: AtomicUsize,
+    /// Work units per second handed out in the last epochs, as f64 bits.
+    pub demand_units: AtomicU64,
     pub photon: std::sync::OnceLock<Arc<crate::photon::service::PhotonService>>,
 }
 
@@ -305,6 +311,7 @@ impl Pool {
             .iter()
             .map(|a| Ok(Payout { address: a.clone(), script: script_for_address(a, net.hrp)? }))
             .collect::<Result<Vec<_>>>()?;
+        let active = if cfg.pool.autoscale_candidates { cfg.pool.min_candidates.clamp(1, payouts.len().max(1)) } else { payouts.len() };
         let ledger = Ledger::open(&cfg.ledger.path).with_context(|| format!("opening ledger {}", cfg.ledger.path))?;
         let (events, _) = broadcast::channel(1024);
         let (epoch, _) = watch::channel(None);
@@ -312,7 +319,7 @@ impl Pool {
             cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
             sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
             pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0),
-            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), photon: std::sync::OnceLock::new(),
+            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), active_candidates: AtomicUsize::new(active), demand_units: AtomicU64::new(0), photon: std::sync::OnceLock::new(),
         });
         pool.stats.connected.store(true, Ordering::Relaxed);
         Ok(pool)
@@ -409,9 +416,10 @@ impl Pool {
                 Err(e) => return Err(e),
             }
         }
-        let mut candidates: Vec<Candidate> = Vec::with_capacity(self.payouts.len());
+        let active = self.active_candidates.load(Ordering::Relaxed).clamp(1, self.payouts.len().max(1));
+        let mut candidates: Vec<Candidate> = Vec::with_capacity(active);
         let mut height = 0;
-        for p in &self.payouts {
+        for p in &self.payouts[..active.min(self.payouts.len())] {
             let g: Gbt = serde_json::from_value(self.node.template(&p.address).await?)?;
             if g.previousblockhash != best {
                 bail!("tip moved while building candidates");
@@ -425,10 +433,11 @@ impl Pool {
 
     async fn fetch_batch(&self, best: &str) -> Result<(Vec<Candidate>, u32)> {
         const CHUNK: usize = 2000;
-        let mut candidates: Vec<Candidate> = Vec::with_capacity(self.payouts.len());
+        let active = self.active_candidates.load(Ordering::Relaxed).clamp(1, self.payouts.len().max(1));
+        let mut candidates: Vec<Candidate> = Vec::with_capacity(active);
         let mut height = 0;
         let mut shared: Option<std::sync::Arc<TxSet>> = None;
-        for chunk in self.payouts.chunks(CHUNK) {
+        for chunk in self.payouts[..active.min(self.payouts.len())].chunks(CHUNK) {
             let scripts: Vec<String> = chunk.iter().map(|p| hex::encode(&p.script)).collect();
             let bt: BatchTemplate = serde_json::from_value(self.node.attestation_batch(&scripts).await?)?;
             if bt.tip != best {
@@ -450,7 +459,31 @@ impl Pool {
         Ok((candidates, height))
     }
 
+    /// Sets how many candidates the next epoch uses from how fast the work units of the last one were used up.
+    fn autoscale(&self) {
+        if !self.cfg.pool.autoscale_candidates {
+            return;
+        }
+        let Some(prev) = self.epoch.borrow().clone() else { return };
+        let age = unix_now() - prev.started_unix;
+        if age < 3.0 {
+            return;
+        }
+        let rate = prev.next_unit.load(Ordering::Relaxed) as f64 / age;
+        let old = get_f64(&self.demand_units);
+        // up at once, down slowly
+        let demand = if rate > old { rate } else { old * 0.9 + rate * 0.1 };
+        set_f64(&self.demand_units, demand);
+        let horizon = if self.cfg.pool.refresh_secs > 0 { self.cfg.pool.refresh_secs as f64 } else { 60.0 };
+        let want = candidates_needed(demand, horizon, prev.slices, self.cfg.pool.min_candidates, self.payouts.len());
+        let have = self.active_candidates.swap(want, Ordering::Relaxed);
+        if want != have {
+            self.event("info", format!("work space: {have} -> {want} candidates ({demand:.0} units/s used, {} available)", self.payouts.len()));
+        }
+    }
+
     pub async fn build_epoch(&self, check: usize) -> Result<Epoch> {
+        self.autoscale();
         let t0 = Instant::now();
         let best = self.node.best_block_hash().await?;
         let (candidates, height) = self.fetch_candidates(&best).await?;
@@ -533,9 +566,27 @@ impl Pool {
     }
 }
 
+/// Candidates needed to hand out `units_per_sec` work units for `horizon_secs` (one epoch) without repeating any, with 25 % headroom, within `min..=max`.
+pub fn candidates_needed(units_per_sec: f64, horizon_secs: f64, slices: u64, min: usize, max: usize) -> usize {
+    let per_candidate = (slices * NTIME_SLOTS) as f64;
+    let want = (units_per_sec * horizon_secs * 1.25 / per_candidate).ceil() as usize;
+    want.clamp(min.max(1), max.max(1)).min(max.max(1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candidates_follow_the_demand() {
+        // 1,000 Bitaxes at 5 jobs per second, 20 s epochs, 16 slices x 60 ntime steps: about 130 candidates
+        assert_eq!(candidates_needed(5000.0, 20.0, 16, 16, 4096), 131);
+        // little demand stays at the minimum, a huge demand is capped at the addresses there are
+        assert_eq!(candidates_needed(10.0, 20.0, 16, 16, 4096), 16);
+        assert_eq!(candidates_needed(1.0e6, 20.0, 16, 16, 512), 512);
+        // never more than there are, never fewer than one
+        assert_eq!(candidates_needed(0.0, 20.0, 16, 0, 0), 1);
+    }
 
     fn dummy(n: usize, target: u8) -> Epoch {
         let c = |i: u8| Candidate {

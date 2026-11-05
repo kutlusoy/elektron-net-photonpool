@@ -1,5 +1,5 @@
 import os, sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import json, subprocess, time, urllib.request
+import json, subprocess, threading, time, urllib.request
 from photon_testlib import *
 from segwit_addr import encode_segwit_address
 
@@ -11,6 +11,7 @@ AGENT = os.environ.get("AGENT", "bitaxe/BM1370/v2.9.0")
 STEADY = os.environ.get("STEADY_SECS", "20")
 # The synthetic miners send no valid shares, so the pool does not know their speed; pinning the interval gives them the cadence a Bitaxe with a hash rate estimate gets.
 CADENCE = os.environ.get("CADENCE_MS", "200")
+AUTOSCALE = os.environ.get("AUTOSCALE", "false")
 ADDRS = int(os.environ.get("ADDRS", "64"))
 SHARE_RATE = os.environ.get("SHARE_RATE", "0")
 
@@ -28,6 +29,8 @@ network = "regtest"
 payout_addresses = {json.dumps(addrs)}
 refresh_secs = 20
 spot_check = 2
+autoscale_candidates = {AUTOSCALE}
+min_candidates = 16
 
 [stratum]
 listen = "127.0.0.1:{STRATUM}"
@@ -61,7 +64,7 @@ with Harness("bench-stratum") as h:
         for _ in range(300):
             try:
                 s = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{API}/api/v1/summary", timeout=2).read())
-                if s["alloc"]["candidates"] == ADDRS: break
+                if s["alloc"]["candidates"] == (16 if AUTOSCALE == 'true' else ADDRS): break
             except Exception: time.sleep(0.1)
         print(f"  info daemon ready with {ADDRS} candidates, rss {rss_mb(d.pid):.0f} MB")
         for n in COUNTS:
@@ -69,17 +72,29 @@ with Harness("bench-stratum") as h:
                                    "--share-rate", SHARE_RATE, "--ramp-per-sec", "4000", "--agent", AGENT, "--steady-secs", STEADY, "--wait-secs", "60"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
             ready = json.loads(lt.stdout.readline())
             time.sleep(2)
+            samples, stop = [], threading.Event()
+            def poll():
+                t_start = time.time()
+                while not stop.wait(10):
+                    try:
+                        sm = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{API}/api/v1/summary", timeout=5).read()); a = sm["alloc"]; nd = sm["node"]
+                        samples.append(f"{time.time() - t_start:.0f}s: {a['candidates']}/{nd.get('candidatesAvailable', '?')} candidates, {nd.get('demandUnitsPerSec', 0):.0f} units/s used, last build {nd['batchMs']} ms, overlap {a['overlap']}, epoch use {a['epochUse'] * 100:.0f}%")
+                    except Exception: pass
+            th = threading.Thread(target=poll, daemon=True)
             cpu0, t0c = cpu_s(d.pid), time.time()
             rss = rss_mb(d.pid)
             lt.stdin.write("go\n"); lt.stdin.flush()
             h.node.rpc("generatetodescriptor", 1, "raw(51)")
+            th.start()
             res = json.loads(lt.stdout.readline())
+            stop.set()
             cpu1, t1c = cpu_s(d.pid), time.time()
             summ = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{API}/api/v1/summary", timeout=5).read())
             ms, st = res["ms"], res["steady"]
             print(f"  {n:>6} conns ({AGENT}): rss before {rss:.0f} MB, after {rss_mb(d.pid):.0f} MB | tip fan-out p50 {ms['p50']:.0f} max {ms['max']:.0f} ms ({res['received_clean']}/{res['connected']}) | "
                   f"steady {st['jobs_per_sec']:.0f} jobs/s = {st['mbit_per_sec']:.1f} Mbit/s to the miners, daemon cpu {(cpu1 - cpu0) / max(1e-9, t1c - t0c) * 100:.0f} % of one core | "
-                  f"allocator: {summ['alloc']['candidates']} candidates, overlap {summ['alloc']['overlap']}, epoch use {summ['alloc']['epochUse'] * 100:.0f} %")
+                  f"allocator at the end: {summ['alloc']['candidates']} candidates, overlap {summ['alloc']['overlap']}, epoch use {summ['alloc']['epochUse'] * 100:.0f} %")
+            for line in samples: print("      " + line)
             lt.terminate(); lt.wait(timeout=20)
             time.sleep(2)
     finally:

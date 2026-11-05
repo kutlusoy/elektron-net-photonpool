@@ -32,9 +32,10 @@ NODE_PATCHES=false
 # --- Pool wallet (on the node) ---
 # Options: letters, digits, - and _. Default pool.
 WALLET_NAME=pool
-# Pool payout addresses provisioned from the wallet.
+# Pool payout addresses provisioned from the wallet. The pool uses only as many as the work demand needs (about 10 Bitaxes or 1 address per 960 units per epoch, see
+# doc-elektron/guideline-stratum-v1.md), so a larger number costs nothing while it is not needed.
 # Options: whole number >= 1. Default 64.
-WALLET_ADDRESSES=64
+WALLET_ADDRESSES=512
 # Leave empty to generate a strong passphrase; the wallet is encrypted with it.
 # Options: any text without spaces at the ends, or empty (a strong passphrase is generated and kept in the stack files).
 WALLET_PASSPHRASE=

@@ -131,7 +131,7 @@ async fn check(pool: std::sync::Arc<Pool>, mine: bool) -> Result<()> {
         "configured": pool.payouts.len(), "rejected": pool.stats.candidates_rejected.load(std::sync::atomic::Ordering::Relaxed),
         "fetch_ms": pool.stats.last_fetch_ms.load(std::sync::atomic::Ordering::Relaxed),
     });
-    if epoch.candidates.len() != pool.payouts.len() {
+    if epoch.candidates.len() != pool.active_candidates.load(std::sync::atomic::Ordering::Relaxed).min(pool.payouts.len()) {
         println!("{report}");
         bail!("some candidates were rejected by the node");
     }

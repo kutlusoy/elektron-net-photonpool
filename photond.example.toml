@@ -43,6 +43,13 @@ spot_check = 4
 #          "batch" (always getattestationbatch; fails on an unpatched node)
 #          "gbt"   (always one getblocktemplate call per address; fine for a few addresses and small blocks)
 backend = "auto"
+# Use only as many of the pool's payout addresses as the work demand needs. Every address is one candidate (its own coinbase, attested by the node) with
+# 16 x 60 = 960 work units per epoch; every job a miner receives uses one unit, so more or faster miners need more candidates. The pool measures how fast
+# the units are used up and grows or shrinks the number of candidates in use between pool.min_candidates and the number of configured addresses.
+# Options: true | false. Default true.
+autoscale_candidates = true
+# Fewest candidates in use while autoscaling. Options: whole number >= 1. Default 16.
+min_candidates = 16
 
 [stratum]
 # Stratum V1 server for miners.
@@ -71,6 +78,11 @@ max_job_interval_ms = 30000
 # only for miners that really roll all granted bits. A duplicate share is treated as a sign that the miner has swept its space and triggers fresh work at once.
 # Options: whole number 0 to 16. Default 5.
 version_space_bits = 5
+# Learn the job interval of every connection: a miner that sends many duplicate or stale shares gets jobs faster, one that does not gets them slower again
+# (never slower than the interval the hash rate calls for, never faster than adaptive_min_interval_ms). Options: true | false. Default true.
+adaptive_jobs = true
+# Shortest job interval the learning may reach, in milliseconds. Options: whole number >= 1. Default 50.
+adaptive_min_interval_ms = 50
 # Miners whose user agent (the name they send with mining.subscribe, for example "bitaxe/BM1370/v2.9.0") contains one of these words, case-insensitive, get every fresh
 # job marked clean, so that they drop their queued older work and switch at once. ESP-Miner (Bitaxe) keeps up to 10 identical jobs queued ahead when the pool sends
 # no extranonce2 space, which showed up as duplicate shares and shares for jobs the pool no longer knew. Large ASICs should not get this: they flush their pipeline on a clean job.
