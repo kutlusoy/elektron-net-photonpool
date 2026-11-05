@@ -230,6 +230,7 @@ const Extras = (() => {
   const reg = {};
   return {
     add(id, build) { reg[id] = { build, up: null }; },
+    row(parent) { const r = document.createElement('div'); r.className = 'crow'; parent.append(r); return r; },
     card(parent, title, cls = '') { const c = document.createElement('section'); c.className = 'card ' + cls; const h = document.createElement('h3'); h.textContent = title; const b = document.createElement('div'); b.className = 'cbody'; c.append(h, b); parent.append(c); return b; },
     tick() {
       for (const id in reg) {

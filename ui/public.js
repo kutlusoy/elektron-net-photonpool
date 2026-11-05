@@ -147,7 +147,7 @@ const card = Extras.card;
 const timeLine = (host, series, fmt, extra = {}) => Neon.line(host, { series, fmt, xfmt: agoLabel, ...extra });
 
 Extras.add('pool', (el) => {
-  const k = card(el, 'pool numbers', 'wide'), hr = card(el, 'pool hashrate (since this page was opened)', 'wide'), mi = card(el, 'miners and workers online'), bl = card(el, 'blocks');
+  const k = card(el, 'pool numbers', 'wide'), row = Extras.row(el), hr = card(row, 'pool hashrate (since this page was opened)'), mi = card(row, 'miners and workers online'), bl = card(row, 'blocks');
   return () => {
     const p = view.pool; if (!p) return;
     Neon.kpis(k, [{ label: 'hashrate', value: p.hashrate.now, fmt: fmtHash }, { label: '1 h avg', value: p.hashrate.h1, fmt: fmtHash, color: 'c2' }, { label: 'miners', value: p.miners.online, fmt: num }, { label: 'workers', value: p.miners.workers, fmt: num, color: 'c2' },
