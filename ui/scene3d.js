@@ -198,14 +198,23 @@ window.Flow3D = (() => {
 
     const st = { hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const size = () => { const r = canvas.getBoundingClientRect(); st.w = Math.max(10, r.width); st.h = Math.max(10, r.height); const dpr = Math.min(2, devicePixelRatio || 1); renderer.setPixelRatio(dpr); renderer.setSize(st.w, st.h, false); cam.aspect = st.w / st.h; cam.updateProjectionMatrix(); for (const f of [lines, trails]) { f.mat.uniforms.res.value.set(st.w * dpr, st.h * dpr); f.mat.uniforms.pxr.value = dpr; } };
+    // Quality levels. 0: the small pane (few particles, 12 fps, no bloom), 1: maximized on a modest device, 2: maximized (bloom, streaks, 30 fps).
+    // The controller never goes above 0 while the pane is small and steps down by itself when the frame rate cannot keep up.
+    const LV = [
+      { fps: 12, dpr: 1, bloom: false, jobs: 36, shares: 24, fire: 140, rate: 0.5, trails: false, sway: 0.35 },
+      { fps: 24, dpr: 1.25, bloom: true, jobs: 100, shares: 60, fire: 320, rate: 0.8, trails: true, sway: 0.7 },
+      { fps: 30, dpr: 1.75, bloom: true, jobs: 150, shares: 90, fire: 600, rate: 1, trails: true, sway: 1 },
+    ];
+    canvas.dataset.level = '0'; st.lv = 0; st.cap = 2; st.slow = 0; st.avg = 0; st.t0 = performance.now(); let q = LV[0];
+    const pane = canvas.closest('.pane'), isFront = () => !!(pane && pane.classList.contains('front'));
+    const size = () => { const r = canvas.getBoundingClientRect(); st.w = Math.max(10, r.width); st.h = Math.max(10, r.height); const dpr = Math.min(q.dpr, devicePixelRatio || 1); st.dpr = dpr; renderer.setPixelRatio(dpr); renderer.setSize(st.w, st.h, false); cam.aspect = st.w / st.h; cam.updateProjectionMatrix(); for (const f of [lines, trails]) { f.mat.uniforms.res.value.set(st.w * dpr, st.h * dpr); f.mat.uniforms.pxr.value = dpr; } bloomSize(); };
     const ro = new ResizeObserver(size); ro.observe(canvas);
     const io = new IntersectionObserver((e) => { st.vis = e[0].isIntersecting; kick(); }); io.observe(canvas);
     const onVis = () => kick(); document.addEventListener('visibilitychange', onVis);
 
-    function spawnJob() { const j = J.find((q) => !q.on); if (!j) return; Object.assign(j, { px: undefined, on: true, t: 0, v: 0.22 + Math.random() * 0.16, m: (Math.random() * Math.max(1, Math.min(MAXM, st.online))) | 0 }); }
+    function spawnJob() { const j = J.slice(0, q.jobs).find((o) => !o.on); if (!j) return; Object.assign(j, { px: undefined, on: true, t: 0, v: 0.22 + Math.random() * 0.16, m: (Math.random() * Math.max(1, Math.min(MAXM, st.online))) | 0 }); }
     function spawnShare(viaGateway) {
-      const idx = S.findIndex((q) => !q.on); if (idx < 0) return;
+      const idx = S.slice(0, q.shares).findIndex((o) => !o.on); if (idx < 0) return;
       const s = S[idx], n = Math.max(1, Math.min(MAXM, st.online)), r = Math.random();
       const o = viaGateway ? (r < st.pRej ? 2 : 0) : (r < st.okF ? 0 : r < st.okF + st.staleF ? 1 : 2);
       Object.assign(s, { px: undefined, on: true, t: 0, v: 0.3 + Math.random() * 0.2, m: viaGateway ? 0 : (Math.random() * n) | 0, o, c: false, g: viaGateway ? (Math.random() * Math.min(MAXG, Math.max(1, st.gw))) | 0 : -1 });
@@ -218,13 +227,14 @@ window.Flow3D = (() => {
       const a = 1 - Math.exp(-dt * 2);
       st.jobs += (st.jobsT - st.jobs) * a; st.shares += (st.sharesT - st.shares) * a;
       // a small base keeps the scene alive; above it the number of particles grows logarithmically with the real rate
-      st.accJ += dt * (2.5 + 8 * Math.log10(1 + st.jobs)); st.accS += dt * (0.8 + 6 * Math.log10(1 + st.shares * 4));
+      st.accJ += dt * q.rate * (2.5 + 8 * Math.log10(1 + st.jobs)); st.accS += dt * q.rate * (0.8 + 6 * Math.log10(1 + st.shares * 4));
       while (st.accJ >= 1) { st.accJ -= 1; spawnJob(); }
       while (st.accS >= 1 && st.online > 0) { st.accS -= 1; spawnShare(false); }
       st.accS = Math.min(st.accS, 2);
-      if (st.gw > 0) { st.accG += dt * (0.5 + 6 * Math.log10(1 + st.pshares * 4)); while (st.accG >= 1) { st.accG -= 1; spawnShare(true); } st.accG = Math.min(st.accG, 2); }
+      if (st.gw > 0) { st.accG += dt * q.rate * (0.5 + 6 * Math.log10(1 + st.pshares * 4)); while (st.accG >= 1) { st.accG -= 1; spawnShare(true); } st.accG = Math.min(st.accG, 2); }
       // camera sways slowly around the scene
-      const k = st.t * 0.12; cam.position.set(1 + Math.sin(k) * 2.2, 5.8 + Math.sin(k * 1.7) * 0.5, 17 + Math.cos(k * 0.8) * 0.6); cam.lookAt(0.5, -0.2, -2);
+      const k = st.t * 0.12, intro = Math.min(1, (performance.now() - st.t0) / 2200), dolly = (1 + 0.45 * Math.pow(1 - intro, 3)) * Math.min(1.75, Math.max(1, 1.85 / (st.w / st.h))); // the camera glides in when the view opens and keeps the whole scene in narrow panes
+      cam.position.set((1 + Math.sin(k) * 2.2 * q.sway) * dolly, (5.8 + Math.sin(k * 1.7) * 0.5 * q.sway) * dolly, (17 + Math.cos(k * 0.8) * 0.6 * q.sway) * dolly); cam.lookAt(0.5, -0.2, -2);
       core.rotation.y += dt * 0.8; core.scale.setScalar(1 + 0.06 * Math.sin(st.t * 2.4));
 
       // template assembly
@@ -270,7 +280,7 @@ window.Flow3D = (() => {
         const t = j.t;
         if (t < 0.25) lerp3(W[0], W[1], t / 0.25, P); else if (t < 0.5) lerp3(W[1], W[2], (t - 0.25) / 0.25, P); else lerp3(W[2], mpos[j.m], (t - 0.5) / 0.5, P);
         P.y += Math.sin(t * Math.PI) * 0.7;
-        if (j.px !== undefined) { trailTo(j); trails.add(tail, P, col.c1, 2.2, 0, 1); trails.add(tail, P, col.c1, 8, 0, 0.25); }
+        if (q.trails && j.px !== undefined) { trailTo(j); trails.add(tail, P, col.c1, 2.2, 0, 1); trails.add(tail, P, col.c1, 8, 0, 0.25); }
         j.px = P.x; j.py = P.y; j.pz = P.z;
         D.position.copy(P); D.scale.setScalar(0.7 + 0.5 * Math.sin(t * Math.PI)); D.rotation.set(0, 0, 0); D.updateMatrix(); jobs.setMatrixAt(i, D.matrix);
       }
@@ -287,14 +297,14 @@ window.Flow3D = (() => {
         else { P.copy(W[2]); P.y -= (t - 0.5) * 4; P.x += (t - 0.5) * 1.2; }
         if (t >= 0.5 && !s.c) { shares.setColorAt(i, s.o === 0 ? col.ok : s.o === 1 ? col.warn : col.err); recolor = true; s.c = true; }
         if (t < 0.5 && s.c === undefined) { /* neutral until the gate */ }
-        { const cc = t < 0.5 ? (s.g >= 0 ? col.c3 : col.c1) : s.o === 0 ? col.ok : s.o === 1 ? col.warn : col.err; if (s.px !== undefined) { trailTo(s); trails.add(tail, P, cc, 2.2, 0, 1); trails.add(tail, P, cc, 8, 0, 0.25); } s.px = P.x; s.py = P.y; s.pz = P.z; }
+        { const cc = t < 0.5 ? (s.g >= 0 ? col.c3 : col.c1) : s.o === 0 ? col.ok : s.o === 1 ? col.warn : col.err; if (q.trails && s.px !== undefined) { trailTo(s); trails.add(tail, P, cc, 2.2, 0, 1); trails.add(tail, P, cc, 8, 0, 0.25); } s.px = P.x; s.py = P.y; s.pz = P.z; }
         D.position.copy(P); D.scale.setScalar(t >= 0.5 && s.o ? Math.max(0.1, 1 - (t - 0.5) * 2) : 1); D.rotation.set(0, 0, 0); D.updateMatrix(); shares.setMatrixAt(i, D.matrix);
       }
       trails.commit(); shares.instanceMatrix.needsUpdate = true; if (recolor && shares.instanceColor) shares.instanceColor.needsUpdate = true;
 
       // photon fire
-      fireAcc += dt * (70 + 70 * Math.log10(1 + st.hr / 1e5) + 40 * Math.log10(1 + st.jobs) + 320 * flare);
-      for (let i = 0; i < FN; i++) {
+      fireAcc += dt * q.rate * (70 + 70 * Math.log10(1 + st.hr / 1e5) + 40 * Math.log10(1 + st.jobs) + 320 * flare);
+      for (let i = 0; i < q.fire; i++) {
         if (fl[i] <= 0) { if (fireAcc >= 1) { fireAcc -= 1; emit(i); } else { fp[i * 3 + 1] = -50; continue; } }
         fl[i] -= dt; const k = 1 - Math.max(0, fl[i]) / fm[i], o = i * 3;
         fv[o + 1] += (0.3 + Math.sin(st.t * 7 + i) * 0.6) * dt; // flames flicker upward
@@ -332,16 +342,68 @@ window.Flow3D = (() => {
         if (gold.t >= 1) { world.remove(gold.m); gold = null; pushBlock(true); ring(col.warn); }
       }
     }
+    // Bloom without the post-processing add-ons of three.js: the scene goes into a render target, the bright parts are shrunk to a quarter of the size,
+    // blurred (two separable passes) and added back. Only used from level 1 on; below that the scene is drawn straight to the canvas.
+    const gl2 = renderer.capabilities.isWebGL2;
+    const ortho = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1), quadGeo = track(new T.PlaneGeometry(2, 2)), quadScene = new T.Scene();
+    const quad = new T.Mesh(quadGeo, null); quad.frustumCulled = false; quadScene.add(quad);
+    const pass = (frag, uniforms) => new T.ShaderMaterial({ vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: frag, uniforms, depthTest: false, depthWrite: false, blending: T.NoBlending });
+    const matBright = pass('uniform sampler2D t; uniform vec2 px; varying vec2 vUv; void main() { vec4 c = (texture2D(t, vUv + px * vec2(-1., -1.)) + texture2D(t, vUv + px * vec2(1., -1.)) + texture2D(t, vUv + px * vec2(-1., 1.)) + texture2D(t, vUv + px * vec2(1., 1.))) * 0.25; float m = max(max(c.r, c.g), c.b); gl_FragColor = vec4(c.rgb * smoothstep(0.32, 0.8, m), 1.0); }', { t: { value: null }, px: { value: new T.Vector2() } });
+    const matBlur = pass('uniform sampler2D t; uniform vec2 dir; varying vec2 vUv; void main() { vec4 s = texture2D(t, vUv) * 0.2270270; s += (texture2D(t, vUv + dir * 1.3846) + texture2D(t, vUv - dir * 1.3846)) * 0.3162162; s += (texture2D(t, vUv + dir * 3.2308) + texture2D(t, vUv - dir * 3.2308)) * 0.0702703; gl_FragColor = s; }', { t: { value: null }, dir: { value: new T.Vector2() } });
+    const matMix = pass('uniform sampler2D t; uniform sampler2D b; uniform float k; varying vec2 vUv; void main() { vec4 s = texture2D(t, vUv); vec3 c = s.rgb + texture2D(b, vUv).rgb * k; gl_FragColor = vec4(c, clamp(max(max(c.r, c.g), max(c.b, s.a)), 0.0, 1.0)); }', { t: { value: null }, b: { value: null }, k: { value: 1 } });
+    track(matBright); track(matBlur); track(matMix);
+    let rtS = null, rtA = null, rtB = null;
+    const mkRT = (w, h, samples) => new T.WebGLRenderTarget(Math.max(2, w | 0), Math.max(2, h | 0), { minFilter: T.LinearFilter, magFilter: T.LinearFilter, format: T.RGBAFormat, type: T.UnsignedByteType, depthBuffer: true, samples });
+    function bloomSize() {
+      [rtS, rtA, rtB].forEach((r) => r && r.dispose()); rtS = rtA = rtB = null;
+      if (!q.bloom) return;
+      const w = st.w * st.dpr, h = st.h * st.dpr;
+      rtS = mkRT(w, h, gl2 ? 4 : 0); rtA = mkRT(w / 4, h / 4, 0); rtB = mkRT(w / 4, h / 4, 0);
+      rtA.depthBuffer = rtB.depthBuffer = false;
+    }
+    const full = (mat, target) => { quad.material = mat; renderer.setRenderTarget(target); renderer.render(quadScene, ortho); };
+    function renderScene() {
+      renderer.setClearColor(0x000000, 0);
+      if (!q.bloom || !rtS) { renderer.setRenderTarget(null); renderer.render(scene, cam); return; }
+      renderer.setRenderTarget(rtS); renderer.clear(); renderer.render(scene, cam);
+      matBright.uniforms.t.value = rtS.texture; matBright.uniforms.px.value.set(1 / rtS.width, 1 / rtS.height); full(matBright, rtA);
+      matBlur.uniforms.t.value = rtA.texture; matBlur.uniforms.dir.value.set(1 / rtA.width, 0); full(matBlur, rtB);
+      matBlur.uniforms.t.value = rtB.texture; matBlur.uniforms.dir.value.set(0, 1 / rtA.height); full(matBlur, rtA);
+      matBlur.uniforms.t.value = rtA.texture; matBlur.uniforms.dir.value.set(2 / rtA.width, 0); full(matBlur, rtB); // a second, wider round for a soft halo
+      matBlur.uniforms.t.value = rtB.texture; matBlur.uniforms.dir.value.set(0, 2 / rtA.height); full(matBlur, rtA);
+      matMix.uniforms.t.value = rtS.texture; matMix.uniforms.b.value = rtA.texture; matMix.uniforms.k.value = 1.15; full(matMix, null);
+    }
+    function setLevel(l) {
+      if (l === st.lv) return;
+      st.lv = l; q = LV[l]; canvas.dataset.level = String(l);
+      size(); // pixel ratio and bloom targets follow the level
+      for (let i = q.fire; i < FN; i++) { fl[i] = 0; fp[i * 3 + 1] = -50; }
+      st.slow = 0; st.avg = 0;
+    }
+    let lvChecked = 0;
+    function control(ts, frameMs) {
+      if (ts - lvChecked > 300) { lvChecked = ts; const want = Math.min(isFront() ? 2 : 0, st.cap); if (want !== st.lv) setLevel(want); }
+      // the frame rate cannot keep up: step down for good (until the page is reloaded)
+      st.avg = st.avg ? st.avg * 0.94 + frameMs * 0.06 : frameMs;
+      if (st.lv > 0 && st.avg > 1000 / q.fps * 1.7) { if (++st.slow > 45) { st.cap = st.lv - 1; setLevel(Math.min(st.lv, st.cap)); } } else st.slow = Math.max(0, st.slow - 1);
+    }
+
     function frame(ts) {
       st.raf = 0; if (!st.run) return;
       if (document.hidden || !st.vis) { st.last = 0; return; }
-      if (!st.last || ts - st.last >= 32) { const dt = st.last ? Math.min(0.1, (ts - st.last) / 1000) : 0.033; update(dt); renderer.render(scene, cam); st.last = ts; }
+      if (!st.last || ts - st.last >= 1000 / q.fps - 2) {
+        const t0 = performance.now(), gap = st.last ? ts - st.last : 1000 / q.fps, dt = st.last ? Math.min(0.1, gap / 1000) : 0.033;
+        update(dt); renderScene(); st.last = ts;
+        if (canvas.style.opacity !== '1') canvas.style.opacity = '1'; // fades in with the first frame
+        control(ts, gap);
+        void t0;
+      }
       st.raf = requestAnimationFrame(frame);
     }
     function kick() { if (st.run && !st.raf && st.vis && !document.hidden) st.raf = requestAnimationFrame(frame); }
     size();
     return {
-      start() { st.run = true; if (reduce) { update(0.5); renderer.render(scene, cam); return; } kick(); },
+      start() { st.run = true; canvas.style.opacity = '0'; canvas.style.transition = 'opacity .9s ease'; st.t0 = performance.now(); if (reduce) { update(0.5); renderScene(); canvas.style.opacity = '1'; return; } kick(); },
       stop() {
         st.run = false; cancelAnimationFrame(st.raf); ro.disconnect(); io.disconnect(); document.removeEventListener('visibilitychange', onVis);
         disposables.forEach((d) => { try { d.dispose(); } catch (_) { /* already gone */ } });
