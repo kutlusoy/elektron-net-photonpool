@@ -158,7 +158,7 @@ function render() {
     `${span('dim', 'backend   ')}${esc(s.node.backend || 'gbt')}  ${span('dim', 'found')} ${s.found}`,
   ].join('\n');
   $('#pane-alloc').innerHTML = [
-    `${span('dim', 'candidates ')}${num(s.alloc.candidates)} ${span('dim', 'be1q payout scripts')}`,
+    `${span('dim', 'candidates ')}${num(s.alloc.candidates)}${s.node.candidatesAvailable ? span('dim', ' of ' + num(s.node.candidatesAvailable) + ' available (grows with the work demand)') : span('dim', ' be1q payout scripts')}`,
     `${span('dim', 'units/s    ')}${num(s.alloc.unitsPerSec)}`,
     `${span('dim', 'epoch use  ')}${bar(s.alloc.epochUse, 14, s.alloc.epochUse > 0.9 ? 'warn' : 'c2')} ${pct(s.alloc.epochUse)}`,
     `${span('dim', 'overlap    ')}${s.alloc.overlap ? span('err', s.alloc.overlap + ' flagged') : span('ok', '0 flagged')}`,
@@ -178,7 +178,7 @@ function render() {
   Extras.tick();
 }
 
-const MINER_KEYS = { name: (m) => m.name, proto: (m) => m.proto, hashrate: (m) => m.hashrate, diff: (m) => m.diff, ok: (m) => m.ok, stale: (m) => m.stale, dup: (m) => m.dup, seen: (m) => m.seen, unit: (m) => m.unit };
+const MINER_KEYS = { name: (m) => m.name, proto: (m) => m.proto, hashrate: (m) => m.hashrate, diff: (m) => m.diff, ok: (m) => m.ok, stale: (m) => m.stale, dup: (m) => m.dup, seen: (m) => m.seen, unit: (m) => m.unit, jobMs: (m) => m.jobMs || 0 };
 function minerRows() {
   let rows = ui.src.miners();
   if (ui.minerFilter) rows = rows.filter((m) => (m.name + ' ' + m.proto).toLowerCase().includes(ui.minerFilter));
@@ -190,11 +190,11 @@ function renderMiners() {
   const shown = rows.slice(0, mw ? Math.max(ui.minerLimit, 200) : ui.minerLimit);
   const mwk = colw(shown.map((m) => m.name), 6);
   $('#miners-hint').textContent = `${shown.length}/${rows.length} sort:${sortOf('miners', 'hashrate').k}${sortOf('miners', 'hashrate').d > 0 ? '+' : '-'}${ui.minerFilter ? ' grep:' + ui.minerFilter : ''}`;
-  $('#pane-miners').innerHTML = [`<span class="row-h">${hdr('miners', [['name', 'WORKER', mw ? mwk : 19, false, 1], ['proto', 'PROTO', 6, false, 1], ['hashrate', 'HASHRATE', 12, true], ['diff', 'DIFF', 10, true], ['ok', 'OK', 8, true], ['stale', 'STALE', 7, true], ['dup', 'DUP', 6, true]], 'hashrate')}  ${hdr('miners', [['seen', 'LAST', 6, false, 1], ['unit', 'UNIT', 4, false, 1]], 'hashrate')}</span>`]
+  $('#pane-miners').innerHTML = [`<span class="row-h">${hdr('miners', [['name', 'WORKER', mw ? mwk : 19, false, 1], ['proto', 'PROTO', 6, false, 1], ['hashrate', 'HASHRATE', 12, true], ['diff', 'DIFF', 10, true], ['ok', 'OK', 8, true], ['stale', 'STALE', 7, true], ['dup', 'DUP', 6, true]], 'hashrate')}  ${hdr('miners', [['seen', 'LAST', 6, false, 1], ['unit', 'UNIT', 14, false, 1], ['jobMs', 'JOB ms', 6, true]], 'hashrate')}</span>`]
     .concat(shown.map((m) => {
       const stale = m.stale / Math.max(1, m.ok + m.stale);
       const seen = m.seen === 0 ? span('ok', 'now   ') : span(m.seen > 5 ? 'warn' : 'dim', pad(m.seen + 's', 6));
-      return `${mw ? pad(m.name, mwk) : pad(trunc(workerLabel(m.name), 18), 19)}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', m.unit)}`;
+      return `${mw ? pad(m.name, mwk) : pad(trunc(workerLabel(m.name), 18), 19)}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', pad(m.unit, 14))}${lpad(m.jobMs ? Math.round(m.jobMs) : '-', 6)}`;
     })).join('\n');
 }
 

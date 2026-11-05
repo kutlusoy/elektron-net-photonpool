@@ -10,6 +10,7 @@ Status: release candidate `0.2.0-rc1` for the first mainnet test. The Rust daemo
 - Serve Stratum V1 and Stratum V2 from one core, plus an optional compact edge protocol for farm proxies.
 - Keep the mandatory per-block UTXO attestation untouched. No consensus changes.
 - Minimise wasted hashes: instant tip-change propagation, unique work per miner, no duplicate shares.
+- Adapt by itself: the job interval of every connection is learned from its duplicate and stale shares, and the number of candidates (work space) follows the load. First hardware test: one Bitaxe, shares accepted, a block found; simulated up to 15,000 Bitaxe-style connections (see [`doc-elektron/guideline-stratum-v1.md`](doc-elektron/guideline-stratum-v1.md)). Larger ASICs and other firmware are not tested yet.
 - Optional web UI served by the daemon; the pool works fully without it.
 
 ## Photon protocol
@@ -27,8 +28,9 @@ A gateway is a small program (`photond gateway`) that a mining farm runs next to
 ## Tests
 
 ```text
-cargo test                                  # 87 unit tests
-ELEKTROND=... test/run_all.sh               # integration steps 1-23 against regtest nodes (see the header of run_all.sh)
+cargo test                                  # 94 unit tests
+ELEKTROND=... test/run_all.sh               # integration steps 1-24 against regtest nodes (see the header of run_all.sh)
+test/bench_bitaxe_profile.py, test/bench_dynamic_growth.py   # steady and dynamic load with Bitaxe-style miners (see the header of each)
 ```
 
 The integration tests recompute every attestation independently in Python and validate candidates with the node itself. Load figures (10,000 miners, full blocks) are in [`doc-elektron/guideline-daemon-core.md`](doc-elektron/guideline-daemon-core.md).

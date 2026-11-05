@@ -232,6 +232,12 @@ pub struct PoolCfg {
     /// How candidates are fetched: "auto" (batch attestation when the node supports it, else one getblocktemplate call per address), "batch" or "gbt".
     #[serde(default = "d_backend")]
     pub backend: String,
+    /// Use only as many of the pool's payout addresses as the work demand needs (each one is a candidate with its own work units); more are added when miners use them up.
+    #[serde(default = "d_true")]
+    pub autoscale_candidates: bool,
+    /// Fewest candidates in use while autoscaling.
+    #[serde(default = "d_min_cand")]
+    pub min_candidates: usize,
 }
 
 #[derive(Deserialize)]
@@ -282,6 +288,12 @@ pub struct StratumCfg {
     /// Miners whose user agent contains one of these words (case-insensitive) get every fresh job marked clean. "*" matches every miner.
     #[serde(default = "d_s_clean_agents")]
     pub clean_work_agents: Vec<String>,
+    /// Learn the job interval of every connection from its duplicate and stale shares: faster when the miner repeats work, slower again when it does not.
+    #[serde(default = "d_true")]
+    pub adaptive_jobs: bool,
+    /// Shortest job interval the learning may reach, in milliseconds.
+    #[serde(default = "d_s_adapt_floor")]
+    pub adaptive_min_interval_ms: u64,
     #[serde(default = "d_true")]
     pub require_address: bool,
     /// Extra listeners with their own default mode. When empty, `listen` is used with the global default mode.
@@ -315,6 +327,8 @@ fn d_s_idle() -> u64 { 300 }
 fn d_s_min_job() -> u64 { 200 }
 fn d_s_max_job() -> u64 { 30_000 }
 fn d_s_space() -> u32 { 5 }
+fn d_min_cand() -> usize { 16 }
+fn d_s_adapt_floor() -> u64 { 50 }
 fn d_s_clean_agents() -> Vec<String> { vec!["bitaxe".into(), "esp-miner".into()] }
 
 fn d_poll() -> u64 { 100 }
@@ -546,8 +560,8 @@ mod tests {
         macro_rules! same {
             ($($($a:ident).+),+ $(,)?) => { $( assert_eq!(format!("{:?}", example.$($a).+), format!("{:?}", d.$($a).+), stringify!($($a).+)); )+ };
         }
-        same!(node.poll_ms, pool.refresh_secs, pool.spot_check, pool.backend);
-        same!(stratum.enabled, stratum.listen, stratum.initial_difficulty, stratum.min_difficulty, stratum.max_difficulty, stratum.share_secs, stratum.max_connections, stratum.idle_secs, stratum.min_job_interval_ms, stratum.max_job_interval_ms, stratum.version_space_bits, stratum.clean_work_agents, stratum.require_address);
+        same!(node.poll_ms, pool.refresh_secs, pool.spot_check, pool.backend, pool.autoscale_candidates, pool.min_candidates);
+        same!(stratum.enabled, stratum.listen, stratum.initial_difficulty, stratum.min_difficulty, stratum.max_difficulty, stratum.share_secs, stratum.max_connections, stratum.idle_secs, stratum.min_job_interval_ms, stratum.max_job_interval_ms, stratum.version_space_bits, stratum.clean_work_agents, stratum.adaptive_jobs, stratum.adaptive_min_interval_ms, stratum.require_address);
         same!(payout.default_mode, payout.modes, payout.min_payout_leptons, payout.max_solo_accounts, payout.dry_run, payout.interval_secs, payout.wallet, payout.wallet_addresses, payout.wallet_passphrase_env, payout.maturity_poll_secs, payout.max_outputs_per_tx, payout.fee_rate);
         same!(payout.fee_pct.pplns, payout.fee_pct.pps, payout.pplns.window_factor, payout.pps.enabled, payout.pps.reserve_min, payout.pps.max_hashrate_share);
         same!(public.enabled, public.listen, public.name, public.stratum_host, public.trust_proxy, public.rate_per_min);

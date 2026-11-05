@@ -65,7 +65,7 @@ async fn summary(State(p): State<Arc<Pool>>) -> Json<Value> {
             "height": height, "tip": tip, "tipTime": tip_time, "connected": s.connected.load(Ordering::Relaxed), "transport": "http-rpc",
             "rttMs": p.node.last_rtt_us.load(Ordering::Relaxed) as f64 / 1000.0,
             "p50": quantile(&lat, 0.5), "p95": quantile(&lat, 0.95), "samples": lat.len(),
-            "batchMs": s.last_fetch_ms.load(Ordering::Relaxed), "backend": *p.backend_name.lock().unwrap(),
+            "batchMs": s.last_fetch_ms.load(Ordering::Relaxed), "backend": *p.backend_name.lock().unwrap(), "candidatesAvailable": p.payouts.len(), "demandUnitsPerSec": get_f64(&p.demand_units),
         },
         "hashrate": {"now": live.hashrate, "m1": live.m1, "h1": live.h1, "hist": if live.hist.is_empty() { vec![0.0] } else { live.hist.iter().copied().collect() }},
         "miners": {"online": live.online, "total": live.total, "v1": live.total, "v2": 0, "edge": 0},
@@ -97,7 +97,7 @@ async fn miners(State(p): State<Arc<Pool>>, Query(q): Query<Limit>) -> Json<Valu
                 "ok": s.ok.load(Ordering::Relaxed), "stale": s.stale.load(Ordering::Relaxed),
                 "dup": s.dup.load(Ordering::Relaxed) + s.inv.load(Ordering::Relaxed),
                 "seen": (now - get_f64(&s.last_seen)).max(0.0) as u64,
-                "unit": format!("c{:03}/t{:02}/s{:02}", unit >> 16, (unit >> 8) & 0xff, unit & 0xff),
+                "unit": format!("c{:03}/t{:02}/s{:02}", unit >> 16, (unit >> 8) & 0xff, unit & 0xff), "jobMs": get_f64(&s.job_ms),
             })
         })
         .collect();

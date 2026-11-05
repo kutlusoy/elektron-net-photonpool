@@ -78,6 +78,59 @@ Line length is limited to 8,192 bytes, malformed messages (more than 10), failed
 
 All connections received the job in every run. The times include block generation in the node and the rebuild of all candidates through `getblocktemplate` (about 45 ms of it for 64 addresses), not only the fan-out itself. Memory is about 7 to 8 KB per connection. Limits of the test setup: the file descriptor limit of the container (20,000) and a single client address, hardware behaviour is NOT covered.
 
+### Steady-state load with Bitaxe-style miners
+
+A Bitaxe (ESP-Miner) is given a clean job every 200 ms (see `guideline-release-and-bitaxe-test.md`, section 8a), five jobs per second and connection. `test/bench_bitaxe_profile.py`
+measures that load with synthetic miners on one 4-core machine that also runs the load generator, the node and the daemon (loopback, regtest, 64 candidates, `refresh_secs = 20`, 20 s window):
+
+| Connections | Daemon memory (before / after) | Jobs per second | To the miners | Daemon CPU | Clean job after a new tip (p50 / max) |
+|---|---|---|---|---|---|
+| 1,000 | 19 / 21 MB | 4,950 | 21 Mbit/s | 5 % of one core | 28 / 30 ms |
+| 5,000 | 58 / 68 MB | 24,749 | 105 Mbit/s | 25 % of one core | 52 / 62 ms |
+| 15,000 | 153 / 183 MB | 74,435 | 316 Mbit/s | 85 % of one core | 74 / 132 ms |
+
+The network is the limit before the CPU is. The work units are used up much faster than with the earlier one job per 15 to 30 s: one candidate offers 16 slices x 60 ntime steps = 960 units per epoch,
+so with five jobs per second per miner and a 20 s epoch one candidate serves about ten Bitaxes, and the 64 candidates of the benchmark about 600 (the allocator reported 38,560 overlapping units at 1,000 and 438,560 at 5,000 connections;
+the reading at 15,000 came right after an epoch change and says nothing). Overlapping units mean two miners get the same header, which shows up as duplicates between miners. 15,000 Bitaxes need about 1,600 candidates.
+
+### Self-adjusting pool (per connection and work space)
+
+Two things adapt to the load now:
+
+- **Job interval per connection** (`[stratum] adaptive_jobs`): the pool counts the duplicate shares and the shares for jobs it no longer knows (not the ones after a new block) of each connection. More than a tenth of them: the
+  interval shrinks by 40 % (down to `adaptive_min_interval_ms`, default 50 ms) and, if that does not help, jobs become clean for that connection. Fewer than two in a hundred: it grows by 15 % per round again, never above the interval that the hash rate
+  estimate calls for. The chosen interval is shown per miner (column JOB ms) and in `/api/v1/miners` as `jobMs`.
+- **Candidates in use** (`[pool] autoscale_candidates`, `min_candidates`): the pool measures how fast the work units of the last epoch were handed out (one unit per job) and builds the next epoch with
+  `ceil(units per second x epoch seconds x 1.25 / 960)` candidates, between `min_candidates` (default 16) and the number of configured addresses. It grows at once and shrinks slowly. The node builds and attests only the candidates in use.
+
+`test/bench_bitaxe_profile.py` with `AUTOSCALE=true ADDRS=2000 CONNS=...` (batch node, 20 s epochs, one 4-core machine for everything):
+
+| Connections | Candidates in use after the first epochs | Overlapping units | Node time to build all candidates of an epoch | Daemon memory | Daemon CPU |
+|---|---|---|---|---|---|
+| 5,000 | 651 (of 2,000) | 0 | not sampled | 77 MB | 30 % of one core |
+| 15,000 | 1,940 (of 2,000) | 0 | 90 to 109 ms | 205 MB | 85 % of one core |
+
+Without autoscaling the same load with 64 candidates overlapped by 438,560 units at 5,000 connections. With a node without the batch patch every candidate costs one `getblocktemplate` call (about 0.7 ms),
+1,900 candidates then take over a second per epoch: build the node with `NODE_PATCHES=true` for pools of this size.
+
+### Dynamic load: miners joining and leaving
+
+`test/bench_dynamic_growth.py` (batch node, 2,000 addresses, 20 s epochs, one 4-core machine for the daemon, the load generator and the node): 1,000 simulated Bitaxes at t = 0, 4,000 more after 40 s, 10,000 more after 80 s, then the groups leave one by one.
+
+| Time | Miners | Candidates in use | Demand (units/s) | Overlapping units | Node time per epoch | Daemon memory | Daemon CPU |
+|---|---|---|---|---|---|---|---|
+| 6 s | 1,000 | 115 | 4,395 | 0 | 6 ms | 21 MB | 7 % of one core |
+| 54 s | 5,000 | 657 | 25,224 | 0 | 35 ms | 70 MB | 29 % |
+| 104 s | 15,000 | 1,950 | 74,873 | 0 | 117 ms | 191 MB | 84 % |
+| 134 s | 14,000 | 1,946 | 74,707 | 0 | 111 ms | 192 MB | 92 % |
+| 209 s | 222 | 1,854 | 71,193 | 0 | 97 ms | 209 MB | 63 % |
+| 269 s | 0 | 954 | 36,611 | 0 | 47 ms | 192 MB | 1 % |
+| 299 s | 0 | 239 | 9,153 | 0 | 12 ms | 188 MB | 1 % |
+| 359 s | 0 | 30 | 1,144 | 0 | 2 ms | 188 MB | 0 % |
+
+The candidates grow within one to two epochs and an exhausted epoch is rebuilt at once, so no unit is handed out twice. When the miners have left, the demand halves per epoch and the candidates follow it down to `min_candidates`.
+Observation: the memory of the process stays at its peak after the miners left (the allocator keeps it); it did not grow in a second wave.
+
 ## 7. Known gaps
 
 - No accounting, payout or persistence yet; shares are only counted.

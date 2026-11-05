@@ -96,7 +96,9 @@ Consequence for the Photon design: a Bitaxe needs a new header about every 160 m
 
 ## 9. Checklist
 
-- [ ] Pre-flight (section 3) done.
-- [ ] Bitaxe connected, shares accepted.
-- [ ] At least one tip change survived without a reject burst.
-- [ ] Report data (section 7) collected.
+- [x] Pre-flight (section 3) done.
+- [x] Bitaxe connected, shares accepted (one Bitaxe Gamma, 37 shares and one duplicate in the longer run, one block found).
+- [x] At least one tip change survived without a reject burst.
+- [x] Report data (section 7) collected: logs and UI screenshots, see 8a.
+- [ ] Longer run (hours) with the hash rate estimate of the pool next to the device's own figure.
+- [ ] A larger ASIC (Antminer, Whatsminer or similar) and other firmware: start-up log and 30 minutes of statistics.

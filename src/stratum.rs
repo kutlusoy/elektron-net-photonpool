@@ -28,6 +28,18 @@ const PREV_TARGET_GRACE: Duration = Duration::from_secs(60);
 /// After a duplicate share the miner gets fresh work at the shortest interval for this long.
 const DUP_BOOST: Duration = Duration::from_secs(30);
 
+/// The next job interval of a connection: faster when more than a tenth of its shares are duplicates or for jobs the pool no longer knows (it works through its jobs
+/// faster than they arrive or hands in late results), slowly slower again when fewer than two in a hundred are, always between `floor` and `cap`.
+fn adapt_interval(cur_ms: f64, ok: u32, dup: u32, stale: u32, floor_ms: f64, cap_ms: f64) -> f64 {
+    let total = ok + dup + stale;
+    if total < 4 {
+        return cur_ms;
+    }
+    let bad = (dup + stale) as f64 / total as f64;
+    let next = if bad > 0.10 { cur_ms * 0.6 } else if bad < 0.02 { cur_ms * 1.15 } else { cur_ms };
+    next.clamp(floor_ms, cap_ms.max(floor_ms))
+}
+
 /// Whether a miner with this user agent gets every fresh job marked clean.
 fn agent_wants_clean(words: &[String], agent: &str) -> bool {
     let a = agent.to_ascii_lowercase();
@@ -126,6 +138,11 @@ struct Session {
     last_job: Instant,
     dup_until: Instant,
     agent_clean: bool,
+    adapt_ms: Option<f64>,
+    adapt_ok: u32,
+    adapt_dup: u32,
+    adapt_stale: u32,
+    adapt_t: Instant,
     last_adjust: Instant,
     shares_since_adjust: u32,
     bad: u32,
@@ -168,7 +185,7 @@ impl Session {
         Self {
             pool, cfg, stats, id, mode: port.mode, port, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
             difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0, rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(),
-            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_job: now, dup_until: now, agent_clean: false, last_adjust: now, shares_since_adjust: 0, bad: 0,
+            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_job: now, dup_until: now, agent_clean: false, adapt_ms: None, adapt_ok: 0, adapt_dup: 0, adapt_stale: 0, adapt_t: now, last_adjust: now, shares_since_adjust: 0, bad: 0,
             acc_minute: 0, acc_diff: 0.0, acc_cnt: 0, acc_last: now,
         }
     }
@@ -342,8 +359,35 @@ impl Session {
 
     fn schedule_next(&mut self) {
         let boost = Instant::now() < self.dup_until;
-        let ms = job_delay_ms(&self.cfg, self.rolling_bits, self.hash_est, boost);
+        let model = job_delay_ms(&self.cfg, self.rolling_bits, self.hash_est, boost);
+        let ms = match self.adapt_ms {
+            Some(a) if !boost => (a.clamp(self.cfg.adaptive_min_interval_ms as f64, self.cfg.max_job_interval_ms as f64)) as u64,
+            _ => model,
+        };
+        set_f64(&self.stats.job_ms, ms as f64);
         self.next_job = Instant::now() + Duration::from_millis(ms);
+    }
+
+    /// Learns the job interval of this connection from its duplicate and stale shares (see `adapt_interval`).
+    fn adapt(&mut self) {
+        if !self.cfg.adaptive_jobs {
+            return;
+        }
+        let total = self.adapt_ok + self.adapt_dup + self.adapt_stale;
+        if total < 12 && !(total >= 4 && self.adapt_t.elapsed() > Duration::from_secs(60)) {
+            return;
+        }
+        let cap = job_delay_ms(&self.cfg, self.rolling_bits, self.hash_est, false) as f64;
+        let floor = self.cfg.adaptive_min_interval_ms as f64;
+        let cur = self.adapt_ms.unwrap_or(cap);
+        let next = adapt_interval(cur, self.adapt_ok, self.adapt_dup, self.adapt_stale, floor, cap);
+        let bad = (self.adapt_dup + self.adapt_stale) as f64 / total as f64;
+        // fastest interval and still repeating work: the miner keeps old jobs queued, so give it clean jobs
+        if bad > 0.10 && next <= floor * 1.01 && !self.agent_clean {
+            self.agent_clean = true;
+        }
+        self.adapt_ms = Some(next);
+        (self.adapt_ok, self.adapt_dup, self.adapt_stale, self.adapt_t) = (0, 0, 0, Instant::now());
     }
 
     async fn send_job(&mut self, wr: &mut OwnedWriteHalf, force_clean: bool) -> Result<()> {
@@ -424,6 +468,8 @@ impl Session {
             (j.epoch.clone(), solo, j.n, j.version)
         });
         let Some((epoch, solo, job_n, job_version)) = found else {
+            self.adapt_stale += 1;
+            self.adapt();
             self.count_stale();
             return self.error(wr, id, 21, "Job not found").await;
         };
@@ -447,6 +493,8 @@ impl Session {
         let result = epoch.check(cand_ref, slice, ntime, version, nonce, &target);
         match result {
             ShareResult::Valid | ShareResult::Block => {
+                self.adapt_ok += 1;
+                self.adapt();
                 self.count_ok(credit);
                 if result == ShareResult::Block {
                     self.block_found(&epoch, cand_ref, version, ntime, nonce);
@@ -457,6 +505,8 @@ impl Session {
             ShareResult::Duplicate => {
                 self.stats.dup.fetch_add(1, Ordering::Relaxed);
                 self.pool.stats.dup.fetch_add(1, Ordering::Relaxed);
+                self.adapt_dup += 1;
+                self.adapt();
                 // The same share again means the miner has swept the space of its job and starts over: give it fresh work, but not faster than min_job_interval_ms.
                 self.dup_until = Instant::now() + DUP_BOOST;
                 self.next_job = self.next_job.min((self.last_job + Duration::from_millis(self.cfg.min_job_interval_ms)).max(Instant::now()));
@@ -620,6 +670,26 @@ mod tests {
         assert_eq!(job_delay_ms(&c, 12, 1.0e3, false), c.max_job_interval_ms);
         // miners that granted fewer bits, or a configured smaller space, are not given more than they have
         assert_eq!(job_delay_ms(&c, 2, 1.0e10, false), (2f64.powi(34) / 1.0e10 * 0.8 * 1000.0) as u64);
+    }
+
+    #[test]
+    fn the_interval_is_learned_from_the_bad_share_ratio() {
+        // many duplicates: faster, down to the floor
+        let mut ms = 200.0;
+        for _ in 0..10 {
+            ms = adapt_interval(ms, 10, 5, 0, 50.0, 200.0);
+        }
+        assert_eq!(ms, 50.0);
+        // clean again: slowly slower, up to the cap
+        for _ in 0..30 {
+            ms = adapt_interval(ms, 20, 0, 0, 50.0, 200.0);
+        }
+        assert_eq!(ms, 200.0);
+        // a few bad shares change nothing, too few shares change nothing
+        assert_eq!(adapt_interval(120.0, 97, 3, 0, 50.0, 200.0), 120.0);
+        assert_eq!(adapt_interval(120.0, 2, 1, 0, 50.0, 200.0), 120.0);
+        // the cap never drops below the floor
+        assert_eq!(adapt_interval(100.0, 20, 0, 0, 50.0, 10.0), 50.0);
     }
 
     #[test]
