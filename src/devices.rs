@@ -46,6 +46,29 @@ pub fn clean_agent(agent: &str) -> String {
     agent.chars().filter(|c| c.is_ascii_graphic() || *c == ' ').take(64).collect::<String>().trim().to_string()
 }
 
+/// Key under which the pool remembers what it has learned about a kind of device: the chip for ESP-Miner devices (`bitaxe/bm1370`), else the software name.
+pub fn profile_key(agent: &str) -> String {
+    let a = clean_agent(agent).to_ascii_lowercase();
+    let mut parts = a.split(|c: char| c == '/' || c == ' ').filter(|p| !p.is_empty());
+    let first = parts.next().unwrap_or("unknown");
+    if first == "bitaxe" || first == "esp-miner" {
+        if let Some(chip) = parts.next().filter(|p| p.starts_with("bm")) {
+            return format!("bitaxe/{chip}");
+        }
+    }
+    first.to_string()
+}
+
+/// Typical hash rate of a device that tells its chip in the user agent (ESP-Miner family: `bitaxe/BM1370/v2.x`). Only a starting value so that the first job
+/// interval and the first share difficulty fit before the pool has measured anything; the pool learns the real rate from the shares and corrects it.
+pub fn expected_hashrate(agent: &str) -> Option<f64> {
+    let a = agent.to_ascii_lowercase();
+    if !(a.contains("bitaxe") || a.contains("esp-miner")) {
+        return None;
+    }
+    [("bm1370", 1.2e12), ("bm1368", 0.7e12), ("bm1366", 0.5e12), ("bm1397", 0.4e12)].iter().find(|(chip, _)| a.contains(chip)).map(|(_, h)| *h)
+}
+
 pub fn classify(agent: &str) -> Device {
     classify_in(agent, &OTHER, MAX_OTHER)
 }
@@ -82,6 +105,22 @@ mod tests {
         assert_eq!(classify_in("brandnew/1.0", &set, 3).name, "Other");
         assert_eq!(classify_in("weird1/2.0", &set, 3).key, "other:weird1");
         assert_eq!(classify("Antminer S19").name, "Antminer");
+    }
+
+    #[test]
+    fn profile_key_names_the_chip_or_the_software() {
+        assert_eq!(profile_key("bitaxe/BM1370/v2.9.0"), "bitaxe/bm1370");
+        assert_eq!(profile_key("ESP-Miner/BM1366 v2"), "bitaxe/bm1366");
+        assert_eq!(profile_key("cgminer/4.11.1"), "cgminer");
+        assert_eq!(profile_key(""), "unknown");
+    }
+
+    #[test]
+    fn chip_in_the_agent_gives_a_starting_hash_rate() {
+        assert_eq!(expected_hashrate("bitaxe/BM1370/v2.9.0"), Some(1.2e12));
+        assert_eq!(expected_hashrate("bitaxe/BM1366/v2.1"), Some(0.5e12));
+        assert_eq!(expected_hashrate("cpuminer/2.5"), None);
+        assert_eq!(expected_hashrate("bitaxe/unknownchip"), None);
     }
 
     #[test]

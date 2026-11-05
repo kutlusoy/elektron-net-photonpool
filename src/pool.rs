@@ -43,6 +43,32 @@ pub struct FoundBlock {
     pub status: &'static str,
 }
 
+/// What the pool has learned about a kind of device (see `devices::profile_key`): typical hash rate, job interval, whether it needs clean jobs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Learned {
+    pub hashrate: f64,
+    pub job_ms: f64,
+    pub clean: bool,
+    pub samples: u32,
+}
+
+/// Folds the current observation of a device type (median over its connections) into what was learned before: a moving average that follows slowly, so one odd
+/// connection does not change much, and that is replaced outright by the first observation.
+pub fn merge_learned(old: Option<Learned>, hashrate: f64, job_ms: f64, clean: bool) -> Learned {
+    match old {
+        None => Learned { hashrate, job_ms, clean, samples: 1 },
+        Some(o) => {
+            let w = 0.1;
+            Learned {
+                hashrate: o.hashrate * (1.0 - w) + hashrate * w,
+                job_ms: if job_ms > 0.0 && o.job_ms > 0.0 { o.job_ms * (1.0 - w) + job_ms * w } else if job_ms > 0.0 { job_ms } else { o.job_ms },
+                clean: if job_ms > 0.0 { clean } else { o.clean },
+                samples: o.samples.saturating_add(1),
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Stats {
     pub ok: AtomicU64,
@@ -88,6 +114,9 @@ pub struct SessionStats {
     pub net_in: AtomicU64,
     pub net_out: AtomicU64,
     pub net_jobs: AtomicU64,
+    /// Job interval the pool learned for this connection from its duplicate and stale shares (f64 bits, 0 = not learned yet) and whether that made it use clean jobs.
+    pub adapt_ms: AtomicU64,
+    pub clean_learned: AtomicU64,
 }
 
 impl SessionStats {
@@ -96,7 +125,7 @@ impl SessionStats {
         set_f64(&now, unix_now());
         Self {
             name: Mutex::new(String::new()), ok: AtomicU64::new(0), stale: AtomicU64::new(0), dup: AtomicU64::new(0), inv: AtomicU64::new(0),
-            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0), agent: Mutex::new(String::new()), device: Mutex::new(("other:unknown".into(), "unknown".into())), best: AtomicU64::new(0), net_in: AtomicU64::new(0), net_out: AtomicU64::new(0), net_jobs: AtomicU64::new(0),
+            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0), agent: Mutex::new(String::new()), device: Mutex::new(("other:unknown".into(), "unknown".into())), best: AtomicU64::new(0), net_in: AtomicU64::new(0), net_out: AtomicU64::new(0), net_jobs: AtomicU64::new(0), adapt_ms: AtomicU64::new(0), clean_learned: AtomicU64::new(0),
         }
     }
 }
@@ -292,6 +321,8 @@ pub struct Pool {
     epoch_seq: AtomicU64,
     pub sessions: Mutex<HashMap<u64, Arc<SessionStats>>>,
     pub session_seq: AtomicU64,
+    /// Open Stratum connections (for the job budget).
+    pub conns: AtomicU64,
     pub live: Mutex<Live>,
     pub solo_active: Mutex<HashMap<String, Instant>>,
     pub pps_ready: AtomicBool,
@@ -308,6 +339,8 @@ pub struct Pool {
     pub demand_units: AtomicU64,
     /// Best share difficulty per device type (key of `devices::classify`), kept in the ledger.
     pub device_best: Mutex<HashMap<String, f64>>,
+    /// Learned values per device type, loaded from the ledger and updated once a minute.
+    pub learned: Mutex<HashMap<String, Learned>>,
     /// Answers of the history API, cached for a few seconds: range -> (time, json).
     pub hist_cache: Mutex<HashMap<String, (Instant, serde_json::Value)>>,
     /// The events that are fit for the public page (see `public_message`), newest last: (sequence number, time, level, text).
@@ -347,14 +380,15 @@ impl Pool {
             .collect::<Result<Vec<_>>>()?;
         let active = if cfg.pool.autoscale_candidates { cfg.pool.min_candidates.clamp(1, payouts.len().max(1)) } else { payouts.len() };
         let ledger = Ledger::open(&cfg.ledger.path).with_context(|| format!("opening ledger {}", cfg.ledger.path))?;
+        let learned: HashMap<String, Learned> = ledger.call(|c| crate::ledger::load_learned(c)).await.unwrap_or_default().into_iter().map(|(k, h, j, c, s)| (k, Learned { hashrate: h, job_ms: j, clean: c, samples: s })).collect();
         let bests: HashMap<String, f64> = ledger.call(|c| crate::ledger::device_bests(c)).await.unwrap_or_default().into_iter().collect();
         let (events, _) = broadcast::channel(1024);
         let (epoch, _) = watch::channel(None);
         let pool = Arc::new(Pool {
             cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
-            sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), conns: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
             pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0),
-            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), active_candidates: AtomicUsize::new(active), demand_units: AtomicU64::new(0), device_best: Mutex::new(bests), hist_cache: Mutex::new(HashMap::new()), public_events: Mutex::new(VecDeque::new()), public_seq: AtomicU64::new(0), photon: std::sync::OnceLock::new(),
+            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), active_candidates: AtomicUsize::new(active), demand_units: AtomicU64::new(0), device_best: Mutex::new(bests), learned: Mutex::new(learned), hist_cache: Mutex::new(HashMap::new()), public_events: Mutex::new(VecDeque::new()), public_seq: AtomicU64::new(0), photon: std::sync::OnceLock::new(),
         });
         pool.stats.connected.store(true, Ordering::Relaxed);
         Ok(pool)
@@ -684,6 +718,20 @@ pub fn candidates_needed(units_per_sec: f64, horizon_secs: f64, slices: u64, min
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn learned_values_follow_slowly_and_start_from_the_first_observation() {
+        let first = merge_learned(None, 1.0e12, 0.0, false);
+        assert_eq!((first.hashrate, first.samples, first.job_ms), (1.0e12, 1, 0.0));
+        let next = merge_learned(Some(first), 2.0e12, 100.0, true);
+        assert!((next.hashrate - 1.1e12).abs() < 1.0);
+        assert_eq!((next.job_ms, next.clean, next.samples), (100.0, true, 2));
+        // an observation without a learned interval keeps the one that was learned
+        let kept = merge_learned(Some(next), 1.1e12, 0.0, false);
+        assert_eq!((kept.job_ms, kept.clean), (100.0, true));
+        let moved = merge_learned(Some(kept), 1.1e12, 50.0, true);
+        assert!((moved.job_ms - 95.0).abs() < 1e-9);
+    }
 
     #[test]
     fn only_harmless_events_are_public_and_the_finder_is_masked() {

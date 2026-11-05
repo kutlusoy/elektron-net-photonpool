@@ -167,7 +167,7 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 | `pool.backend` | `auto` (default): batch attestation when the node has the `getattestationbatch` RPC, else one `getblocktemplate` call per address; `batch`, `gbt` force one |
 | `stratum.listen`, `stratum.initial_difficulty`, `stratum.share_secs` | Miner port, starting difficulty, target seconds per share |
 | `stratum.max_connections` | Upper bound for sockets |
-| `stratum.adaptive_jobs`, `stratum.adaptive_min_interval_ms` | The job interval of every connection is learned from its duplicate and stale shares (default on, shortest 50 ms) |
+| `stratum.adaptive_jobs`, `stratum.adaptive_min_interval_ms` | The job interval of every connection is learned from its duplicate and stale shares (default on, shortest 25 ms). The pool also remembers what it learned per device type (hash rate, job interval, clean jobs) and starts the next connection of that type with it; `stratum.min_job_interval_ms` (default 25) and `stratum.max_jobs_per_sec` (default 50000) set the shortest job interval, which grows with the number of connections |
 | `stratum.clean_work_agents`, `stratum.version_space_bits` | Miners whose name contains one of these words (default `bitaxe`, `esp-miner`) get every fresh job marked clean; how many version bits a miner really sweeps per job (default 5), which sets how often fresh work is sent |
 | `api.listen`, `api.ui_dir` | Admin API and UI location |
 | `api.explorer_url` | Optional base URL of a mempool-style block explorer (for example `https://mempool.elektron-net.org`). Found blocks and the chain tip then link to `<explorer_url>/block/<hash>` in the UI and in `/api/v1/blocks`. Must start with `http://` or `https://`. |

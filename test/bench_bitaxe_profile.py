@@ -37,6 +37,7 @@ listen = "127.0.0.1:{STRATUM}"
 initial_difficulty = 0.001
 max_connections = 100000
 min_job_interval_ms = {CADENCE}
+max_jobs_per_sec = 100000000
 max_job_interval_ms = {CADENCE}
 
 [ledger]
