@@ -20,6 +20,7 @@ if [ -n "$ELEKTROND_BATCH" ]; then
   ELEKTROND="$ELEKTROND_BATCH" python3 step20_gateway_reconnect.py || rc=1     # pool outage and reconnect
   ELEKTROND="$ELEKTROND_BATCH" python3 step22_coinbase_weight.py || rc=1       # block weight with large coinbases
   ELEKTROND="$ELEKTROND_BATCH" python3 step23_attestation_scaling.py || rc=1    # attestation cost against the set size
+  python3 check_patch_scope.py || rc=1                                          # the patch only adds code, no consensus code is touched
   ELEKTROND="$ELEKTROND_BATCH" python3 step28_batch_rpc_limits.py || rc=1       # budgets, overflow, parallel limit, responsiveness
   UNPATCHED="${ELEKTROND:-elektrond}" ELEKTROND="$ELEKTROND_BATCH" python3 step29_unpatched_node_accepts.py || rc=1   # an unpatched node accepts the batch blocks
 else
