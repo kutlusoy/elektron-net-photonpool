@@ -250,14 +250,14 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .nrow { position: relative; }
 .nrow:hover::after { left: 40%; bottom: 80%; }
 
-.ndonut { display: flex; align-items: center; gap: 14px; }
+.ndonut { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 4px 0; }
 .ndsvg { width: 150px; height: 150px; flex: none; }
 .ndtrack { fill: none; stroke: color-mix(in srgb, var(--c1) 10%, transparent); stroke-width: 11; }
 .ndseg { fill: none; stroke-width: 11; transition: stroke-dasharray 1s cubic-bezier(.2, .8, .2, 1), stroke-dashoffset 1s cubic-bezier(.2, .8, .2, 1), opacity .2s, stroke-width .2s; filter: drop-shadow(0 0 5px currentColor); }
 .hov .ndseg { opacity: .35; } .hov .ndseg.on { opacity: 1; stroke-width: 14; }
-.ndbig { fill: var(--fg); font-size: 17px; font-family: var(--mono); font-weight: 600; }
+.ndbig { fill: var(--fg); font-size: 14px; font-family: var(--mono); font-weight: 600; }
 .ndsub { fill: var(--dim); font-size: 8px; font-family: var(--mono); }
-.nleg { display: grid; gap: 3px; font-size: 11px; min-width: 0; }
+.nleg { display: grid; gap: 3px; font-size: 11px; min-width: 0; width: 100%; max-width: 300px; }
 .nlrow { display: grid; grid-template-columns: 9px 1fr auto; gap: 7px; align-items: center; cursor: default; }
 .nlrow i { width: 9px; height: 9px; box-shadow: 0 0 8px currentColor; }
 .nlrow span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -342,3 +342,7 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .crow { grid-column: 1 / -1; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; align-items: stretch; }
 .crow .card .nchart { height: 230px; }
 @media (max-width: 1100px) { .crow { grid-template-columns: 1fr 1fr; } .crow .card:first-child { grid-column: 1 / -1; } }
+.mrow { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+.mfee { font-size: 26px; text-shadow: 0 0 10px var(--glow); }
+.cbody > div { margin: 2px 0; }
+.crow { transition: grid-template-columns .25s ease; }

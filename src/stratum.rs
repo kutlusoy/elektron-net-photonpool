@@ -666,10 +666,16 @@ async fn stats_task(pool: Arc<Pool>) {
         let sessions: Vec<Arc<SessionStats>> = pool.sessions.lock().unwrap().values().cloned().collect();
         let now = unix_now();
         let (mut hr, mut online, mut shares, mut pps_hr) = (0.0, 0u64, 0u64, 0.0);
+        let mut by_mode = [(0u64, 0.0f64); 3];
         for s in &sessions {
             hr += get_f64(&s.hashrate);
             if s.mode.load(Ordering::Relaxed) == Mode::Pps as u64 {
                 pps_hr += get_f64(&s.hashrate);
+            }
+            if get_f64(&s.difficulty) > 0.0 {
+                let m = (s.mode.load(Ordering::Relaxed) as usize).min(2);
+                by_mode[m].0 += 1;
+                by_mode[m].1 += get_f64(&s.hashrate);
             }
             // a connected miner is online even while it hashes without finding a share (CPU miners can take minutes per share)
             if get_f64(&s.difficulty) > 0.0 {
@@ -696,6 +702,7 @@ async fn stats_task(pool: Arc<Pool>) {
         live.jobs_per_sec = net.2.saturating_sub(prev_net.2) as f64;
         live.connects_per_sec = net.3.saturating_sub(prev_net.3) as f64;
         prev_net = net;
+        live.by_mode = by_mode;
         live.online = online;
         live.total = sessions.len() as u64;
         drop(live);

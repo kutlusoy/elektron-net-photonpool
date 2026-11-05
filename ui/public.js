@@ -63,7 +63,7 @@ function demoSource() {
         node: { height: 132457, tip: hex(r, 64), tipTime: now() - 23 }, networkDifficulty: 1.2e9,
       };
       view.blocks = blocks; view.payouts = payouts;
-      view.engine = { node: { connected: true, rttMs: 0.4 + r() * 0.3, p50: 28 + r() * 10, p95: 55 + r() * 20 },
+      view.engine = { modes: [{ mode: 'pplns', online: 700, hashrate: 7e16 + r() * 1e15 }, { mode: 'solo', online: 298, hashrate: 2.4e16 + r() * 1e15 }, { mode: 'pps', online: 0, hashrate: 0 }], node: { connected: true, rttMs: 0.4 + r() * 0.3, p50: 28 + r() * 10, p95: 55 + r() * 20 },
         net: { connections: 1000, inBps: 20000 + r() * 8000, outBps: 300000 + r() * 40000, jobsPerSec: 900 + r() * 100, connectsPerSec: r() < 0.2 ? 1 : 0, accepted: 1450, closed: 450, refused: 0, bytesIn: 3e8, bytesOut: 4e9 } };
     },
     async account(addr) {
@@ -144,6 +144,7 @@ function render() {
 function trackSeries(p) {
   Series.seed('hr', p.hashrate.hist, 5);
   const en = view.engine;
+  if (en && en.modes) en.modes.forEach((m) => { Series.push('mm_' + m.mode, m.online); Series.push('mh_' + m.mode, m.hashrate); });
   if (en) { Series.push('inbps', en.net.inBps); Series.push('outbps', en.net.outBps); Series.push('jobsps', en.net.jobsPerSec); Series.push('conns', en.net.connections); Series.push('cps', en.net.connectsPerSec); Series.push('nlat50', en.node.p50); Series.push('nlat95', en.node.p95); Series.push('nrtt', en.node.rttMs); }
   Series.push('hr', p.hashrate.now); Series.push('h1', p.hashrate.h1); Series.push('online', p.miners.online); Series.push('workers', p.miners.workers);
 }
@@ -180,12 +181,33 @@ Extras.add('connect', (el) => {
   };
 });
 
+const modeColor = { solo: 'c1', pplns: 'c2', pps: 'c3' };
+// Payout modes: the rules as plain cards on top, below the live load per mode (connected miners and hash rate over time, share of the pool).
 Extras.add('modes', (el) => {
-  const f = card(el, 'fees by mode (%)'), a = card(el, 'availability');
+  const info = Extras.row(el), row = Extras.row(el);
+  let cards = null;
+  const ct = card(row, 'connected miners per mode'), ch = card(row, 'hash rate per mode'), cs = card(row, 'share of the pool hash rate');
   return () => {
     const p = view.pool; if (!p) return;
-    Neon.bars(f, p.modes.map((m) => ({ key: m.mode, label: modeLabel[m.mode] || m.mode, value: m.fee, text: m.fee + '%', color: m.available ? 'c1' : 'warn' })), { max: Math.max(5, ...p.modes.map((m) => m.fee)) });
-    Neon.donut(a, p.modes.map((m) => ({ key: m.mode, label: (modeLabel[m.mode] || m.mode) + (m.available ? '' : ' (paused)'), value: 1, color: m.available ? 'ok' : 'warn', text: m.available ? 'open' : 'paused' })), { big: String(p.modes.filter((m) => m.available).length), sub: 'modes open' });
+    if (!cards) {
+      info.style.gridTemplateColumns = `repeat(${Math.max(1, p.modes.length)}, 1fr)`;
+      cards = Object.fromEntries(p.modes.map((m) => [m.mode, card(info, (modeLabel[m.mode] || m.mode) + ' mode')]));
+    }
+    const en = (view.engine && view.engine.modes) || [];
+    const live = (id) => en.find((m) => m.mode === id) || { online: 0, hashrate: 0 };
+    p.modes.forEach((m) => {
+      const ports = p.stratum.ports.filter((x) => x.mode === m.mode).map((x) => x.port + (x.override ? ' (+m)' : '')).join(', ') || 'by password only: m=' + m.mode;
+      cards[m.mode].innerHTML = [
+        `<div class="mrow"><b class="mfee ${modeColor[m.mode]}">${esc(m.fee)}%</b><span class="dim">pool fee</span><span class="${m.available ? 'ok' : 'warn'}">${m.available ? 'open' : 'paused'}</span></div>`,
+        `<div>${esc(modeShort[m.mode] || '')}</div>`,
+        `<div class="dim">port ${esc(ports)}</div>`,
+        `<div class="dim">${num(live(m.mode).online)} miners, ${fmtHash(live(m.mode).hashrate)}</div>`,
+      ].join('');
+    });
+    timeLine(ct, p.modes.map((m) => ({ name: modeLabel[m.mode] || m.mode, data: Series.get('mm_' + m.mode), color: modeColor[m.mode] })), num);
+    timeLine(ch, p.modes.map((m) => ({ name: modeLabel[m.mode] || m.mode, data: Series.get('mh_' + m.mode), color: modeColor[m.mode] })), fmtHash);
+    const tot = p.modes.reduce((a, m) => a + live(m.mode).hashrate, 0);
+    Neon.donut(cs, p.modes.map((m) => ({ key: m.mode, label: modeLabel[m.mode] || m.mode, value: live(m.mode).hashrate, color: modeColor[m.mode], text: tot ? pct(live(m.mode).hashrate / tot) : '0%' })), { big: fmtHash(tot), sub: 'all modes' });
   };
 });
 

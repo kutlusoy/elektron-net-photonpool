@@ -248,3 +248,32 @@ const Extras = (() => {
     },
   };
 })();
+
+// A card in a row whose text is cut off grows while the mouse is over it; the other cards of the row shrink a little to make room.
+(() => {
+  const cut = (card) => card.scrollWidth > card.clientWidth + 1 || [...card.querySelectorAll('*')].some((e) => e.clientWidth && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== 'visible');
+  document.addEventListener('mouseover', (ev) => {
+    const card = ev.target.closest && ev.target.closest('.crow > .card');
+    if (!card) return;
+    const row = card.parentElement;
+    if (row._grown === card || getComputedStyle(row).display !== 'grid') return;
+    const cols = getComputedStyle(row).gridTemplateColumns.split(' ').map(parseFloat);
+    const kids = [...row.children];
+    if (cols.length !== kids.length || kids.some((k) => k.offsetLeft > 0 && k.offsetTop !== kids[0].offsetTop) || !cut(card)) return;
+    clearTimeout(row._t);
+    const i = kids.indexOf(card), total = cols.reduce((a, b) => a + b, 0), want = Math.min(total * 0.6, cols[i] * 1.5);
+    const rest = total - cols[i], scale = (total - want) / rest;
+    if (!row._orig) { row._orig = cols; row._inline = row.style.gridTemplateColumns; }
+    row.style.gridTemplateColumns = cols.map((w, k) => (k === i ? want : w * scale) + 'px').join(' ');
+    row._grown = card;
+  });
+  document.addEventListener('mouseout', (ev) => {
+    const card = ev.target.closest && ev.target.closest('.crow > .card');
+    if (!card || (ev.relatedTarget && card.contains(ev.relatedTarget))) return;
+    const row = card.parentElement;
+    if (row._grown !== card) return;
+    row._grown = null;
+    row.style.gridTemplateColumns = row._orig.map((w) => w + 'px').join(' ');
+    row._t = setTimeout(() => { row.style.gridTemplateColumns = row._inline; row._orig = null; }, 300);
+  });
+})();

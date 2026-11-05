@@ -113,6 +113,8 @@ pub struct Live {
     pub out_bps: f64,
     pub jobs_per_sec: f64,
     pub connects_per_sec: f64,
+    /// Started connections and their summed hash rate per payout mode (index: solo, pplns, pps).
+    pub by_mode: [(u64, f64); 3],
 }
 
 pub struct Unit {
