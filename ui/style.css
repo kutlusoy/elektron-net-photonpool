@@ -79,8 +79,8 @@ body {
   gap: 10px; padding: 10px;
   min-height: 0;
   grid-template-columns: 1.25fr 1fr 1fr;
-  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1.15fr);
-  grid-template-areas: "pool tip alloc" "miners miners blocks" "tty tty tty";
+  grid-template-rows: auto minmax(0, .85fr) minmax(0, 1fr) minmax(0, .9fr);
+  grid-template-areas: "pool tip alloc" "history history devices" "miners miners blocks" "tty tty tty";
 }
 .p-pool { grid-area: pool; } .p-tip { grid-area: tip; } .p-alloc { grid-area: alloc; }
 .p-miners { grid-area: miners; } .p-blocks { grid-area: blocks; } .p-tty { grid-area: tty; }
@@ -139,12 +139,12 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 ::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 1100px) {
-  .grid { grid-template-columns: 1fr 1fr; grid-template-areas: "pool tip" "alloc blocks" "miners miners" "tty tty"; grid-template-rows: auto auto minmax(160px, 1fr) minmax(200px, 1fr); }
+  .grid { grid-template-columns: 1fr 1fr; grid-template-areas: "pool tip" "alloc blocks" "history devices" "miners miners" "tty tty"; grid-template-rows: auto auto minmax(190px, 1fr) minmax(160px, 1fr) minmax(200px, 1fr); }
 }
 @media (max-width: 720px) {
   body { padding: 6px; font-size: 12px; overflow: auto; }
   .window { height: auto; min-height: 100%; clip-path: none; }
-  .grid { grid-template-columns: 1fr; grid-template-areas: "pool" "tip" "alloc" "miners" "blocks" "tty"; grid-template-rows: none; }
+  .grid { grid-template-columns: 1fr; grid-template-areas: "pool" "tip" "alloc" "history" "devices" "miners" "blocks" "tty"; grid-template-rows: none; }
   .p-miners pre { max-height: 300px; }
   .tty { min-height: 220px; max-height: 320px; }
   pre { overflow-x: auto; }
@@ -153,14 +153,16 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
   .tag.demo, .pulse { animation: none; }
 }
 
-.grid.pub { grid-template-columns: 1.2fr 1.2fr 1fr; grid-template-rows: auto minmax(0, 1fr) minmax(0, 1.2fr); grid-template-areas: "pool connect modes" "blocks blocks payouts" "tty tty tty"; }
+.grid.pub { grid-template-columns: 1.2fr 1.2fr 1fr; grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "pool connect modes" "history history devices" "blocks blocks payouts" "tty tty tty"; }
+.p-history { grid-area: history; } .p-devices { grid-area: devices; }
 .p-connect { grid-area: connect; } .p-modes { grid-area: modes; } .p-payouts { grid-area: payouts; }
 .grid.pub .p-blocks { grid-area: blocks; }
 @media (max-width: 1100px) {
-  .grid.pub { grid-template-columns: 1fr 1fr; grid-template-areas: "pool connect" "modes payouts" "blocks blocks" "tty tty"; grid-template-rows: auto auto minmax(160px, 1fr) minmax(200px, 1fr); }
+  .grid.pub { grid-template-columns: 1fr 1fr; grid-template-areas: "pool connect" "modes payouts" "history devices" "blocks blocks" "tty tty"; grid-template-rows: auto auto minmax(200px, 1fr) minmax(160px, 1fr) minmax(200px, 1fr); }
 }
 @media (max-width: 720px) {
-  .grid.pub { grid-template-columns: 1fr; grid-template-areas: "pool" "connect" "modes" "blocks" "payouts" "tty"; grid-template-rows: none; }
+  .grid.pub { grid-template-columns: 1fr; grid-template-areas: "pool" "connect" "modes" "history" "devices" "blocks" "payouts" "tty"; grid-template-rows: none; }
+  .chartpane { min-height: 190px; }
 }
 
 .minerlink { letter-spacing: .1em; font-size: 12px; }
@@ -293,3 +295,31 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .mtip a { color: var(--c1); word-break: break-all; }
 .music.credit .mtitle:hover + .mtip, .music.credit .mtitle:focus + .mtip, .music.credit .mtip:hover, .music.credit .mtip:focus-within { display: block; }
 @media (max-width: 720px) { .mtitle { max-width: 12ch; } }
+
+/* Single-page shell (spa.js): the view is swapped in place; the title bar with the music player stays */
+.window.spa { grid-template-rows: auto 1fr; }
+#view { display: grid; grid-template-rows: auto 1fr; min-height: 0; view-transition-name: view; }
+.lnk.on { color: var(--c3); text-shadow: 0 0 8px var(--glow); }
+@keyframes pane-in { from { opacity: 0; transform: translateY(16px) scale(.985); filter: blur(5px); } to { opacity: 1; transform: none; filter: none; } }
+.grid.entering .pane { animation: pane-in .6s cubic-bezier(.2, .8, .2, 1) backwards; animation-delay: calc(var(--i, 0) * 55ms); }
+@keyframes view-out { to { opacity: 0; transform: scale(.97); filter: blur(6px); } }
+@keyframes view-in { from { opacity: 0; transform: scale(1.02); filter: blur(6px); } }
+::view-transition-old(view) { animation: view-out .28s ease-in both; }
+::view-transition-new(view) { animation: view-in .42s .08s cubic-bezier(.2, .8, .2, 1) both; }
+@media (prefers-reduced-motion: reduce) { .grid.entering .pane, ::view-transition-old(view), ::view-transition-new(view) { animation: none; } }
+
+/* History pane: range buttons and a chart that fills the pane */
+.chartpane { flex: 1; min-height: 0; padding: 6px 8px 2px; position: relative; }
+.chartpane .nchart { height: 100%; }
+.pane h2 .rng { display: inline-flex; gap: 2px; font-style: normal; letter-spacing: 0; }
+.rbtn { font: inherit; font-size: 10px; padding: 0 6px; color: var(--dim); background: none; border: 1px solid transparent; cursor: pointer; }
+.rbtn:hover { color: var(--c1); }
+.rbtn.on { color: var(--c3); border-color: var(--c3); text-shadow: 0 0 8px var(--glow); }
+.pane.front .chartpane { flex: 0 1 auto; height: 28%; }
+
+.rng .sep2 { display: inline-block; width: 1px; margin: 2px 4px; background: var(--line); }
+
+.hleg { position: absolute; top: 2px; right: 14px; display: flex; gap: 12px; font-size: 10px; color: var(--dim); pointer-events: none; }
+.hleg .sw { display: inline-block; width: 8px; height: 8px; margin-right: 5px; box-shadow: 0 0 6px currentColor; }
+.hleg .sw.c1 { background: var(--c1); color: var(--c1); } .hleg .sw.c2 { background: var(--c2); color: var(--c2); } .hleg .sw.c3 { background: var(--c3); color: var(--c3); }
+.hleg .sw.ok { background: var(--ok); color: var(--ok); } .hleg .sw.warn { background: var(--warn); color: var(--warn); } .hleg .sw.err { background: var(--err); color: var(--err); }

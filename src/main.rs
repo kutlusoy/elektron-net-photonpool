@@ -2,6 +2,7 @@ mod accounting;
 mod addr;
 mod api;
 mod config;
+mod devices;
 mod diff;
 mod ledger;
 mod music;

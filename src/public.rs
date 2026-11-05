@@ -77,6 +77,9 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/public/v1/pool", get(pool_view))
         .route("/public/v1/blocks", get(blocks))
         .route("/public/v1/payouts", get(payouts))
+        .route("/public/v1/devices", get(|State(s): State<St>| async move { Json(crate::api::devices_view(&s.pool)) }))
+        .route("/public/v1/history/devices", get(|State(s): State<St>, Query(q): Query<crate::api::RangeQ>| async move { Json(crate::api::device_history_view(&s.pool, q.range.as_deref().unwrap_or("24h")).await) }))
+        .route("/public/v1/history", get(|State(s): State<St>, Query(q): Query<crate::api::RangeQ>| async move { Json(crate::api::history_view(&s.pool, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/public/v1/account/:address", get(account))
         .route("/", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
         .route("/style.css", get(|State(s): State<St>| file(s, "style.css", "text/css; charset=utf-8")))
@@ -85,8 +88,11 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/charts.js", get(|State(s): State<St>| file(s, "charts.js", "text/javascript; charset=utf-8")))
         .route("/depth.js", get(|State(s): State<St>| file(s, "depth.js", "text/javascript; charset=utf-8")))
         .route("/public.js", get(|State(s): State<St>| file(s, "public.js", "text/javascript; charset=utf-8")))
-        .route("/miner.html", get(|State(s): State<St>| file(s, "miner.html", "text/html; charset=utf-8")))
-        .route("/miner", get(|State(s): State<St>| file(s, "miner.html", "text/html; charset=utf-8")))
+        .route("/miner.html", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
+        .route("/miner", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
+        .route("/miner/*address", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))
+        .route("/stats.js", get(|State(s): State<St>| file(s, "stats.js", "text/javascript; charset=utf-8")))
+        .route("/spa.js", get(|State(s): State<St>| file(s, "spa.js", "text/javascript; charset=utf-8")))
         .route("/miner.js", get(|State(s): State<St>| file(s, "miner.js", "text/javascript; charset=utf-8")))
         .route("/music/playlist.json", get(|State(s): State<St>| crate::music::playlist_response(crate::music::dir(&s.pool.cfg.api.music_dir, &s.pool.cfg.api.ui_dir))))
         .nest_service("/music", crate::music::files(crate::music::dir(&pool.cfg.api.music_dir, &pool.cfg.api.ui_dir)))
@@ -103,7 +109,9 @@ pub async fn serve(pool: Arc<Pool>) -> Result<()> {
 
 async fn guard(State(st): State<St>, ConnectInfo(peer): ConnectInfo<SocketAddr>, req: Request, next: Next) -> Response {
     let ip = client_ip(peer.ip(), req.headers(), st.pool.cfg.public.trust_proxy);
-    let mut resp = if st.limiter.allow(ip) {
+    // only the data API is rate limited: a page view fetches about ten static files, and the music streams in ranges
+    let limited = req.uri().path().starts_with("/public/v1/");
+    let mut resp = if !limited || st.limiter.allow(ip) {
         next.run(req).await
     } else {
         let mut r = (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();

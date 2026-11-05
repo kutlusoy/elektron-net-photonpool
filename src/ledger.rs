@@ -50,6 +50,9 @@ pub fn init(conn: &Connection) -> Result<()> {
          CREATE TABLE IF NOT EXISTS balance(account TEXT PRIMARY KEY, confirmed INTEGER NOT NULL DEFAULT 0, paid INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS payouts(id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, txid TEXT, status TEXT NOT NULL, total INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS payout_items(payout_id INTEGER NOT NULL, account TEXT NOT NULL, amount INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS pool_history(minute INTEGER PRIMARY KEY, hashrate REAL NOT NULL, miners INTEGER NOT NULL, ok INTEGER NOT NULL, stale INTEGER NOT NULL, dup INTEGER NOT NULL, net_diff REAL NOT NULL) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS device_history(minute INTEGER NOT NULL, device TEXT NOT NULL, name TEXT NOT NULL, hashrate REAL NOT NULL, workers INTEGER NOT NULL, PRIMARY KEY(minute, device)) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS device_best(device TEXT PRIMARY KEY, name TEXT NOT NULL, best REAL NOT NULL, updated INTEGER NOT NULL) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS photon_trust(key TEXT PRIMARY KEY, passes INTEGER NOT NULL, fails INTEGER NOT NULL, last_fail INTEGER NOT NULL, banned_until INTEGER NOT NULL, updated INTEGER NOT NULL) WITHOUT ROWID;",
     )?;
     Ok(())
@@ -364,6 +367,71 @@ pub fn blocks_since(conn: &Connection, ts: i64) -> Result<i64> {
     Ok(conn.query_row("SELECT COUNT(*) FROM blocks WHERE found_at >= ?1 AND status != 'orphaned'", params![ts], |r| r.get(0))?)
 }
 
+/// One pool-wide sample per minute (the average hash rate of that minute, miners online, share counts of that minute, network difficulty).
+pub struct HistoryRow {
+    pub minute: i64,
+    pub hashrate: f64,
+    pub miners: i64,
+    pub ok: i64,
+    pub stale: i64,
+    pub dup: i64,
+    pub net_diff: f64,
+}
+
+pub fn add_history(conn: &Connection, r: &HistoryRow) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO pool_history(minute, hashrate, miners, ok, stale, dup, net_diff) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![r.minute, r.hashrate, r.miners, r.ok, r.stale, r.dup, r.net_diff],
+    )?;
+    Ok(())
+}
+
+/// History in slots of `slot_minutes` since `since_minute`, oldest first: (slot start minute, mean hash rate, peak miners, summed ok, stale, dup shares, network difficulty).
+pub fn history(conn: &Connection, since_minute: i64, slot_minutes: i64) -> Result<Vec<(i64, f64, i64, i64, i64, i64, f64)>> {
+    let mut st = conn.prepare("SELECT (minute / ?2) * ?2, AVG(hashrate), MAX(miners), SUM(ok), SUM(stale), SUM(dup), MAX(net_diff) FROM pool_history WHERE minute >= ?1 GROUP BY 1 ORDER BY 1")?;
+    let v = st.query_map(params![since_minute, slot_minutes.max(1)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?.collect::<std::result::Result<_, _>>()?;
+    Ok(v)
+}
+
+pub fn prune_history(conn: &Connection, older_than_minute: i64) -> Result<usize> {
+    conn.execute("DELETE FROM device_history WHERE minute < ?1", params![older_than_minute])?;
+    Ok(conn.execute("DELETE FROM pool_history WHERE minute < ?1", params![older_than_minute])?)
+}
+
+/// (slot minute, device key, display name, mean hash rate, working connections) per device type.
+pub type DeviceRow = (i64, String, String, f64, i64);
+
+pub fn add_device_history(conn: &mut Connection, rows: &[DeviceRow]) -> Result<()> {
+    let tx = conn.transaction()?;
+    for (minute, device, name, hashrate, workers) in rows {
+        tx.execute("INSERT OR REPLACE INTO device_history(minute, device, name, hashrate, workers) VALUES (?1, ?2, ?3, ?4, ?5)", params![minute, device, name, hashrate, workers])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Per device type and slot of `slot_minutes` since `since_minute`: (slot start minute, key, name, mean hash rate, peak working connections), oldest first.
+pub fn device_history(conn: &Connection, since_minute: i64, slot_minutes: i64) -> Result<Vec<DeviceRow>> {
+    let mut st = conn.prepare("SELECT (minute / ?2) * ?2, device, MAX(name), AVG(hashrate), MAX(workers) FROM device_history WHERE minute >= ?1 GROUP BY 1, 2 ORDER BY 1, 2")?;
+    let v = st.query_map(params![since_minute, slot_minutes.max(1)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<std::result::Result<_, _>>()?;
+    Ok(v)
+}
+
+/// Raises the best share difficulty of a device type (never lowers it).
+pub fn bump_device_best(conn: &Connection, device: &str, name: &str, best: f64, now: i64) -> Result<()> {
+    conn.execute(
+        "INSERT INTO device_best(device, name, best, updated) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(device) DO UPDATE SET best = MAX(best, excluded.best), name = excluded.name, updated = excluded.updated",
+        params![device, name, best, now],
+    )?;
+    Ok(())
+}
+
+pub fn device_bests(conn: &Connection) -> Result<Vec<(String, f64)>> {
+    let mut st = conn.prepare("SELECT device, best FROM device_best")?;
+    let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<_, _>>()?;
+    Ok(v)
+}
+
 pub fn prune_shares(conn: &Connection, older_than_minute: i64) -> Result<usize> {
     Ok(conn.execute("DELETE FROM share_buckets WHERE minute < ?1", params![older_than_minute])?)
 }
@@ -511,5 +579,17 @@ mod tests {
         l.call(|c| add_shares(c, &[ShareRow { minute: 1, account: "a".into(), mode: MODE_PPS, diff: 2.0, count: 1 }], Some((10.0, i64::MAX)))).await.unwrap();
         let info = l.call(|c| account_info(c, "a")).await.unwrap();
         assert_eq!(info.confirmed, 20);
+    }
+
+    #[test]
+    fn device_history_is_grouped_by_slot_and_pruned() {
+        let mut c = db();
+        add_device_history(&mut c, &[(100, "bitaxe".into(), "Bitaxe".into(), 2.0e12, 3), (105, "bitaxe".into(), "Bitaxe".into(), 4.0e12, 5), (100, "other:x".into(), "x".into(), 1.0e6, 1)]).unwrap();
+        let v = device_history(&c, 0, 10).unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0], (100, "bitaxe".to_string(), "Bitaxe".to_string(), 3.0e12, 5));
+        assert_eq!(v[1].1, "other:x");
+        prune_history(&c, 103).unwrap();
+        assert_eq!(device_history(&c, 0, 1).unwrap().len(), 1);
     }
 }

@@ -119,7 +119,7 @@ Files go to `/opt/photond`, `/etc/photond` and `/var/lib/photond`; the pool stop
 
 - UI: `http://127.0.0.1:8081/` (for a remote host use an SSH tunnel: `ssh -L 8081:127.0.0.1:8081 user@host`).
 - API (read-only): `/api/v1/summary`, `/miners`, `/blocks`, `/events`.
-- **Public page for miners:** set `[public] enabled = true` to serve a public terminal page (pool statistics, connection details with ports and modes, blocks, payouts, address lookup) and a personal **miner page** (`/miner.html#<address>`: balances, pending PPLNS credits with the blocks until maturity, payouts, workers, 24 h hashrate, blocks found) on its own listener, default `127.0.0.1:8082`. Put a reverse proxy with TLS in front of it and set `trust_proxy = true`. The operator UI and API are never served there. See [`doc-elektron/guideline-public-page.md`](doc-elektron/guideline-public-page.md).
+- **Public page for miners:** set `[public] enabled = true` to serve a public terminal page (pool statistics, connection details with ports and modes, blocks, payouts, address lookup) and a personal **miner page** (`/miner/<address>`, also `/miner.html#<address>`: balances, pending PPLNS credits with the blocks until maturity, payouts, workers, 24 h hashrate, blocks found) on its own listener, default `127.0.0.1:8082`. Put a reverse proxy with TLS in front of it and set `trust_proxy = true`. The operator UI and API are never served there. See [`doc-elektron/guideline-public-page.md`](doc-elektron/guideline-public-page.md).
 - The UI shows a `DEMO DATA` tag and simulated numbers when it cannot reach the API.
 
 ## 7. Configuration reference
@@ -134,6 +134,8 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 | `payout.dry_run`, `payout.min_payout_leptons`, `payout.fee_pct.*`, `payout.pplns.window_factor` | Payout switch (default dry run) and the mode parameters, all with standard defaults |
 | `pool.payout_addresses` | Pool-owned addresses; more addresses give miners more independent search space (see the sizing table in [`doc-elektron/guideline-photon-architecture.md`](doc-elektron/guideline-photon-architecture.md)) |
 | `public.*` | Public pool page and its rate limit (see the next section) |
+| `ledger.stats_keep_days` | Days of pool statistics (one sample per minute, about 6 MB for 60 days) that the public page draws its history from; older samples are deleted (default 60) |
+| `ledger.device_history_minutes` | The history by device type (Bitaxe, NerdMiner, ...) is stored once per this many minutes (default 5, about 70 bytes per device type and sample) |
 | `pool.spot_check` | Candidates per epoch validated against the node |
 | `pool.autoscale_candidates`, `pool.min_candidates` | The pool uses only as many of its payout addresses (candidates) as the work demand needs and grows or shrinks by itself (default on, at least 16). Every candidate offers 960 work units per epoch; a Bitaxe uses about 100 per epoch. With many miners provision enough addresses (`payout.wallet_addresses`, the Docker stack default is 512) and build the node with the batch patch (`NODE_PATCHES=true`) |
 | `pool.backend` | `auto` (default): batch attestation when the node has the Photon patch, else one `getblocktemplate` call per address; `batch`, `gbt` force one |

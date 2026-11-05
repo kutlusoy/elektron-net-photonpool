@@ -94,7 +94,7 @@ const Music = (() => {
   // Two sources behind one set of controls: audio files from the server's music folder (streamed by an <audio> element, looped as
   // a playlist) when there are any, otherwise the generated score above.
   const KEY = 'photon.music.volume.v2'; // new key: older saved values (default was higher) do not apply
-  const P = { ctx: null, b: null, master: null, timer: 0, next: 0, step: 0, t0: 0, state: 'stopped', vol: 0.28, tracks: [], idx: 0, audio: null, an: null, actx: null, onTrack: () => {} };
+  const P = { ctx: null, b: null, master: null, timer: 0, next: 0, step: 0, t0: 0, state: 'stopped', vol: 0.28, tracks: [], idx: 0, seek: 0, armed: false, audio: null, an: null, actx: null, onTrack: () => {} };
   try { const v = parseFloat(localStorage.getItem(KEY)); if (v >= 0 && v <= 1) P.vol = v; } catch (_) { /* storage unavailable */ }
   const gainOf = (v) => v * v;
   const files = () => P.tracks.length > 0;
@@ -112,6 +112,7 @@ const Music = (() => {
     if (P.audio) return;
     const a = P.audio = new Audio(); a.preload = 'none'; a.volume = gainOf(P.vol);
     a.addEventListener('ended', () => skip(1));
+    a.addEventListener('loadedmetadata', () => { if (P.seek > 0 && P.seek < a.duration - 3) a.currentTime = P.seek; P.seek = 0; });
     a.addEventListener('error', () => { if (P.tracks.length > 1) skip(1); });
     try {
       const AC = window.AudioContext || window.webkitAudioContext; P.actx = new AC();
@@ -125,7 +126,7 @@ const Music = (() => {
     if (P.audio) loadTrack(P.state === 'playing');
     else P.onTrack(P.tracks[P.idx]);
   }
-  function play() {
+  function play0() {
     if (P.state === 'playing') return;
     if (files()) {
       filePlayer();
@@ -139,18 +140,40 @@ const Music = (() => {
     P.b = build(P.ctx, P.master); P.an = P.b.analyser; P.b.startRain();
     P.step = 0; P.next = P.t0 = P.ctx.currentTime + 0.1; pump(); P.timer = setInterval(pump, 60); P.state = 'playing';
   }
-  function pause() {
+  function pause0() {
     if (P.state !== 'playing') return;
     if (files()) P.audio.pause(); else P.ctx.suspend();
     P.state = 'paused';
   }
-  function stop() {
+  function stop0() {
     if (P.state === 'stopped') return;
     if (files()) { P.audio.pause(); P.audio.currentTime = 0; P.state = 'stopped'; return; }
     clearInterval(P.timer); const ctx = P.ctx; P.state = 'stopped';
     try { P.master.gain.cancelScheduledValues(ctx.currentTime); P.master.gain.setTargetAtTime(0, ctx.currentTime, 0.05); } catch (_) { /* already closed */ }
     setTimeout(() => ctx.close().catch(() => {}), 400); P.ctx = P.b = P.master = P.an = null;
   }
+  // what the visitor did last is remembered: playing music resumes at the first click or key press on the next page load (browsers only allow sound after one)
+  const KEY_PLAY = 'photon.music.playing', KEY_POS = 'photon.music.pos';
+  const store = (k, v) => { try { localStorage.setItem(k, v); } catch (_) { /* storage unavailable */ } };
+  const fetchKey = (k) => { try { return localStorage.getItem(k) || ''; } catch (_) { return ''; } };
+  const play = () => { play0(); if (P.state === 'playing') store(KEY_PLAY, '1'); };
+  const pause = () => { pause0(); store(KEY_PLAY, '0'); };
+  const stop = () => { stop0(); store(KEY_PLAY, '0'); store(KEY_POS, ''); };
+  function armResume() {
+    if (fetchKey(KEY_PLAY) !== '1' || P.state !== 'stopped') return;
+    const pos = (() => { try { return JSON.parse(fetchKey(KEY_POS) || 'null'); } catch (_) { return null; } })();
+    if (pos && files() && pos.i >= 0 && pos.i < P.tracks.length) { P.idx = pos.i; P.seek = pos.t || 0; P.onTrack(P.tracks[P.idx]); }
+    P.armed = true;
+    const evs = ['pointerdown', 'pointerup', 'keydown'];
+    const go = (e) => {
+      evs.forEach((n) => document.removeEventListener(n, go, true));
+      P.armed = false;
+      if (e.target && e.target.closest && e.target.closest('.music')) return; // the visitor uses the player itself
+      if (P.state === 'stopped') play();
+    };
+    evs.forEach((n) => document.addEventListener(n, go, true));
+  }
+
   function volume(v) {
     P.vol = Math.max(0, Math.min(1, v));
     if (P.audio) P.audio.volume = gainOf(P.vol);
@@ -176,7 +199,8 @@ const Music = (() => {
     const tip = document.createElement('span'); tip.className = 'mtip'; w.append(tip);
     const tm = document.createElement('span'); tm.className = 'mtime'; w.append(tm);
     const clock = bar.querySelector('.clock'); bar.insertBefore(w, clock);
-    const showTime = () => { tm.textContent = `${P.state === 'stopped' && !files() ? '--:--' : fmt(time())} / ${fmt(length())}`; };
+    const showTime = () => {
+      if (P.armed && P.state === 'stopped') { tm.textContent = 'click anywhere to resume'; return; } tm.textContent = `${P.state === 'stopped' && !files() ? '--:--' : fmt(time())} / ${fmt(length())}`; };
     showTime();
     // the track and its credit: visible title, tooltip with the credit line, artist link and license code
     P.onTrack = (t) => {
@@ -197,7 +221,8 @@ const Music = (() => {
       if (!j || !Array.isArray(j.tracks) || !j.tracks.length) return;
       P.tracks = j.tracks.filter((t) => t && typeof t.file === 'string'); if (!P.tracks.length) return;
       w.classList.add('files'); w.classList.toggle('multi', P.tracks.length > 1); P.onTrack(P.tracks[0]); pp.title = 'play music'; showTime();
-    }).catch(() => { /* no playlist: the generated score is used */ });
+    }).catch(() => { /* no playlist: the generated score is used */ }).finally(armResume);
+    setInterval(() => { if (files() && P.state === 'playing' && P.audio) store(KEY_POS, JSON.stringify({ i: P.idx, t: Math.floor(P.audio.currentTime) })); }, 5000);
     const g = eq.getContext('2d'), data = new Uint8Array(32);
     const color = () => getComputedStyle(document.body).getPropertyValue('--c1').trim() || '#0ff';
     setInterval(() => {

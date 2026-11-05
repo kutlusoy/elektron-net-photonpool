@@ -81,17 +81,18 @@ function demoSource() {
       return miners.map((m) => ({ name: m.name, proto: m.proto, hashrate: m.th * 1e12, diff: m.th * 1e12 * 10 / 4294967296, ok: m.ok, stale: m.stale, dup: m.dup + m.inv, seen: m.seen, unit: m.unit }));
     },
     blocks(n) { return st.blocks.slice(0, n || 12); },
+    devices() { return Stats.demoDevices(); },
     events() { const out = st.ev.slice(evCursor); evCursor = st.ev.length; return out; },
   };
 }
 
 function liveSource(base) {
   const get = async (p) => { const r = await fetch(base + p, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); };
-  let cache = { summary: null, miners: [], blocks: [] }, queue = [];
+  let cache = { summary: null, miners: [], blocks: [], devices: [] }, queue = [];
   const poll = async () => {
     try {
-      const [s, m, b] = await Promise.all([get('/summary'), get('/miners?limit=1000'), get('/blocks?limit=12')]);
-      cache = { summary: s, miners: m, blocks: b };
+      const [s, m, b, d] = await Promise.all([get('/summary'), get('/miners?limit=1000'), get('/blocks?limit=12'), get('/devices').catch(() => ({ devices: [] }))]);
+      cache = { summary: s, miners: m, blocks: b, devices: d.devices };
     } catch (e) { queue.push({ t: Date.now() / 1000, lvl: 'err', msg: 'api poll failed: ' + e.message }); }
   };
   const stream = () => { try { const es = new EventSource(base + '/events'); es.onmessage = (e) => { try { queue.push(JSON.parse(e.data)); } catch (_) { /* ignore malformed event */ } }; } catch (_) { /* no SSE */ } };
@@ -102,6 +103,7 @@ function liveSource(base) {
     summary() { return cache.summary; },
     miners() { return cache.miners; },
     blocks() { return cache.blocks; },
+    devices() { return cache.devices || []; },
     events() { const o = queue; queue = []; return o; },
   };
 }
@@ -175,10 +177,13 @@ function render() {
       const cls = b.status === 'found' ? 'ok' : b.status === 'maturing' ? 'c3' : 'dim';
       return `${linkPad(b.url || blockUrl(s.pool.explorerUrl, b.hash), num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 9)}${bw ? pad(b.worker, bwk) : pad(trunc(workerLabel(b.worker), 18), 19)}${bw ? pad(b.hash || '', bhk) : ''}${span(cls, b.status)}`;
     })).join('\n');
+  const dev = ui.src.devices ? ui.src.devices() : [];
+  Stats.S.devices = dev;
+  $('#pane-devices').innerHTML = Stats.devicesHtml(dev);
   Extras.tick();
 }
 
-const MINER_KEYS = { name: (m) => m.name, proto: (m) => m.proto, hashrate: (m) => m.hashrate, diff: (m) => m.diff, ok: (m) => m.ok, stale: (m) => m.stale, dup: (m) => m.dup, seen: (m) => m.seen, unit: (m) => m.unit, jobMs: (m) => m.jobMs || 0 };
+const MINER_KEYS = { name: (m) => m.name, device: (m) => m.device || '', proto: (m) => m.proto, hashrate: (m) => m.hashrate, diff: (m) => m.diff, ok: (m) => m.ok, stale: (m) => m.stale, dup: (m) => m.dup, seen: (m) => m.seen, unit: (m) => m.unit, jobMs: (m) => m.jobMs || 0 };
 function minerRows() {
   let rows = ui.src.miners();
   if (ui.minerFilter) rows = rows.filter((m) => (m.name + ' ' + m.proto).toLowerCase().includes(ui.minerFilter));
@@ -190,11 +195,11 @@ function renderMiners() {
   const shown = rows.slice(0, mw ? Math.max(ui.minerLimit, 200) : ui.minerLimit);
   const mwk = colw(shown.map((m) => m.name), 6);
   $('#miners-hint').textContent = `${shown.length}/${rows.length} sort:${sortOf('miners', 'hashrate').k}${sortOf('miners', 'hashrate').d > 0 ? '+' : '-'}${ui.minerFilter ? ' grep:' + ui.minerFilter : ''}`;
-  $('#pane-miners').innerHTML = [`<span class="row-h">${hdr('miners', [['name', 'WORKER', mw ? mwk : 19, false, 1], ['proto', 'PROTO', 6, false, 1], ['hashrate', 'HASHRATE', 12, true], ['diff', 'DIFF', 10, true], ['ok', 'OK', 8, true], ['stale', 'STALE', 7, true], ['dup', 'DUP', 6, true]], 'hashrate')}  ${hdr('miners', [['seen', 'LAST', 6, false, 1], ['unit', 'UNIT', 14, false, 1], ['jobMs', 'JOB ms', 6, true]], 'hashrate')}</span>`]
+  $('#pane-miners').innerHTML = [`<span class="row-h">${hdr('miners', [['name', 'WORKER', mw ? mwk : 19, false, 1], ['device', 'DEVICE', 13, false, 1], ['proto', 'PROTO', 6, false, 1], ['hashrate', 'HASHRATE', 12, true], ['diff', 'DIFF', 10, true], ['ok', 'OK', 8, true], ['stale', 'STALE', 7, true], ['dup', 'DUP', 6, true]], 'hashrate')}  ${hdr('miners', [['seen', 'LAST', 6, false, 1], ['unit', 'UNIT', 14, false, 1], ['jobMs', 'JOB ms', 6, true]], 'hashrate')}</span>`]
     .concat(shown.map((m) => {
       const stale = m.stale / Math.max(1, m.ok + m.stale);
       const seen = m.seen === 0 ? span('ok', 'now   ') : span(m.seen > 5 ? 'warn' : 'dim', pad(m.seen + 's', 6));
-      return `${mw ? pad(m.name, mwk) : pad(trunc(workerLabel(m.name), 18), 19)}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', pad(m.unit, 14))}${lpad(m.jobMs ? Math.round(m.jobMs) : '-', 6)}`;
+      return `${mw ? pad(m.name, mwk) : pad(trunc(workerLabel(m.name), 18), 19)}${span('c2', pad(m.device || '-', 13))}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', pad(m.unit, 14))}${lpad(m.jobMs ? Math.round(m.jobMs) : '-', 6)}`;
     })).join('\n');
 }
 
@@ -381,6 +386,7 @@ async function boot() {
     try { const l = liveSource('/api/v1'); await Promise.race([l.init(), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 1500))]); if (l.summary()) src = l; } catch (_) { /* fall back to demo */ }
   }
   ui.src = src || demoSource();
+  Stats.historyPane($('.p-history'), '/api/v1', ui.src.demo);
   const tag = $('#mode-tag');
   tag.textContent = ui.src.demo ? 'DEMO DATA' : 'LIVE';
   tag.className = 'tag ' + (ui.src.demo ? 'demo' : 'live');

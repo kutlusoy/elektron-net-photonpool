@@ -250,7 +250,11 @@ impl Session {
         match req.method {
             "mining.subscribe" => {
                 self.subscribed = true;
-                self.agent_clean = agent_wants_clean(&self.cfg.clean_work_agents, req.params.get(0).and_then(Value::as_str).unwrap_or(""));
+                let agent = crate::devices::clean_agent(req.params.get(0).and_then(Value::as_str).unwrap_or(""));
+                self.agent_clean = agent_wants_clean(&self.cfg.clean_work_agents, &agent);
+                let dev = crate::devices::classify(&agent);
+                *self.stats.device.lock().unwrap() = (dev.key, dev.name);
+                *self.stats.agent.lock().unwrap() = agent;
                 self.reply(wr, &id, &format!("[[[\"mining.notify\",\"{:x}\"]],\"\",0]", self.id), "null").await?;
                 self.maybe_start(wr).await
             }
@@ -495,6 +499,12 @@ impl Session {
             ShareResult::Valid | ShareResult::Block => {
                 self.adapt_ok += 1;
                 self.adapt();
+                let d = epoch.share_difficulty(cand_ref, ntime, version, nonce);
+                if d > get_f64(&self.stats.best) {
+                    set_f64(&self.stats.best, d);
+                }
+                let agent = self.stats.agent.lock().unwrap().clone();
+                self.pool.note_best(&agent, d);
                 self.count_ok(credit);
                 if result == ShareResult::Block {
                     self.block_found(&epoch, cand_ref, version, ntime, nonce);
@@ -617,6 +627,12 @@ impl Session {
 async fn stats_task(pool: Arc<Pool>) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let (mut prev_shares, mut prev_units, mut prev_epoch) = (0u64, 0u64, 0u64);
+    // one history sample per minute for the public statistics
+    let (mut hist_minute, mut hist_sum, mut hist_n, mut hist_base) = (unix_now() as i64 / 60, 0.0f64, 0u32, (0u64, 0u64, 0u64));
+    // per device type: (name, summed hash rate of the seconds, seconds, peak working connections), written once per device_history_minutes
+    let slot_len = pool.cfg.ledger.device_history_minutes.max(1);
+    let mut dev_slot = unix_now() as i64 / 60 / slot_len;
+    let mut dev_acc: std::collections::HashMap<String, (String, f64, u32, u64)> = std::collections::HashMap::new();
     loop {
         tick.tick().await;
         let sessions: Vec<Arc<SessionStats>> = pool.sessions.lock().unwrap().values().cloned().collect();
@@ -647,7 +663,53 @@ async fn stats_task(pool: Arc<Pool>) {
         }
         live.online = online;
         live.total = sessions.len() as u64;
+        drop(live);
         (prev_shares, prev_units, prev_epoch) = (shares, used, eid);
+        hist_sum += hr;
+        hist_n += 1;
+        {
+            let mut now_dev: std::collections::HashMap<String, (String, f64, u64)> = std::collections::HashMap::new();
+            for s in &sessions {
+                if now - get_f64(&s.last_seen) >= 120.0 {
+                    continue;
+                }
+                let d = s.device.lock().unwrap();
+                let e = now_dev.entry(d.0.clone()).or_insert_with(|| (d.1.clone(), 0.0, 0));
+                e.1 += get_f64(&s.hashrate);
+                e.2 += 1;
+            }
+            for (key, (name, rate, workers)) in now_dev {
+                let a = dev_acc.entry(key).or_insert((name, 0.0, 0, 0));
+                a.1 += rate;
+                a.2 += 1;
+                a.3 = a.3.max(workers);
+            }
+        }
+        let slot = now as i64 / 60 / slot_len;
+        if slot != dev_slot {
+            let rows: Vec<crate::ledger::DeviceRow> = dev_acc.drain().map(|(key, (name, sum, n, workers))| (dev_slot * slot_len, key, name, sum / n.max(1) as f64, workers as i64)).collect();
+            dev_slot = slot;
+            if !rows.is_empty() {
+                let p = pool.clone();
+                tokio::spawn(async move {
+                    let _ = p.ledger.call(move |c| crate::ledger::add_device_history(c, &rows)).await;
+                });
+            }
+        }
+        let minute = now as i64 / 60;
+        if minute != hist_minute {
+            let (ok, stale, dup) = (pool.stats.ok.load(Ordering::Relaxed), pool.stats.stale.load(Ordering::Relaxed), pool.stats.dup.load(Ordering::Relaxed));
+            let net_diff = pool.epoch.borrow().as_ref().and_then(|e| e.candidates.first().map(|c| crate::diff::difficulty_from_target(&c.target))).unwrap_or(0.0);
+            let row = crate::ledger::HistoryRow {
+                minute: hist_minute, hashrate: hist_sum / hist_n.max(1) as f64, miners: online as i64,
+                ok: ok.saturating_sub(hist_base.0) as i64, stale: stale.saturating_sub(hist_base.1) as i64, dup: dup.saturating_sub(hist_base.2) as i64, net_diff,
+            };
+            let p = pool.clone();
+            tokio::spawn(async move {
+                let _ = p.ledger.call(move |c| crate::ledger::add_history(c, &row)).await;
+            });
+            (hist_minute, hist_sum, hist_n, hist_base) = (minute, 0.0, 0, (ok, stale, dup));
+        }
     }
 }
 

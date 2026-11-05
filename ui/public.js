@@ -1,4 +1,25 @@
+window.Views = window.Views || {};
+Views.pool = (() => {
 'use strict';
+const timers = [], offs = [];
+const on = (t, ev, fn) => { t.addEventListener(ev, fn); offs.push(() => t.removeEventListener(ev, fn)); };
+const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-live="off"></div>
+  <main class="grid pub">
+    <section class="pane p-pool" aria-label="Pool"><h2><span>POOL</span></h2><pre id="pane-pool"></pre></section>
+    <section class="pane p-connect" aria-label="Connect"><h2><span>CONNECT</span></h2><pre id="pane-connect"></pre></section>
+    <section class="pane p-modes" aria-label="Payout modes"><h2><span>MODES</span></h2><pre id="pane-modes"></pre></section>
+    <section class="pane p-history" aria-label="History"><h2><span>HISTORY</span><em class="rng"></em></h2><div class="chartpane"></div></section>
+    <section class="pane p-devices" aria-label="Devices"><h2><span>DEVICES</span></h2><pre id="pane-devices"></pre></section>
+    <section class="pane p-blocks" aria-label="Blocks"><h2><span>BLOCKS</span></h2><pre id="pane-blocks"></pre></section>
+    <section class="pane p-payouts" aria-label="Payouts"><h2><span>PAYOUTS</span></h2><pre id="pane-payouts"></pre></section>
+    <section class="pane p-tty" aria-label="Console"><h2><span>TTY</span><em>try <kbd>account &lt;your address&gt;</kbd> or <kbd>help</kbd></em></h2>
+      <div class="tty" id="tty" tabindex="-1"></div>
+      <form class="prompt" id="prompt" autocomplete="off">
+        <label for="cmd"><span class="u">guest</span><span class="at">@</span><span class="h">photon</span><span class="sep">:~$</span></label>
+        <input id="cmd" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="command line">
+      </form>
+    </section>
+  </main>`;
 
 const modeLabel = { solo: 'SOLO', pplns: 'PPLNS', pps: 'PPS' };
 const modeShort = { solo: 'reward straight to you', pplns: 'share of each pool block', pps: 'fixed pay per share' };
@@ -8,7 +29,8 @@ const modeText = {
   pps: 'fixed payment per share, paid by the pool',
 };
 
-const view = { src: null, pool: null, blocks: [], payouts: [] };
+const view = { src: null, pool: null, blocks: [], payouts: [], devices: [] };
+let histCtl = null;
 
 /* ---------- data ---------- */
 
@@ -16,7 +38,7 @@ function liveSource() {
   const get = async (p) => { const r = await fetch('/public/v1' + p, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); };
   return {
     demo: false,
-    async refresh() { [view.pool, view.blocks, view.payouts] = await Promise.all([get('/pool'), get('/blocks?limit=12'), get('/payouts?limit=8')]); },
+    async refresh() { let d; [view.pool, view.blocks, view.payouts, d] = await Promise.all([get('/pool'), get('/blocks?limit=12'), get('/payouts?limit=8'), get('/devices').catch(() => ({ devices: [] }))]); view.devices = d.devices; },
     async account(addr) { const r = await fetch('/public/v1/account/' + encodeURIComponent(addr), { cache: 'no-store' }); if (!r.ok) throw new Error(r.status === 400 ? 'not a valid address for this network' : 'HTTP ' + r.status); return r.json(); },
   };
 }
@@ -30,6 +52,7 @@ function demoSource() {
   return {
     demo: true,
     async refresh() {
+      view.devices = Stats.demoDevices();
       hist.push(9.4e16 + r() * 4e15); hist.shift();
       view.pool = {
         name: 'Photon Demo', version: '0.1.0-demo', network: 'mainnet', explorerUrl: '', uptime: 3 * 86400 + 4000,
@@ -54,7 +77,7 @@ function txUrl(base, txid) {
   return safeUrl(base) && /^[0-9a-f]{64}$/.test(txid || '') ? `${base.replace(/\/+$/, '')}/tx/${txid}` : '';
 }
 
-document.addEventListener('depthchange', () => { try { render(); } catch (_) { /* no data yet */ } });
+const onDepth = () => { try { render(); } catch (_) { /* no data yet */ } };
 function render() {
   const p = view.pool;
   if (!p) return;
@@ -108,6 +131,8 @@ function render() {
       const a = Date.now() / 1000 - x.time;
       return `${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 8)}${pad(coins(x.amount), 15)}${link(txUrl(p.explorerUrl, x.txid), wide('payouts') ? (x.txid || '') : short(x.txid || '', 6, 4), 'c1')}`;
     })).join('\n') || span('dim', 'no payouts yet');
+  Stats.S.devices = view.devices;
+  $('#pane-devices').innerHTML = Stats.devicesHtml(view.devices || []);
   Extras.tick();
 }
 
@@ -168,7 +193,7 @@ Extras.add('payouts', (el) => {
 
 /* ---------- console ---------- */
 
-const tty = $('#tty');
+let tty;
 function out(html) {
   const d = document.createElement('div');
   d.innerHTML = html;
@@ -208,7 +233,7 @@ const cmds = {
     out(span('dim', 'user: <your address>.<worker>   password: x   (version rolling on)'));
   },
   modes() { view.pool.modes.forEach((m) => out(`${span('c2', pad(modeLabel[m.mode] || m.mode, 6))} fee ${m.fee}%  ${m.available ? span('ok', 'open') : span('warn', 'paused')}  ${span('dim', modeText[m.mode] || '')}`)); },
-  miner(a) { if (!a[0]) return out(span('warn', 'usage: miner <your address>')); location.href = 'miner.html#' + encodeURIComponent(a[0]); },
+  miner(a) { if (!a[0]) return out(span('warn', 'usage: miner <your address>')); SPA.go('/miner/' + encodeURIComponent(a[0])); },
   blocks() { view.blocks.slice(0, 8).forEach((b) => out(`${linkPad(b.url, num(b.height), 9)}${pad(modeLabel[b.mode] || b.mode, 7)}${b.finder}  ${b.status}`)); },
   payouts() { view.payouts.forEach((x) => out(`${new Date(x.time * 1000).toISOString().slice(0, 16).replace('T', ' ')}  ${coins(x.amount)}  ${link(txUrl(view.pool.explorerUrl, x.txid), short(x.txid || '', 8, 6), 'c1')}`)); if (!view.payouts.length) out(span('dim', 'no payouts yet')); },
   account(a) { return accountCmd(a[0]); },
@@ -221,8 +246,9 @@ const cmds = {
   clear() { tty.innerHTML = ''; },
 };
 
-const input = $('#cmd');
+let input;
 const hist = []; let hi = 0;
+function bindConsole() {
 $('#prompt').addEventListener('submit', async (e) => {
   e.preventDefault();
   const raw = input.value.trim();
@@ -239,11 +265,12 @@ input.addEventListener('keydown', (e) => {
   else if (e.key === 'Tab') { e.preventDefault(); const m = Object.keys(cmds).filter((c) => c.startsWith(input.value)); if (m.length === 1) input.value = m[0] + ' '; }
   else if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); cmds.clear(); }
 });
-document.addEventListener('keydown', (e) => { if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && document.activeElement !== input) input.focus(); });
+on(document, 'keydown', (e) => { if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && document.activeElement !== input) input.focus(); });
+}
 
 /* ---------- boot ---------- */
 
-async function boot() {
+async function boot0() {
   try { const t = localStorage.getItem('photon-theme'); if (t) document.body.dataset.theme = t; } catch (_) { /* storage unavailable */ }
   let src = null;
   if (!new URLSearchParams(location.search).has('demo') && location.protocol !== 'file:') {
@@ -251,15 +278,30 @@ async function boot() {
   }
   view.src = src || demoSource();
   if (!src) await view.src.refresh();
+  $('#who').textContent = 'photon';
+  histCtl = Stats.historyPane($('.p-history'), '/public/v1', view.src.demo);
   const tag = $('#mode-tag');
   tag.textContent = view.src.demo ? 'DEMO DATA' : 'LIVE';
   tag.className = 'tag ' + (view.src.demo ? 'demo' : 'live');
   out(span('c1', 'welcome to the pool terminal. type help, or look up your address with: account <address>'));
   render();
-  setInterval(async () => { try { await view.src.refresh(); render(); } catch (_) { /* keep the last data */ } }, 5000);
-  setInterval(() => { $('#clock').textContent = new Date().toISOString().slice(11, 19) + ' UTC'; }, 500);
+  timers.push(setInterval(async () => { try { await view.src.refresh(); render(); } catch (_) { /* keep the last data */ } }, 5000));
   const hash = decodeURIComponent(location.hash.replace(/^#/, ''));
   if (hash) { out(`${span('u', 'guest')}${span('at', '@')}${span('h', 'photon')}${span('sep', ':~$')} account ${esc(hash)}`); accountCmd(hash); }
   if (matchMedia('(pointer: fine)').matches) input.focus();
 }
-boot();
+
+async function mount(root) {
+  root.innerHTML = TEMPLATE;
+  tty = $('#tty'); input = $('#cmd');
+  bindConsole();
+  on(document, 'depthchange', onDepth);
+  boot0().catch((e) => out(span('err', 'could not start: ' + e.message)));
+}
+function unmount() {
+  if (histCtl) { histCtl.destroy(); histCtl = null; }
+  timers.splice(0).forEach(clearInterval);
+  offs.splice(0).forEach((f) => f());
+}
+return { mount, unmount };
+})();

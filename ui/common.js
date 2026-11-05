@@ -25,6 +25,7 @@ const wide = (id) => !!document.querySelector('.p-' + id + '.front');
 // Column width that fits the longest value (maximized panes only).
 const colw = (vals, min) => Math.max(min, ...vals.map((v) => String(v).length)) + 2;
 const fit = (s, n, w) => (w ? String(s).padEnd(n) : pad(s, n));
+const fmtDiff = (n) => { if (!(n > 0)) return '-'; const u = [[1e15, 'P'], [1e12, 'T'], [1e9, 'G'], [1e6, 'M'], [1e3, 'k']]; for (const [v, c] of u) if (n >= v) return (n / v).toFixed(2) + c; return n.toFixed(n < 10 ? 2 : 0); };
 const short = (h, a = 8, b = 6) => (h.length > a + b + 1 ? h.slice(0, a) + '..' + h.slice(-b) : h);
 
 function fmtHash(h) {

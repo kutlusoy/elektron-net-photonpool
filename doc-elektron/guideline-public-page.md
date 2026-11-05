@@ -1,7 +1,7 @@
 # Elektron Net: `elektron-net-photonpool` Public Pool Page Guideline
 
-- **Version:** 0.1 (draft)
-- **Date:** November 3, 2026
+- **Version:** 0.2 (single-page shell, device list, stored history)
+- **Date:** November 5, 2026
 - **Audience:** Pool operators and developers
 - **Reference implementation:** [`elektron-net-mempool`](https://github.com/kutlusoy/elektron-net-mempool) - block and transaction routes (`/block/<hash>`, `/tx/<txid>`) used for links - treat as ground truth for anything the doc references
 - **See also:** [`guideline-admin-api-and-ui.md`](./guideline-admin-api-and-ui.md), [`guideline-payout-modes.md`](./guideline-payout-modes.md), [`../Quick-Install.md`](../Quick-Install.md)
@@ -11,6 +11,15 @@
 ## 1. What it is
 
 The daemon can serve a public page for miners on its own listener (`[public]`, off by default). It uses the same terminal look as the operator UI and shows pool statistics, connection instructions, payout modes with fees, recent blocks and payouts, and lets a miner look up their own address (`account <address>`, or open `/#<address>`). The operator API and UI are never served on this listener.
+
+## 1.0 One page, several views
+
+The public pages are one single-page app (`public.html` with `spa.js`): the pool view (`/`) and the miner view (`/miner`, `/miner/<address>`, also `/miner.html#<address>`) are swapped in place with a short view transition and no reload, so the title bar with the **music player** and the clock stays and **the music keeps playing** when a visitor changes the page. A visitor who opens a path directly or reloads starts without music at first (browsers allow sound only after a click or key press); if the music was playing, it **resumes at the first click or key press anywhere on the page**, on the same track and at the same position (the browser remembers this locally; pause and stop are remembered too, so nothing starts that the visitor switched off). While it waits the player shows "click anywhere to resume". The browser's back button and the command `miner <address>` in the terminal work as navigation. There is no build step: plain JavaScript files, no framework.
+
+The pool view also shows the **device table** and the **pool history**:
+
+- **Devices:** the miners listed by the name they send when they connect (user agent), for example Bitaxe, NerdMiner, NerdQAxe+, cpuminer, with the number of working connections, their hash rate and the best share difficulty ever seen from that type. Known open source miners are linked to their project and marked with a star (open source software and hardware); unknown names are listed as they are. The list of known miners is in `src/devices.rs`.
+- **History:** a hash rate chart with the ranges 1 h, 24 h, 7 d, 30 d and all, read from the statistics that the pool stores (below). A switch changes between the whole pool and **one line per device type** (the eight types with the most hash rate); the maximized pane adds the hash rate and the working connections by device type. The maximized pane adds miners online, the share of valid shares, the network difficulty and how long the history is kept.
 
 ## 1.1 The miner page
 
@@ -23,16 +32,19 @@ The daemon can serve a public page for miners on its own listener (`[public]`, o
 | `GET /pool` | name, network, explorer URL, uptime, stratum host and ports with their default mode, modes with fee and availability, minimum payout, PPLNS window factor, hashrate (now, 1 min, 1 h, history), miners online and workers, blocks in 24 h and by status, node height, tip and network difficulty |
 | `GET /blocks?limit=n` | height, hash, time, mode, status, **masked** finder (`be1q..abcd`), explorer link |
 | `GET /payouts?limit=n` | time, txid, total amount, status |
+| `GET /devices` | `devices[]` with `name`, project `url` (null for unknown types), `openSource`, `working` connections, `hashrate` and `best` share difficulty per device type, sorted by hash rate; no worker names, no agent strings other than the type name |
+| `GET /history/devices?range=1h\|24h\|7d\|30d\|all` | the same by device type: `devices[]` with `key`, `name` and `points` of `[time, hash rate, working connections]` for the eight types with the most hash rate; stored once per `ledger.device_history_minutes` (default 5) |
+| `GET /history?range=1h\|24h\|7d\|30d\|all` | stored pool statistics: `points` of `[time, hash rate, miners, ok, stale, dup, network difficulty]` in slots of `stepMinutes`, and `keepDays`; the answer is cached for 20 s |
 | `GET /account/<address>` | hashrate, online workers (`workerList` with mode, hashrate, difficulty, accepted, stale, invalid, last seen), shares of the last hour and 24 h per mode, pending, payable and paid balance in leptons, minimum payout, last payouts, PPLNS credits per block with the blocks until maturity (`credits`), blocks found by the address, and a 24 h hashrate history in 10 minute slots. `400` for an address that is not valid for the configured network. |
 
 No worker names, other accounts, IP addresses or operator data are exposed. The address lookup is public by design: anyone who knows an address sees its pool statistics, as on other pools.
 
 ## 3. Protection
 
-- Per-client token bucket (`public.rate_per_min`, default 120). Over the limit the answer is `429` with `Retry-After: 10`.
+- Per-client token bucket (`public.rate_per_min`, default 120) for the data API under `/public/v1/`. Over the limit the answer is `429` with `Retry-After: 10`. Static files and the music stream are not counted (a page view fetches about ten files).
 - `X-Forwarded-For` is only trusted when `public.trust_proxy = true`; set it only behind your own reverse proxy (Caddy in the stack). Otherwise it is ignored, so clients cannot dodge the limit by spoofing it.
 - Responses carry a strict `Content-Security-Policy` (`default-src 'none'`, scripts and styles only from the same origin), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and a short cache lifetime.
-- Only `public.html`, `miner.html`, `style.css`, `common.js`, `public.js` and `miner.js` are served as static files (fixed list, no directory serving). The test suite checks that `index.html`, `app.js`, the operator API and path-traversal attempts are not reachable.
+- Only `public.html` (also for `/miner`, `/miner/<address>` and `/miner.html`), `style.css`, `common.js`, `spa.js`, `charts.js`, `stats.js`, `music.js`, `depth.js`, `public.js` and `miner.js` are served as static files (fixed list, no directory serving), plus the audio files of the music folder (`/music/`, audio extensions only). The test suite checks that `index.html`, `app.js`, the operator API and path-traversal attempts are not reachable.
 
 ## 4. Configuration
 
