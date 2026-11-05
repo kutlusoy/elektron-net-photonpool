@@ -188,6 +188,8 @@ async function mount(root) {
   on(box, 'keydown', () => { setTimeout(() => { view.follow = near(); }, 0); });
   const ro = new ResizeObserver(() => { fitEvents(); if (view.follow) toBottom(false); }); ro.observe(box); offs.push(() => ro.disconnect());
   on(document, 'depthchange', () => { try { render(); } catch (_) { /* no data yet */ } });
+  // the 3D scene takes its colors when it is built: build it again with a fresh canvas (a lost WebGL context cannot be reused)
+  on(document, 'themechange', () => { if (!flow) return; flow.stop(); flow = null; const old = $('#flow'); if (old) { const c = old.cloneNode(false); old.replaceWith(c); } startFlow(); });
   startFlow();
   const tick = async () => { try { await refresh(); render(); } catch (e) { if (!view.s) $('#pane-tip').textContent = 'pool API not reachable: ' + e.message; } };
   await tick();

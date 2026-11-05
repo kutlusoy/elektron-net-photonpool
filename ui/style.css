@@ -14,6 +14,17 @@
 body[data-theme="amber"] { --c1: #ffb000; --c2: #ff6a00; --c3: #ffe08a; --fg: #ffe9c2; --dim: #a58a5c; }
 body[data-theme="green"] { --c1: #39ff88; --c2: #00e5ff; --c3: #d6ff3d; --fg: #d2ffe4; --dim: #6fa585; }
 body[data-theme="magenta"] { --c1: #ff2bd6; --c2: #00e5ff; --c3: #f9f002; --fg: #ffd9f7; --dim: #a57099; }
+/* more moods, from technical to dangerous to hacker-like */
+body[data-theme="ice"] { --bg: #03060d; --c1: #7cc7ff; --c2: #b9a8ff; --c3: #eaf6ff; --fg: #e4f1ff; --dim: #7f98b0; --ok: #7dffcf; --warn: #ffd27a; --err: #ff7a9c; }
+body[data-theme="abyss"] { --bg: #010a0c; --c1: #00ffd5; --c2: #2f7bff; --c3: #b6fff0; --fg: #d3fff8; --dim: #5f9a94; --ok: #5dff9c; --warn: #ffd166; --err: #ff5d7a; }
+body[data-theme="gold"] { --bg: #070604; --c1: #f5c542; --c2: #fff0b0; --c3: #ff8a3d; --fg: #fff3d2; --dim: #a89560; --ok: #b9f27a; --warn: #ff9a3d; --err: #ff5a5a; }
+body[data-theme="candy"] { --bg: #120a1a; --c1: #ff7ac8; --c2: #7ad8ff; --c3: #ffe27a; --fg: #ffe9f6; --dim: #b98fb0; --ok: #8affc1; --warn: #ffc46b; --err: #ff6b8a; }
+body[data-theme="candy"] .window { border-radius: 14px; }
+body[data-theme="candy"] .pane { border-radius: 10px; }
+body[data-theme="toxic"] { --bg: #040702; --c1: #c6ff00; --c2: #ff00e6; --c3: #00ffd0; --fg: #f0ffd0; --dim: #8da05a; --ok: #5dff6a; --warn: #ffb000; --err: #ff3b3b; }
+body[data-theme="crimson"] { --bg: #0b0204; --c1: #ff2a3d; --c2: #ff7a00; --c3: #ffd400; --fg: #ffdcdc; --dim: #a96a6a; --ok: #7dff6a; --warn: #ffd400; --err: #ff2bb0; }
+body[data-theme="matrix"] { --bg: #010802; --c1: #00ff41; --c2: #00b32c; --c3: #b6ff9e; --fg: #b8ffc8; --dim: #2f8a4a; --ok: #00ff41; --warn: #d6ff3d; --err: #ff3b3b; }
+body[data-theme="mono"] { --bg: #050505; --c1: #f2f2f2; --c2: #ff3b3b; --c3: #9aa0a6; --fg: #d8d8d8; --dim: #7d7d7d; --ok: #7ee79a; --warn: #bdbdbd; --err: #ff3b3b; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -382,3 +393,15 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 @keyframes blkrow { 0% { background: color-mix(in srgb, var(--warn) 45%, transparent); } 100% { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .flowbanner { animation: none; } .blkrow { animation: none; } }
 .flowtip .flowtipnote { margin-top: 4px; padding-top: 3px; border-top: 1px dashed var(--line); font-size: 9px; opacity: .7; }
+
+/* atmosphere of single themes (cheap CSS only; still for reduced motion) */
+body[data-theme="matrix"] .fx { background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,.30) 3px), radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,.7) 100%); }
+body[data-theme="matrix"] .pane h2 span, body[data-theme="matrix"] .statusline b { text-shadow: 0 0 10px #00ff41, 0 0 22px rgba(0, 255, 65, .5); }
+body[data-theme="toxic"] .titlebar { background: repeating-linear-gradient(135deg, rgba(198, 255, 0, .12) 0 10px, transparent 10px 20px); }
+body[data-theme="crimson"] .fx { background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,.18) 3px), radial-gradient(ellipse at center, transparent 45%, rgba(255, 30, 50, .22) 100%); animation: alarm 3.2s ease-in-out infinite; }
+@keyframes alarm { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+body[data-theme="gold"] .titlebar { background: linear-gradient(90deg, rgba(245, 197, 66, .14), transparent 55%); }
+body[data-theme="gold"] .pane h2 span { background: linear-gradient(90deg, #f5c542 0%, #fff2b0 45%, #f5c542 90%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; animation: goldshine 7s linear infinite; }
+@keyframes goldshine { to { background-position: -220% 0; } }
+body[data-theme="mono"] .pane { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .03); }
+@media (prefers-reduced-motion: reduce) { body[data-theme="crimson"] .fx, body[data-theme="gold"] .pane h2 span { animation: none; } }
