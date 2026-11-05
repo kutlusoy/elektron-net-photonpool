@@ -196,6 +196,20 @@ An external static review of the patch (no build, no run) raised the points belo
 
 `step28` tests the budgets, the overflow case, the coinbase size limit, the parallel limit and that the node stays responsive and keeps validating blocks during heavy calls. Sanitizer run (November 5, 2026, repeated on the final branch code): the node was built with `-DSANITIZERS=address,undefined` (RelWithDebInfo, `-O1`, wallet off) and `step14`, `step15` (seeds 1 and 2), `step16` to `step20`, `step22`, `step23`, `step28`, `step29` and `step30` ran against it, with `ASAN_OPTIONS=detect_leaks=0` and the reports written to files: no AddressSanitizer or UndefinedBehaviorSanitizer report. After the option was removed, `step28`, `step29`, `step30` and the functional test `rpc_getattestationbatch.py` of the node repository were run again on a fresh sanitizer build: no report. `step23` is a timing check and failed once by a hair under the slow sanitizer build (83 ms against a limit of 83 ms) and passed on the second run. Leak detection was off, and the fuzz-style input tests are random, not coverage guided. Not done: a coverage-guided fuzzer.
 
+## 6c. Load test with a UTXO set of mainnet size
+
+`test/load_mainnet_utxo.py` fills a regtest chain with up to 10 million unspent outputs (P2WPKH sized, created by fan-out transactions from anyone-can-spend outputs), keeps 2000 transactions in the mempool so that the block template of the RPC is not empty, and measures the RPC at 1, 5 and 10 million outputs (November 5, 2026, one machine, 4 cores, 15 GB RAM, six calls per cell, node with the batch RPC and `-debug=rpc`):
+
+| Outputs in the set | Node memory | One pass over the set (`gettxoutsetinfo`) | 1 candidate (p50) | 512 candidates (p50) | 4096 candidates (p50 / p95) | `cs_main` held by one call (max) | Block create and connect, idle / with heavy batch calls (p50) |
+|---|---|---|---|---|---|---|---|
+| 1.0 million | 244 MB | 4.5 s | 98 ms | 125 ms | 440 / 481 ms | 119 ms | 49 / 41 ms |
+| 5.0 million | 1.7 GB | 20.4 s | 88 ms | 121 ms | 346 / 349 ms | 111 ms | 33 / 49 ms |
+| 10.0 million | 2.6 GB | 42.5 s | 117 ms | 123 ms | 360 / 381 ms | 136 ms | 41 / 42 ms |
+
+Reading: the cost of the RPC does not grow with the size of the set (it grows with what the template contains and with the number of candidates), a call with 4096 candidates takes about 0.35 to 0.45 s, one call holds `cs_main` for about 100 ms with 2000 transactions in the template (the snapshot of template and attestation base state), `getblockchaininfo` stayed below 12 ms and blocks were still created and connected in the same time (under 61 ms) while three threads called the RPC with 4096 candidates in a loop (two run, the others are refused as busy). A full pass over the set grows with its size, as expected, and is not used by the RPC.
+
+Limits of this measurement: regtest rules, transactions with one input and two outputs, a mempool of 2000 transactions instead of a real full block, a synthetic set whose outputs are all fresh, one machine. The real size of the mainnet UTXO set and the share of the database cache that was warm were not checked. The cost of `getblocktemplate` for the same mempool was not measured for comparison, so a statement like "as cheap as getblocktemplate" is not made here.
+
 ## 7. Security
 
 - Local unix socket with restrictive permissions for IPC, cookie or credential authentication for JSON-RPC.

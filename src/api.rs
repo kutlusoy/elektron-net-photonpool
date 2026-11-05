@@ -28,6 +28,7 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/api/v1/blocks", get(blocks))
         .route("/api/v1/events", get(events))
         .route("/api/v1/ledger", get(ledger_view))
+        .route("/api/v1/learned", get(|State(p): State<Arc<Pool>>| async move { Json(learned_view(&p)) }))
         .route("/api/v1/devices", get(|State(p): State<Arc<Pool>>| async move { Json(devices_view(&p)) }))
         .route("/api/v1/history/devices", get(|State(p): State<Arc<Pool>>, Query(q): Query<RangeQ>| async move { Json(device_history_view(&p, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/api/v1/history", get(|State(p): State<Arc<Pool>>, Query(q): Query<RangeQ>| async move { Json(history_view(&p, q.range.as_deref().unwrap_or("24h")).await) }))
@@ -43,6 +44,14 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route_service("/miner.html", ServeFile::new(shell.clone()))
         .route_service("/miner/*address", ServeFile::new(shell))
         .fallback_service(ServeDir::new(ui))
+}
+
+/// What the pool has learned per device type (operator view).
+fn learned_view(p: &Arc<Pool>) -> Value {
+    let m = p.learned.lock().unwrap();
+    let mut v: Vec<(&String, &crate::pool::Learned)> = m.iter().collect();
+    v.sort_by(|a, b| a.0.cmp(b.0));
+    json!(v.into_iter().map(|(k, l)| json!({"device": k, "hashrate": l.hashrate, "jobMs": l.job_ms, "clean": l.clean, "samples": l.samples})).collect::<Vec<_>>())
 }
 
 #[derive(Deserialize)]

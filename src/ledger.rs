@@ -53,6 +53,7 @@ pub fn init(conn: &Connection) -> Result<()> {
          CREATE TABLE IF NOT EXISTS pool_history(minute INTEGER PRIMARY KEY, hashrate REAL NOT NULL, miners INTEGER NOT NULL, ok INTEGER NOT NULL, stale INTEGER NOT NULL, dup INTEGER NOT NULL, net_diff REAL NOT NULL) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS device_history(minute INTEGER NOT NULL, device TEXT NOT NULL, name TEXT NOT NULL, hashrate REAL NOT NULL, workers INTEGER NOT NULL, PRIMARY KEY(minute, device)) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS device_best(device TEXT PRIMARY KEY, name TEXT NOT NULL, best REAL NOT NULL, updated INTEGER NOT NULL) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS device_learned(key TEXT PRIMARY KEY, hashrate REAL NOT NULL, job_ms REAL NOT NULL, clean INTEGER NOT NULL, samples INTEGER NOT NULL, updated INTEGER NOT NULL) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS photon_trust(key TEXT PRIMARY KEY, passes INTEGER NOT NULL, fails INTEGER NOT NULL, last_fail INTEGER NOT NULL, banned_until INTEGER NOT NULL, updated INTEGER NOT NULL) WITHOUT ROWID;",
     )?;
     Ok(())
@@ -424,6 +425,27 @@ pub fn bump_device_best(conn: &Connection, device: &str, name: &str, best: f64, 
         params![device, name, best, now],
     )?;
     Ok(())
+}
+
+/// What the pool has learned about a device type: (key, hash rate, job interval in ms (0 = none), wants clean jobs, samples).
+pub type LearnedRow = (String, f64, f64, bool, u32);
+
+pub fn save_learned(conn: &Connection, key: &str, hashrate: f64, job_ms: f64, clean: bool, samples: u32, now: i64) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO device_learned(key, hashrate, job_ms, clean, samples, updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![key, hashrate, job_ms, clean as i64, samples as i64, now],
+    )?;
+    Ok(())
+}
+
+pub fn load_learned(conn: &Connection) -> Result<Vec<LearnedRow>> {
+    let mut st = conn.prepare("SELECT key, hashrate, job_ms, clean, samples FROM device_learned")?;
+    let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0, r.get::<_, i64>(4)? as u32)))?.collect::<std::result::Result<_, _>>()?;
+    Ok(v)
+}
+
+pub fn prune_learned(conn: &Connection, older_than: i64) -> Result<usize> {
+    Ok(conn.execute("DELETE FROM device_learned WHERE updated < ?1", params![older_than])?)
 }
 
 pub fn device_bests(conn: &Connection) -> Result<Vec<(String, f64)>> {

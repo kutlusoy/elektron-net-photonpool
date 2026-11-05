@@ -46,7 +46,7 @@ window.Flow3D = (() => {
     varying vec4 vC; varying vec2 vA; varying float vY; varying float vD; varying float vX;
     void main() {
       float edge = 1.0 - smoothstep(0.35, 1.0, abs(vY));
-      float a = edge * edge * mix(vA.x, vA.y, vX) * (1.0 - smoothstep(25.0, 70.0, vD));
+      float a = edge * edge * mix(vA.x, vA.y, vX) * (1.0 - smoothstep(45.0, 130.0, vD));
       gl_FragColor = vec4(vC.rgb * a, a);
     }`;
   function fatLines(cap) {
@@ -204,7 +204,7 @@ window.Flow3D = (() => {
     let gold = null, assemble = 1, heightLabel = label('', '#' + col.c3.getHexString(), 0.9);
     heightLabel.position.set(X.tpl, 1.7, 0); add(heightLabel); track(heightLabel.material);
 
-    const st = { hovM: -1, gf: [1, 1, 1], gfg: 1, yaw: 0, yawT: 0, pitch: 0, pitchT: 0, zoom: 1, zoomT: 1, touched: -1e9, modes: [], shake: 0, flash: 0, goldT: 0, bLabel: null, hov: -2, cnt: { ok: 0, stale: 0, bad: 0 }, tipTime: 0, rtt: 0, p50: 0, p95: 0, connected: true, units: 0, hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
+    const st = { hovM: -1, gf: [1, 1, 1], gfg: 1, yaw: 0, yawT: 0, pitch: 0, pitchT: 0, zoom: 1.2, zoomT: 1.2, touched: -1e9, modes: [], shake: 0, flash: 0, goldT: 0, bLabel: null, hov: -2, cnt: { ok: 0, stale: 0, bad: 0 }, tipTime: 0, rtt: 0, p50: 0, p95: 0, connected: true, units: 0, hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     // Quality levels. 0: the small pane (few particles, no bloom), 1: maximized on a modest device, 2: maximized (bloom, streaks, many particles).
     // Every level draws every display frame (smooth motion) as long as the device keeps up and at most 25 miners are online; beyond that, or when the frame
@@ -419,20 +419,20 @@ window.Flow3D = (() => {
     const onLeave = () => { tip.hidden = true; st.hov = -2; st.hovM = -1; };
     canvas.addEventListener('pointermove', onMove); canvas.addEventListener('pointerleave', onLeave);
 
-    // Orbit controls: drag turns the view (limited, it never goes under the floor), the wheel zooms between 0.7x and 1.5x, a double click resets.
+    // Orbit controls: drag turns the view all the way round without a stop (the tilt is limited so that it never goes under the floor), the wheel zooms between 0.6x and 2.6x, a double click resets.
     let drag = null;
-    const LIM = { yaw: 1.1, pitchMin: -0.15, pitchMax: 0.5, zMin: 0.7, zMax: 1.5 };
+    const LIM = { pitchMin: -0.1, pitchMax: 1.25, zMin: 0.6, zMax: 2.6, z0: 1.2 };
     const touch = () => { st.touched = performance.now(); };
     const onDown = (e) => { if (e.button !== 0) return; drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; tip.hidden = true; touch(); };
     const onDrag = (e) => {
       if (!drag) return;
-      st.yawT = Math.max(-LIM.yaw, Math.min(LIM.yaw, st.yawT - (e.clientX - drag.x) * 0.006));
+      st.yawT -= (e.clientX - drag.x) * 0.006;
       st.pitchT = Math.max(LIM.pitchMin, Math.min(LIM.pitchMax, st.pitchT + (e.clientY - drag.y) * 0.004));
       drag.x = e.clientX; drag.y = e.clientY; touch();
     };
     const onUp = (e) => { if (!drag) return; drag = null; canvas.style.cursor = 'grab'; try { canvas.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ } };
     const onWheel = (e) => { e.preventDefault(); st.zoomT = Math.max(LIM.zMin, Math.min(LIM.zMax, st.zoomT * Math.exp(e.deltaY * 0.0012))); touch(); };
-    const onReset = () => { st.yawT = 0; st.pitchT = 0; st.zoomT = 1; st.touched = -1e9; };
+    const onReset = () => { st.yawT = Math.round(st.yawT / (2 * Math.PI)) * 2 * Math.PI; st.pitchT = 0; st.zoomT = LIM.z0; st.touched = -1e9; };   // back to the nearest default angle
     canvas.style.cursor = 'grab'; canvas.style.touchAction = 'none';
     canvas.addEventListener('pointerdown', onDown); canvas.addEventListener('pointermove', onDrag); canvas.addEventListener('pointerup', onUp); canvas.addEventListener('pointercancel', onUp);
     canvas.addEventListener('wheel', onWheel, { passive: false }); canvas.addEventListener('dblclick', onReset);

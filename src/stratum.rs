@@ -8,7 +8,7 @@ use crate::template::{header_hash, meets_target};
 use anyhow::{anyhow, bail, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -48,11 +48,17 @@ fn agent_wants_clean(words: &[String], agent: &str) -> bool {
 
 /// Time until the next job for a miner: the time its hardware needs to sweep the space of one job (a bit less, to stay ahead), within the configured limits.
 /// Without a hash rate estimate the pool sends a job per second; after a duplicate share it sends them as fast as allowed.
-fn job_delay_ms(cfg: &crate::config::StratumCfg, rolling_bits: u32, hash_est: f64, boost: bool) -> u64 {
+fn job_delay_ms(cfg: &crate::config::StratumCfg, rolling_bits: u32, hash_est: f64, boost: bool, floor_ms: f64) -> u64 {
     let bits = rolling_bits.min(cfg.version_space_bits);
     let unit_hashes = 2f64.powi(32 + bits as i32);
     let secs = if boost { 0.0 } else if hash_est > 0.0 { unit_hashes / hash_est * 0.8 } else { 1.0 };
-    (secs * 1000.0).clamp(cfg.min_job_interval_ms as f64, cfg.max_job_interval_ms as f64) as u64
+    let max = cfg.max_job_interval_ms as f64;
+    (secs * 1000.0).clamp(floor_ms.min(max), max) as u64
+}
+
+/// Shortest job interval of one connection: the configured minimum, and never so short that all connections together exceed `max_jobs_per_sec`.
+fn floor_ms(cfg: &crate::config::StratumCfg, conns: u64) -> f64 {
+    (cfg.min_job_interval_ms as f64).max(1000.0 * conns as f64 / cfg.max_jobs_per_sec.max(1) as f64)
 }
 
 pub async fn serve(pool: Arc<Pool>) -> Result<()> {
@@ -90,12 +96,14 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
             let _permit = permit;
             let id = pool.session_seq.fetch_add(1, Ordering::Relaxed) + 1;
             NET.accepted.fetch_add(1, Ordering::Relaxed);
+            pool.conns.fetch_add(1, Ordering::Relaxed);
             let stats = Arc::new(SessionStats::new());
             pool.sessions.lock().unwrap().insert(id, stats.clone());
             let stats_end = stats.clone();
             let res = Session::new(pool.clone(), cfg, port, stats, id).run(stream).await;
             pool.sessions.lock().unwrap().remove(&id);
             NET.closed.fetch_add(1, Ordering::Relaxed);
+            pool.conns.fetch_sub(1, Ordering::Relaxed);
             NET.bytes_in.fetch_add(stats_end.net_in.load(Ordering::Relaxed), Ordering::Relaxed);
             NET.bytes_out.fetch_add(stats_end.net_out.load(Ordering::Relaxed), Ordering::Relaxed);
             NET.jobs.fetch_add(stats_end.net_jobs.load(Ordering::Relaxed), Ordering::Relaxed);
@@ -144,6 +152,8 @@ struct Session {
     window_start: Instant,
     window_diff: f64,
     hash_est: f64,
+    /// Typical hash rate of this kind of device (from the user agent), 0 when unknown: a lower bound for the job rate while the measured rate is still too low.
+    prior_hs: f64,
     last_job: Instant,
     dup_until: Instant,
     agent_clean: bool,
@@ -208,7 +218,7 @@ impl Session {
         Self {
             pool, cfg, stats, id, mode: port.mode, port, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
             difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0, rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(),
-            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, last_job: now, dup_until: now, agent_clean: false, adapt_ms: None, adapt_ok: 0, adapt_dup: 0, adapt_stale: 0, adapt_t: now, last_adjust: now, shares_since_adjust: 0, bad: 0,
+            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, prior_hs: 0.0, last_job: now, dup_until: now, agent_clean: false, adapt_ms: None, adapt_ok: 0, adapt_dup: 0, adapt_stale: 0, adapt_t: now, last_adjust: now, shares_since_adjust: 0, bad: 0,
             acc_minute: 0, acc_diff: 0.0, acc_cnt: 0, acc_last: now,
         }
     }
@@ -286,6 +296,25 @@ impl Session {
                 let agent = crate::devices::clean_agent(req.params.get(0).and_then(Value::as_str).unwrap_or(""));
                 self.agent_clean = agent_wants_clean(&self.cfg.clean_work_agents, &agent);
                 let dev = crate::devices::classify(&agent);
+                // What the pool knows about this kind of device: what it learned from earlier connections (after a few observations), else a typical value
+                // of the chip. It sets the first share difficulty (about one share per share_secs), the job pace and whether jobs are clean; everything is
+                // corrected by the measurement of this connection from the first shares on.
+                let learned = self.pool.learned.lock().unwrap().get(&crate::devices::profile_key(&agent)).copied().filter(|l| l.samples >= 3);
+                let prior = learned.map(|l| l.hashrate).or_else(|| crate::devices::expected_hashrate(&agent));
+                if let Some(h) = prior.filter(|h| *h > 0.0) {
+                    self.prior_hs = h;
+                    let d = (h * self.cfg.share_secs / 4_294_967_296.0).clamp(self.cfg.min_difficulty, self.cfg.max_difficulty);
+                    if !self.started {
+                        self.difficulty = d;
+                        self.target = target_from_difficulty(d);
+                    }
+                }
+                if let Some(l) = learned {
+                    if l.job_ms > 0.0 {
+                        self.adapt_ms = Some(l.job_ms);
+                    }
+                    self.agent_clean |= l.clean;
+                }
                 *self.stats.device.lock().unwrap() = (dev.key, dev.name);
                 *self.stats.agent.lock().unwrap() = agent;
                 self.reply(wr, &id, &format!("[[[\"mining.notify\",\"{:x}\"]],\"\",0]", self.id), "null").await?;
@@ -394,11 +423,19 @@ impl Session {
         Ok(())
     }
 
+    /// The hash rate the job interval is based on: the measured one, but at least 60 % of the typical rate of the device type. A miner that is starved of work reports
+    /// less than it can do, so the measurement alone would keep it starved; with the prior it gets work at the right pace at once and the interval follows the
+    /// measurement up from there.
+    fn rate_for_jobs(&self) -> f64 {
+        self.hash_est.max(0.6 * self.prior_hs)
+    }
+
     fn schedule_next(&mut self) {
         let boost = Instant::now() < self.dup_until;
-        let model = job_delay_ms(&self.cfg, self.rolling_bits, self.hash_est, boost);
+        let floor = floor_ms(&self.cfg, self.pool.conns.load(Ordering::Relaxed));
+        let model = job_delay_ms(&self.cfg, self.rolling_bits, self.rate_for_jobs(), boost, floor);
         let ms = match self.adapt_ms {
-            Some(a) if !boost => (a.clamp(self.cfg.adaptive_min_interval_ms as f64, self.cfg.max_job_interval_ms as f64)) as u64,
+            Some(a) if !boost => (a.clamp((self.cfg.adaptive_min_interval_ms as f64).max(floor).min(self.cfg.max_job_interval_ms as f64), self.cfg.max_job_interval_ms as f64)) as u64,
             _ => model,
         };
         set_f64(&self.stats.job_ms, ms as f64);
@@ -414,16 +451,19 @@ impl Session {
         if total < 12 && !(total >= 4 && self.adapt_t.elapsed() > Duration::from_secs(60)) {
             return;
         }
-        let cap = job_delay_ms(&self.cfg, self.rolling_bits, self.hash_est, false) as f64;
-        let floor = self.cfg.adaptive_min_interval_ms as f64;
+        let global = floor_ms(&self.cfg, self.pool.conns.load(Ordering::Relaxed));
+        let cap = job_delay_ms(&self.cfg, self.rolling_bits, self.rate_for_jobs(), false, global) as f64;
+        let floor = (self.cfg.adaptive_min_interval_ms as f64).max(global).min(cap);
         let cur = self.adapt_ms.unwrap_or(cap);
         let next = adapt_interval(cur, self.adapt_ok, self.adapt_dup, self.adapt_stale, floor, cap);
         let bad = (self.adapt_dup + self.adapt_stale) as f64 / total as f64;
         // fastest interval and still repeating work: the miner keeps old jobs queued, so give it clean jobs
         if bad > 0.10 && next <= floor * 1.01 && !self.agent_clean {
             self.agent_clean = true;
+            self.stats.clean_learned.store(1, Ordering::Relaxed);
         }
         self.adapt_ms = Some(next);
+        set_f64(&self.stats.adapt_ms, next);
         (self.adapt_ok, self.adapt_dup, self.adapt_stale, self.adapt_t) = (0, 0, 0, Instant::now());
     }
 
@@ -553,7 +593,7 @@ impl Session {
                 self.adapt();
                 // The same share again means the miner has swept the space of its job and starts over: give it fresh work, but not faster than min_job_interval_ms.
                 self.dup_until = Instant::now() + DUP_BOOST;
-                self.next_job = self.next_job.min((self.last_job + Duration::from_millis(self.cfg.min_job_interval_ms)).max(Instant::now()));
+                self.next_job = self.next_job.min((self.last_job + Duration::from_millis(floor_ms(&self.cfg, self.pool.conns.load(Ordering::Relaxed)) as u64)).max(Instant::now()));
                 self.error(wr, id, 22, "Duplicate share").await
             }
             ShareResult::LowDifficulty => {
@@ -775,13 +815,105 @@ async fn stats_task(pool: Arc<Pool>) {
                 let _ = p.ledger.call(move |c| crate::ledger::add_history(c, &row)).await;
             });
             (hist_minute, hist_sum, hist_n, hist_base) = (minute, 0.0, 0, (ok, stale, dup));
+            learn_devices(&pool, &sessions, now);
         }
+    }
+}
+
+/// One connection as seen by the learning: (device key, hash rate, learned job interval or 0, learned clean jobs).
+type Observation = (String, f64, f64, bool);
+
+/// Per device type the median hash rate, the median learned job interval (0 if none) and whether most connections that learned an interval needed clean jobs.
+fn aggregate_types(obs: &[Observation]) -> HashMap<String, (f64, f64, bool)> {
+    fn median(v: &mut Vec<f64>) -> f64 {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        if v.is_empty() { 0.0 } else { v[v.len() / 2] }
+    }
+    let mut by_type: HashMap<&str, (Vec<f64>, Vec<f64>, usize)> = HashMap::new();
+    for (key, hr, adapt, clean) in obs {
+        let e = by_type.entry(key.as_str()).or_default();
+        e.0.push(*hr);
+        if *adapt > 0.0 {
+            e.1.push(*adapt);
+            e.2 += *clean as usize;
+        }
+    }
+    by_type.into_iter().map(|(k, (mut hr, mut ad, votes))| {
+        let clean = !ad.is_empty() && votes * 2 > ad.len();
+        (k.to_string(), (median(&mut hr), median(&mut ad), clean))
+    }).collect()
+}
+
+/// Once a minute: what the connections of each device type show (typical hash rate, learned job interval, need for clean jobs) is folded into the knowledge of
+/// that type and saved. Only connections with enough shares count.
+fn learn_devices(pool: &Arc<Pool>, sessions: &[Arc<SessionStats>], now: f64) {
+    let mut obs: Vec<Observation> = Vec::new();
+    for s in sessions {
+        let (hr, ok) = (get_f64(&s.hashrate), s.ok.load(Ordering::Relaxed));
+        if hr <= 0.0 || ok < 20 || now - get_f64(&s.last_seen) > 120.0 {
+            continue;
+        }
+        let key = crate::devices::profile_key(&s.agent.lock().unwrap());
+        obs.push((key, hr, get_f64(&s.adapt_ms), s.clean_learned.load(Ordering::Relaxed) != 0));
+    }
+    for (key, (h, j, clean)) in aggregate_types(&obs) {
+        let merged = {
+            let mut m = pool.learned.lock().unwrap();
+            let l = crate::pool::merge_learned(m.get(&key).copied(), h, j, clean);
+            m.insert(key.clone(), l);
+            l
+        };
+        let p = pool.clone();
+        tokio::spawn(async move {
+            let _ = p.ledger.call(move |c| crate::ledger::save_learned(c, &key, merged.hashrate, merged.job_ms, merged.clean, merged.samples, unix_now() as i64)).await;
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn learning_takes_the_median_per_device_type() {
+        let obs: Vec<Observation> = vec![
+            ("bitaxe/bm1370".into(), 1.1e12, 90.0, false), ("bitaxe/bm1370".into(), 1.2e12, 100.0, false), ("bitaxe/bm1370".into(), 5.0e12, 400.0, true),
+            ("cpuminer".into(), 5.0e6, 0.0, false),
+        ];
+        let m = aggregate_types(&obs);
+        assert_eq!(m["bitaxe/bm1370"], (1.2e12, 100.0, false));
+        assert_eq!(m["cpuminer"], (5.0e6, 0.0, false));
+        let clean: Vec<Observation> = vec![("x".into(), 1.0, 50.0, true), ("x".into(), 2.0, 60.0, true), ("x".into(), 3.0, 70.0, false)];
+        assert!(aggregate_types(&clean)["x"].2);
+    }
+
+    #[test]
+    fn job_floor_grows_with_the_connections_and_a_starved_fast_miner_gets_work_in_time() {
+        let c = cfg();
+        // a few connections: the configured minimum; a big farm: the budget decides (50,000 jobs per second in total)
+        assert_eq!(floor_ms(&c, 10), c.min_job_interval_ms as f64);
+        assert_eq!(floor_ms(&c, 15_000), 300.0);
+        // a Bitaxe of 1.2 TH/s sweeps 2^37 hashes in 114 ms: the interval must be below that, not the old fixed 200 ms
+        let ms = job_delay_ms(&c, 12, 1.2e12, false, floor_ms(&c, 1));
+        assert!((80..114).contains(&ms), "{ms}");
+        // the interval never exceeds max_job_interval_ms even when the floor of a huge farm is above it
+        let mut tight = cfg();
+        tight.max_job_interval_ms = 200;
+        assert_eq!(job_delay_ms(&tight, 12, 1.0e12, false, floor_ms(&tight, 100_000)), 200);
+    }
+
+    #[test]
+    fn a_starved_miner_converges_to_its_real_rate() {
+        // the miner's real rate H, but it only does the work it gets: rate(I) = min(H, 2^37 / I). The pool derives the interval from the measured rate.
+        let c = cfg();
+        let real: f64 = 1.2e12;
+        let mut measured: f64 = 0.35e12;
+        for _ in 0..12 {
+            let i = job_delay_ms(&c, 12, measured, false, floor_ms(&c, 1)) as f64 / 1000.0;
+            measured = real.min(2f64.powi(37) / i);
+        }
+        assert!(measured > 0.97 * real, "{measured}");
+    }
 
     fn cfg() -> crate::config::StratumCfg {
         toml::from_str("").unwrap()
@@ -790,14 +922,16 @@ mod tests {
     #[test]
     fn job_cadence_follows_the_space_a_miner_really_sweeps() {
         let c = cfg();
-        // a Bitaxe at 1 TH/s sweeps 2^37 hashes per job in about 0.14 s: fresh work at the shortest interval
-        assert_eq!(job_delay_ms(&c, 12, 1.0e12, false), c.min_job_interval_ms);
+        // a Bitaxe at 1 TH/s sweeps 2^37 hashes per job in about 0.14 s: fresh work a bit earlier, at 0.8 of that
+        assert_eq!(job_delay_ms(&c, 12, 1.0e12, false, c.min_job_interval_ms as f64), (2f64.powi(37) / 1.0e12 * 0.8 * 1000.0) as u64);
+        // a faster one is limited by the shortest interval
+        assert_eq!(job_delay_ms(&c, 12, 1.0e13, false, c.min_job_interval_ms as f64), c.min_job_interval_ms);
         // a 10 GH/s miner can keep one job for about 11 s, a very slow one never longer than the maximum
-        assert_eq!(job_delay_ms(&c, 12, 1.0e10, false), (2f64.powi(37) / 1.0e10 * 0.8 * 1000.0) as u64);
-        assert_eq!(job_delay_ms(&c, 12, 1.0e9, false), c.max_job_interval_ms);
-        assert_eq!(job_delay_ms(&c, 12, 1.0e3, false), c.max_job_interval_ms);
+        assert_eq!(job_delay_ms(&c, 12, 1.0e10, false, c.min_job_interval_ms as f64), (2f64.powi(37) / 1.0e10 * 0.8 * 1000.0) as u64);
+        assert_eq!(job_delay_ms(&c, 12, 1.0e9, false, c.min_job_interval_ms as f64), c.max_job_interval_ms);
+        assert_eq!(job_delay_ms(&c, 12, 1.0e3, false, c.min_job_interval_ms as f64), c.max_job_interval_ms);
         // miners that granted fewer bits, or a configured smaller space, are not given more than they have
-        assert_eq!(job_delay_ms(&c, 2, 1.0e10, false), (2f64.powi(34) / 1.0e10 * 0.8 * 1000.0) as u64);
+        assert_eq!(job_delay_ms(&c, 2, 1.0e10, false, c.min_job_interval_ms as f64), (2f64.powi(34) / 1.0e10 * 0.8 * 1000.0) as u64);
     }
 
     #[test]
@@ -834,8 +968,8 @@ mod tests {
     #[test]
     fn unknown_speed_gets_a_job_per_second_and_a_duplicate_makes_it_fast() {
         let c = cfg();
-        assert_eq!(job_delay_ms(&c, 12, 0.0, false), 1000);
-        assert_eq!(job_delay_ms(&c, 12, 1.0e9, true), c.min_job_interval_ms);
-        assert_eq!(job_delay_ms(&c, 12, 0.0, true), c.min_job_interval_ms);
+        assert_eq!(job_delay_ms(&c, 12, 0.0, false, c.min_job_interval_ms as f64), 1000);
+        assert_eq!(job_delay_ms(&c, 12, 1.0e9, true, c.min_job_interval_ms as f64), c.min_job_interval_ms);
+        assert_eq!(job_delay_ms(&c, 12, 0.0, true, c.min_job_interval_ms as f64), c.min_job_interval_ms);
     }
 }

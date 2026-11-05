@@ -123,6 +123,8 @@ impl Pool {
                     let _ = a.ledger.call(move |c| ledger::prune_shares(c, cutoff)).await;
                     let stats_cutoff = minute_now() - a.cfg.ledger.stats_keep_days * 1440;
                     let _ = a.ledger.call(move |c| ledger::prune_history(c, stats_cutoff)).await;
+                    let learned_cutoff = stats_cutoff * 60;
+                    let _ = a.ledger.call(move |c| ledger::prune_learned(c, learned_cutoff)).await;
                 }
             }
         });
