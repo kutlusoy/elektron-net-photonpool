@@ -11,7 +11,7 @@ const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-liv
     <section class="pane p-alloc" aria-label="Allocator"><h2><span>ALLOCATOR</span></h2><pre id="pane-alloc"></pre></section>
     <section class="pane p-shares" aria-label="Shares"><h2><span>SHARES</span></h2><pre id="pane-shares"></pre></section>
     <section class="pane p-events" aria-label="Events"><h2><span>EVENTS</span><em>public feed, no miner data</em></h2><div class="tty" id="events" tabindex="-1"></div></section>
-    <section class="pane p-flow" aria-label="Engine flow"><h2><span>PHOTON CORE</span><em title="Rates and counts are live from the pool; the single particles are illustrative">the engine, live</em></h2><div class="flowbox"><canvas id="flow"></canvas></div></section>
+    <section class="pane p-flow" aria-label="Engine flow"><h2><span>PHOTON CORE</span><em>live data</em></h2><div class="flowbox"><canvas id="flow"></canvas></div></section>
   </main>`;
 let flow = null;
 const view = { s: null, seq: 0, lastTip: { h: null, t: 0 }, follow: true };
