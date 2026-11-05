@@ -115,6 +115,7 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/charts.js", get(|State(s): State<St>| file(s, "charts.js", "text/javascript; charset=utf-8")))
         .route("/depth.js", get(|State(s): State<St>| file(s, "depth.js", "text/javascript; charset=utf-8")))
         .route("/public.js", get(|State(s): State<St>| file(s, "public.js", "text/javascript; charset=utf-8")))
+        .route("/favicon.ico", get(|State(s): State<St>| file(s, "favicon.ico", "image/x-icon")))
         .route("/engine", get(|State(s): State<St>| file(s, "index.html", "text/html; charset=utf-8")))
         .route("/ops", get(|State(s): State<St>| file(s, "index.html", "text/html; charset=utf-8")))
         .route("/engine.js", get(|State(s): State<St>| file(s, "engine.js", "text/javascript; charset=utf-8")))

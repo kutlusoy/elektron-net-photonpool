@@ -224,6 +224,11 @@ impl Session {
                 }
                 _ = sleep_until(next_job), if started => {
                     self.send_job(&mut wr, false).await?;
+                    // a slow miner (CPU, tiny device) finds no share at all at a high difficulty, so vardiff must also run without shares;
+                    // only for a connection that has never had a valid share, so the difficulty of an established miner is never touched here
+                    if self.stats.ok.load(Ordering::Relaxed) == 0 {
+                        self.vardiff(&mut wr).await?;
+                    }
                 }
                 _ = sleep_until(TokioInstant::from_std(deadline)) => bail!("idle timeout"),
             }
@@ -588,6 +593,7 @@ impl Session {
         if !(elapsed >= 30.0 || self.shares_since_adjust >= 50) {
             return Ok(());
         }
+        let none = self.shares_since_adjust == 0;
         let rate = self.shares_since_adjust as f64 / elapsed.max(1.0);
         let ratio = rate * self.cfg.share_secs;
         self.last_adjust = Instant::now();
@@ -595,7 +601,8 @@ impl Session {
         if (0.6..=1.5).contains(&ratio) {
             return Ok(());
         }
-        let d = self.difficulty * ratio.clamp(0.125, 8.0);
+        // no share at all in the window: the difficulty is far too high for this miner, go down fast
+        let d = self.difficulty * if none { 1.0 / 32.0 } else { ratio.clamp(0.125, 8.0) };
         self.set_difficulty(wr, d).await
     }
 
@@ -643,7 +650,8 @@ async fn stats_task(pool: Arc<Pool>) {
             if s.mode.load(Ordering::Relaxed) == Mode::Pps as u64 {
                 pps_hr += get_f64(&s.hashrate);
             }
-            if now - get_f64(&s.last_seen) < 120.0 {
+            // a connected miner is online even while it hashes without finding a share (CPU miners can take minutes per share)
+            if get_f64(&s.difficulty) > 0.0 {
                 online += 1;
             }
             shares += s.ok.load(Ordering::Relaxed) + s.stale.load(Ordering::Relaxed) + s.dup.load(Ordering::Relaxed) + s.inv.load(Ordering::Relaxed);
@@ -670,7 +678,7 @@ async fn stats_task(pool: Arc<Pool>) {
         {
             let mut now_dev: std::collections::HashMap<String, (String, f64, u64)> = std::collections::HashMap::new();
             for s in &sessions {
-                if now - get_f64(&s.last_seen) >= 120.0 {
+                if get_f64(&s.difficulty) <= 0.0 {
                     continue;
                 }
                 let d = s.device.lock().unwrap();
