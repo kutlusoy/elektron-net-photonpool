@@ -192,7 +192,7 @@ An external static review of the patch (no build, no run) raised the points belo
 
 `step30` is the end-to-end version: a real `photond` with the batch backend on the patched node, Stratum miners in pool mode and in solo mode find blocks, and a second UNPATCHED node accepts every one of them (pool and solo, six blocks in a row, the solo block pays the miner directly).
 
-`step28` tests the budgets, the overflow case, the coinbase size limit, the parallel limit and that the node stays responsive and keeps validating blocks during heavy calls. Not done: sanitizer builds (ASan/UBSan) and a coverage-guided fuzzer; the request decoder is covered by the input tests of `step14` and `step28` only.
+`step28` tests the budgets, the overflow case, the coinbase size limit, the parallel limit and that the node stays responsive and keeps validating blocks during heavy calls. Sanitizer run (November 5, 2026): the patched node was built with `-DSANITIZERS=address,undefined` (RelWithDebInfo, `-O1`, wallet off) and `step14`, `step15` (seeds 1 and 2), `step16` to `step20`, `step22`, `step23`, `step28`, `step29` and `step30` ran against it, with `ASAN_OPTIONS=detect_leaks=0` and the reports written to files: no AddressSanitizer or UndefinedBehaviorSanitizer report. `step23` is a timing check and failed once by a hair under the slow sanitizer build (83 ms against a limit of 83 ms) and passed on the second run. Leak detection was off, and the fuzz-style input tests are random, not coverage guided. Not done: a coverage-guided fuzzer.
 
 ## 7. Security
 
