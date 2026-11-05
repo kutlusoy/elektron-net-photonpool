@@ -19,8 +19,6 @@ body[data-theme="ice"] { --bg: #03060d; --c1: #7cc7ff; --c2: #b9a8ff; --c3: #eaf
 body[data-theme="abyss"] { --bg: #010a0c; --c1: #00ffd5; --c2: #2f7bff; --c3: #b6fff0; --fg: #d3fff8; --dim: #5f9a94; --ok: #5dff9c; --warn: #ffd166; --err: #ff5d7a; }
 body[data-theme="gold"] { --bg: #070604; --c1: #f5c542; --c2: #fff0b0; --c3: #ff8a3d; --fg: #fff3d2; --dim: #a89560; --ok: #b9f27a; --warn: #ff9a3d; --err: #ff5a5a; }
 body[data-theme="candy"] { --bg: #120a1a; --c1: #ff7ac8; --c2: #7ad8ff; --c3: #ffe27a; --fg: #ffe9f6; --dim: #b98fb0; --ok: #8affc1; --warn: #ffc46b; --err: #ff6b8a; }
-body[data-theme="candy"] .window { border-radius: 14px; }
-body[data-theme="candy"] .pane { border-radius: 10px; }
 body[data-theme="toxic"] { --bg: #040702; --c1: #c6ff00; --c2: #ff00e6; --c3: #00ffd0; --fg: #f0ffd0; --dim: #8da05a; --ok: #5dff6a; --warn: #ffb000; --err: #ff3b3b; }
 body[data-theme="crimson"] { --bg: #0b0204; --c1: #ff2a3d; --c2: #ff7a00; --c3: #ffd400; --fg: #ffdcdc; --dim: #a96a6a; --ok: #7dff6a; --warn: #ffd400; --err: #ff2bb0; }
 body[data-theme="matrix"] { --bg: #010802; --c1: #00ff41; --c2: #00b32c; --c3: #b6ff9e; --fg: #b8ffc8; --dim: #2f8a4a; --ok: #00ff41; --warn: #d6ff3d; --err: #ff3b3b; }
@@ -405,3 +403,39 @@ body[data-theme="gold"] .pane h2 span { background: linear-gradient(90deg, #f5c5
 @keyframes goldshine { to { background-position: -220% 0; } }
 body[data-theme="mono"] .pane { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .03); }
 @media (prefers-reduced-motion: reduce) { body[data-theme="crimson"] .fx, body[data-theme="gold"] .pane h2 span { animation: none; } }
+
+/* CANDY: liquid glass. Panes and cards are translucent gummy glass over soft colored light: blurred, saturated backdrop, a bright rim on the top edge, a
+   colored glow at the bottom edge and a specular streak. On Chromium the small elements (cards, tags, player, tooltips) also refract the background through
+   an SVG displacement map (see Themes in common.js); other browsers get the blur-only version. */
+body[data-theme="candy"] { --bg: #0d0716; --panel: rgba(40, 20, 60, .5); }
+body[data-theme="candy"] { background:
+    radial-gradient(520px 420px at 12% 18%, rgba(255, 90, 190, .55), transparent 70%),
+    radial-gradient(560px 460px at 86% 14%, rgba(80, 210, 255, .5), transparent 70%),
+    radial-gradient(600px 480px at 70% 92%, rgba(255, 226, 90, .38), transparent 70%),
+    radial-gradient(480px 420px at 6% 88%, rgba(150, 255, 190, .34), transparent 70%),
+    var(--bg); }
+body[data-theme="candy"] .fx { background: none; mix-blend-mode: normal; }
+body[data-theme="candy"] .window { clip-path: none; border-radius: 22px; border-color: rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .03); }
+body[data-theme="candy"] .titlebar, body[data-theme="candy"] .statusline { background: rgba(255, 255, 255, .06); backdrop-filter: blur(16px) saturate(1.7); -webkit-backdrop-filter: blur(16px) saturate(1.7); }
+body[data-theme="candy"] .pane, body[data-theme="candy"] .card {
+  border: 1px solid rgba(255, 255, 255, .34); border-radius: 18px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .17), rgba(255, 255, 255, .05) 45%, rgba(255, 122, 200, .07));
+  backdrop-filter: blur(14px) saturate(1.8) brightness(1.08); -webkit-backdrop-filter: blur(14px) saturate(1.8) brightness(1.08);
+  box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, .75), inset 0 -14px 26px -12px rgba(255, 122, 200, .32), inset 8px 0 18px -12px rgba(122, 216, 255, .3), 0 14px 34px rgba(0, 0, 0, .38);
+}
+body[data-theme="candy"] .pane::before, body[data-theme="candy"] .pane::after { display: none; }
+/* specular streak across the top of every glass pane */
+body[data-theme="candy"] .pane > h2 { position: relative; border-bottom: 1px solid rgba(255, 255, 255, .18); background: linear-gradient(180deg, rgba(255, 255, 255, .22), transparent); border-radius: 18px 18px 0 0; }
+body[data-theme="candy"] .pane.front { background: linear-gradient(145deg, rgba(60, 30, 85, .92), rgba(40, 20, 60, .9)); backdrop-filter: none; -webkit-backdrop-filter: none; }
+body[data-theme="candy"] .card h3 { background: linear-gradient(90deg, rgba(255, 255, 255, .18), transparent 70%); border-bottom-color: rgba(255, 255, 255, .2); border-radius: 18px 18px 0 0; }
+body[data-theme="candy"] .music, body[data-theme="candy"] .tag, body[data-theme="candy"] .flowtip, body[data-theme="candy"] .rbtn {
+  border-radius: 999px; border-color: rgba(255, 255, 255, .4); background: linear-gradient(145deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, .06));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 6px 16px rgba(0, 0, 0, .3); backdrop-filter: blur(10px) saturate(1.8); -webkit-backdrop-filter: blur(10px) saturate(1.8);
+}
+body[data-theme="candy"] .flowtip { border-radius: 14px; }
+body[data-theme="candy"] .pane h2 span { text-shadow: 0 0 10px rgba(255, 122, 200, .8); }
+body[data-theme="candy"] .prompt { background: rgba(255, 255, 255, .06); border-radius: 0 0 18px 18px; }
+body[data-theme="candy"] .flowbox canvas, body[data-theme="candy"] .chartpane { border-radius: 0 0 18px 18px; }
+/* refraction on small glass elements, Chromium only (the class is set by Themes) */
+body[data-theme="candy"].refract .card, body[data-theme="candy"].refract .music, body[data-theme="candy"].refract .tag, body[data-theme="candy"].refract .flowtip { backdrop-filter: url(#lg) blur(6px) saturate(1.8); }
+@media (prefers-reduced-motion: no-preference) { body[data-theme="candy"] .pane { transition-property: transform, filter, opacity, left, top, width, height, box-shadow, background; } }
