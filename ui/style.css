@@ -19,8 +19,6 @@ body[data-theme="ice"] { --bg: #03060d; --c1: #7cc7ff; --c2: #b9a8ff; --c3: #eaf
 body[data-theme="abyss"] { --bg: #010a0c; --c1: #00ffd5; --c2: #2f7bff; --c3: #b6fff0; --fg: #d3fff8; --dim: #5f9a94; --ok: #5dff9c; --warn: #ffd166; --err: #ff5d7a; }
 body[data-theme="gold"] { --bg: #070604; --c1: #f5c542; --c2: #fff0b0; --c3: #ff8a3d; --fg: #fff3d2; --dim: #a89560; --ok: #b9f27a; --warn: #ff9a3d; --err: #ff5a5a; }
 body[data-theme="candy"] { --bg: #120a1a; --c1: #ff7ac8; --c2: #7ad8ff; --c3: #ffe27a; --fg: #ffe9f6; --dim: #b98fb0; --ok: #8affc1; --warn: #ffc46b; --err: #ff6b8a; }
-body[data-theme="candy"] .window { border-radius: 14px; }
-body[data-theme="candy"] .pane { border-radius: 10px; }
 body[data-theme="toxic"] { --bg: #040702; --c1: #c6ff00; --c2: #ff00e6; --c3: #00ffd0; --fg: #f0ffd0; --dim: #8da05a; --ok: #5dff6a; --warn: #ffb000; --err: #ff3b3b; }
 body[data-theme="crimson"] { --bg: #0b0204; --c1: #ff2a3d; --c2: #ff7a00; --c3: #ffd400; --fg: #ffdcdc; --dim: #a96a6a; --ok: #7dff6a; --warn: #ffd400; --err: #ff2bb0; }
 body[data-theme="matrix"] { --bg: #010802; --c1: #00ff41; --c2: #00b32c; --c3: #b6ff9e; --fg: #b8ffc8; --dim: #2f8a4a; --ok: #00ff41; --warn: #d6ff3d; --err: #ff3b3b; }
@@ -405,3 +403,56 @@ body[data-theme="gold"] .pane h2 span { background: linear-gradient(90deg, #f5c5
 @keyframes goldshine { to { background-position: -220% 0; } }
 body[data-theme="mono"] .pane { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .03); }
 @media (prefers-reduced-motion: reduce) { body[data-theme="crimson"] .fx, body[data-theme="gold"] .pane h2 span { animation: none; } }
+
+/* CANDY: jelly glass. Every pane is a gummy: clear, strongly tinted in its own candy color, lit from inside, with a thick glossy highlight on the top left,
+   a bright rim and a soft colored shadow, and it wobbles a little when touched. The backdrop is only lightly blurred, so the colored light behind shows through
+   instead of turning cloudy. On Chromium the small elements also refract the background (SVG displacement, see Themes in common.js). */
+body[data-theme="candy"] { --bg: #0c0616; --panel: rgba(40, 20, 60, .5); }
+body[data-theme="candy"] { background:
+    radial-gradient(560px 460px at 10% 16%, rgba(255, 70, 180, .62), transparent 70%),
+    radial-gradient(600px 500px at 88% 12%, rgba(60, 200, 255, .58), transparent 70%),
+    radial-gradient(640px 520px at 72% 94%, rgba(255, 222, 60, .46), transparent 70%),
+    radial-gradient(520px 460px at 4% 90%, rgba(120, 255, 170, .42), transparent 70%),
+    radial-gradient(460px 400px at 46% 50%, rgba(170, 110, 255, .3), transparent 70%),
+    var(--bg); }
+body[data-theme="candy"] .fx { background: none; mix-blend-mode: normal; }
+body[data-theme="candy"] .window { clip-path: none; border-radius: 26px; border-color: rgba(255, 255, 255, .25); background: transparent; }
+body[data-theme="candy"] .titlebar, body[data-theme="candy"] .statusline { background: rgba(255, 255, 255, .08); backdrop-filter: blur(8px) saturate(1.8); -webkit-backdrop-filter: blur(8px) saturate(1.8); }
+/* a candy color per pane */
+body[data-theme="candy"] .pane, body[data-theme="candy"] .card { --jc: 255, 90, 190; }
+body[data-theme="candy"] .pane:nth-child(5n+2), body[data-theme="candy"] .card:nth-child(5n+2) { --jc: 60, 205, 255; }
+body[data-theme="candy"] .pane:nth-child(5n+3), body[data-theme="candy"] .card:nth-child(5n+3) { --jc: 255, 214, 60; }
+body[data-theme="candy"] .pane:nth-child(5n+4), body[data-theme="candy"] .card:nth-child(5n+4) { --jc: 110, 255, 170; }
+body[data-theme="candy"] .pane:nth-child(5n+5), body[data-theme="candy"] .card:nth-child(5n+5) { --jc: 175, 120, 255; }
+body[data-theme="candy"] .pane, body[data-theme="candy"] .card {
+  border: 1.5px solid rgba(255, 255, 255, .55); border-radius: 26px; overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 25% 0%, rgba(var(--jc), .5), rgba(var(--jc), .16) 55%, rgba(var(--jc), .1) 100%),
+    linear-gradient(160deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, 0) 40%);
+  backdrop-filter: blur(5px) saturate(1.9) brightness(1.15); -webkit-backdrop-filter: blur(5px) saturate(1.9) brightness(1.15);
+  box-shadow: inset 0 3px 2px rgba(255, 255, 255, .75), inset 0 -22px 30px -10px rgba(var(--jc), .75), inset 0 0 0 1px rgba(var(--jc), .35), 0 18px 34px -10px rgba(var(--jc), .55), 0 4px 14px rgba(0, 0, 0, .3);
+}
+/* the glossy highlight: a bent white streak and a small bright dot on the top left (replaces the corner marks) */
+body[data-theme="candy"] .pane::before { display: block; left: 5%; top: 3px; width: 46%; height: 22px; border: 0; border-radius: 50%; background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, 0)); filter: blur(.5px); opacity: .85; z-index: 1; }
+body[data-theme="candy"] .pane::after { display: block; right: auto; bottom: auto; left: 2.4%; top: 11px; width: 9px; height: 9px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .95); box-shadow: 0 0 8px rgba(255, 255, 255, .9); z-index: 1; }
+body[data-theme="candy"] .pane > h2 { border-bottom: 1px solid rgba(255, 255, 255, .22); background: transparent; border-radius: 26px 26px 0 0; padding-left: 38px; position: relative; z-index: 2; }
+body[data-theme="candy"] .pane h2, body[data-theme="candy"] .card h3 { color: #fff; text-shadow: 0 1px 6px rgba(var(--jc), .9), 0 0 2px rgba(0, 0, 0, .5); }
+body[data-theme="candy"] .card h3 { background: linear-gradient(90deg, rgba(255, 255, 255, .22), transparent 70%); border-bottom-color: rgba(255, 255, 255, .25); border-radius: 26px 26px 0 0; padding-left: 18px; }
+body[data-theme="candy"] .pane pre, body[data-theme="candy"] .tty, body[data-theme="candy"] .chartpane, body[data-theme="candy"] .cbody { text-shadow: 0 1px 3px rgba(20, 5, 40, .75); }
+body[data-theme="candy"] .dim, body[data-theme="candy"] .row-h { color: rgba(255, 240, 250, .78); }
+/* maximized: still a jelly, but denser so that charts stay readable */
+body[data-theme="candy"] .pane.front { background: radial-gradient(120% 90% at 25% 0%, rgba(var(--jc), .42), rgba(34, 18, 54, .93) 60%), rgba(34, 18, 54, .93); backdrop-filter: none; -webkit-backdrop-filter: none; }
+body[data-theme="candy"] .music, body[data-theme="candy"] .tag, body[data-theme="candy"] .flowtip, body[data-theme="candy"] .rbtn {
+  border-radius: 999px; border: 1.5px solid rgba(255, 255, 255, .6); background: radial-gradient(120% 140% at 30% 0%, rgba(255, 255, 255, .45), rgba(255, 122, 200, .22));
+  box-shadow: inset 0 2px 1px rgba(255, 255, 255, .8), inset 0 -6px 10px -4px rgba(255, 122, 200, .6), 0 6px 14px rgba(0, 0, 0, .25); backdrop-filter: blur(4px) saturate(1.9); -webkit-backdrop-filter: blur(4px) saturate(1.9);
+}
+body[data-theme="candy"] .flowtip { border-radius: 18px; background: rgba(40, 18, 62, .88); }
+body[data-theme="candy"] .prompt { background: rgba(255, 255, 255, .1); border-radius: 0 0 26px 26px; }
+body[data-theme="candy"] .flowbox canvas, body[data-theme="candy"] .chartpane { border-radius: 0 0 26px 26px; }
+/* jelly wobble when the pointer enters a pane (once, ~0.9 s) */
+@media (prefers-reduced-motion: no-preference) {
+  body[data-theme="candy"] .pane:not(.front):hover { animation: jelly .9s ease-out; }
+  @keyframes jelly { 0% { transform: scale(1, 1); } 20% { transform: scale(1.012, .985); } 40% { transform: scale(.992, 1.01); } 60% { transform: scale(1.005, .997); } 100% { transform: scale(1, 1); } }
+}
+/* refraction on small glass elements, Chromium only (the class is set by Themes) */
+body[data-theme="candy"].refract .card, body[data-theme="candy"].refract .music, body[data-theme="candy"].refract .tag, body[data-theme="candy"].refract .flowtip { backdrop-filter: url(#lg) blur(6px) saturate(1.8); }

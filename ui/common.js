@@ -98,12 +98,36 @@ const THEMES = [
   { id: 'mono', name: 'GHOST', mood: 'monochrome, one red wire', sw: ['#f2f2f2', '#ff3b3b', '#9aa0a6'] },
   { id: 'green', name: 'FOREST', mood: 'green with cyan', sw: ['#39ff88', '#00e5ff', '#d6ff3d'] },
 ];
+// Liquid glass refraction (idea: kube.io/blog/liquid-glass-css-svg): a displacement map for a rounded rectangle is drawn once (the pixels at the edge are pushed
+// inward like light through a convex bezel, the middle stays flat), stretched over any element and applied with an SVG feDisplacementMap as backdrop-filter.
+// Only Chromium accepts an SVG filter in backdrop-filter, other browsers keep the blur-only glass (no class is set there).
+function glass() {
+  if (document.getElementById('lgsvg') || !/Chrome\//.test(navigator.userAgent) ) return; // every Chromium browser (Chrome, Edge, Opera, Brave) has Chrome/ in its agent
+  const N = 128, cv = document.createElement('canvas'); cv.width = cv.height = N;
+  const g = cv.getContext('2d'), img = g.createImageData(N, N), R = 30, BEZ = 22; // corner radius and bezel width in map pixels
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const cx = Math.min(Math.max(x, R), N - 1 - R), cy = Math.min(Math.max(y, R), N - 1 - R), dx = x - cx, dy = y - cy;
+    const d = Math.hypot(dx, dy) - R;
+    const edge = Math.min(x, y, N - 1 - x, N - 1 - y), dist = d > 0 ? 0 : (Math.hypot(dx, dy) > 0 && (x < R || x > N - 1 - R) && (y < R || y > N - 1 - R) ? R - Math.hypot(dx, dy) : edge);
+    const t = Math.max(0, 1 - dist / BEZ), mag = Math.pow(t, 2.2); // strongest at the very edge (convex profile)
+    let nx = 0, ny = 0; const len = Math.hypot(dx, dy);
+    if (len > 0.001 && (x < R || x > N - 1 - R) && (y < R || y > N - 1 - R)) { nx = dx / len; ny = dy / len; }
+    else { const m = Math.min(x, y, N - 1 - x, N - 1 - y); if (m === x) nx = -1; else if (m === N - 1 - x) nx = 1; else if (m === y) ny = -1; else ny = 1; }
+    const i = (y * N + x) * 4;
+    img.data[i] = 128 - nx * mag * 127; img.data[i + 1] = 128 - ny * mag * 127; img.data[i + 2] = 128; img.data[i + 3] = 255; // rays bend toward the middle
+  }
+  g.putImageData(img, 0, 0);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.id = 'lgsvg'; svg.setAttribute('width', '0'); svg.setAttribute('height', '0'); svg.style.position = 'absolute'; svg.setAttribute('color-interpolation-filters', 'sRGB');
+  svg.innerHTML = `<filter id="lg" x="0" y="0" width="100%" height="100%"><feImage href="${cv.toDataURL()}" x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="26" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+  document.body.append(svg); document.body.classList.add('refract');
+}
 const Themes = (() => {
   // Themes are chosen in the terminal (`theme <name>`, `theme` lists them). The default is always cyan: nothing is stored, the choice lasts until the page is reloaded.
   const has = (id) => THEMES.some((t) => t.id === id);
   function set(id) {
     if (!has(id)) return false;
     document.body.dataset.theme = id;
+    if (id === 'candy') glass(); // the refraction map is only built when candy is chosen
     document.dispatchEvent(new Event('themechange'));
     return true;
   }
