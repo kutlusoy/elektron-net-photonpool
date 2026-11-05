@@ -1,5 +1,17 @@
+diff --git a/src/rpc/client.cpp b/src/rpc/client.cpp
+index 8d3e551..b9318d4 100644
+--- a/src/rpc/client.cpp
++++ b/src/rpc/client.cpp
+@@ -108,6 +108,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
+     { "walletpassphrase", 0, "passphrase", ParamFormat::STRING },
+     { "walletpassphrase", 1, "timeout" },
+     { "getblocktemplate", 0, "template_request" },
++    { "getattestationbatch", 0, "request" },
+     { "listsinceblock", 0, "blockhash", ParamFormat::STRING },
+     { "listsinceblock", 1, "target_confirmations" },
+     { "listsinceblock", 2, "include_watchonly" },
 diff --git a/src/rpc/mining.cpp b/src/rpc/mining.cpp
-index b6fbf12..1906874 100644
+index b6fbf12..888bf7a 100644
 --- a/src/rpc/mining.cpp
 +++ b/src/rpc/mining.cpp
 @@ -21,6 +21,8 @@
@@ -11,17 +23,17 @@ index b6fbf12..1906874 100644
  #include <net.h>
  #include <node/context.h>
  #include <node/miner.h>
-@@ -1201,6 +1203,243 @@ static RPCMethod submitheader()
+@@ -1201,6 +1203,239 @@ static RPCMethod submitheader()
      };
  }
  
 +
-+//! Photon patch: attestations for many coinbase variants of one block candidate in a single call.
++//! Attestations for many coinbase variants of one block template in a single call (mining pools).
 +static RPCMethod getattestationbatch()
 +{
 +    return RPCMethod{
 +        "getattestationbatch",
-+        "Photon patch (not part of upstream consensus): builds one block template for the current tip and returns, for every requested\n"
++        "Builds one block template for the current tip and returns, for every requested\n"
 +        "coinbase variant, the UTXO attestation the node would require, plus the finished coinbase. All variants share the same tip and\n"
 +        "transaction selection; only the coinbase differs. Attestation is computed with the consensus code of the node and only from\n"
 +        "the MuHash activation height on. The result of a variant must be validated like any block, getblocktemplate proposal mode\n"
@@ -46,7 +58,7 @@ index b6fbf12..1906874 100644
 +        RPCExamples{HelpExampleCli("getattestationbatch", "'{\"candidates\":[{\"outputs\":[{\"scriptPubKey\":\"0014...\"}]}]}'")},
 +        [](const RPCMethod& self, const JSONRPCRequest& request) -> UniValue
 +{
-+    // Photon patch hardening: at most two of these (CPU heavy) calls at a time, further ones fail at once instead of queueing behind cs_main.
++    // At most two calls at a time; further ones fail at once instead of queueing behind cs_main.
 +    static std::atomic<int> g_batch_running{0};
 +    struct BatchSlot {
 +        explicit BatchSlot(std::atomic<int>& c) : m_c{c} { if (m_c.fetch_add(1) >= 2) { m_c.fetch_sub(1); throw JSONRPCError(RPC_MISC_ERROR, "getattestationbatch is busy, try again"); } }
@@ -63,7 +75,7 @@ index b6fbf12..1906874 100644
 +    if (!cands.isArray()) throw JSONRPCError(RPC_INVALID_PARAMETER, "candidates must be an array");
 +    constexpr size_t MAX_BATCH{4096};
 +    constexpr size_t MAX_OUTPUTS{1000};
-+    // Budgets over the whole request (the per-candidate limits alone allow millions of outputs): the CPU cost is per output (MuHash), the memory per script byte.
++    // Budgets over the whole request: the cost is per output (MuHash), the memory per script byte.
 +    constexpr size_t MAX_TOTAL_OUTPUTS{400000};
 +    constexpr size_t MAX_TOTAL_SCRIPT_BYTES{8 * 1024 * 1024};
 +    size_t total_outputs{0}, total_script_bytes{0};
@@ -117,9 +129,7 @@ index b6fbf12..1906874 100644
 +        parsed.push_back(std::move(pc));
 +    }
 +
-+    // Everything that needs the chainstate (template, tip, attestation base state) is taken under cs_main as one consistent snapshot; the per-candidate
-+    // work below (coinbase assembly, MuHash of the outputs, hex encoding) needs only copies and runs without the lock, so a large request cannot stall
-+    // block validation.
++    // The chainstate snapshot (template, tip, attestation base state) is taken under cs_main; the per-candidate work below runs on copies without the lock.
 +    const Consensus::Params& params = chainman.GetParams().GetConsensus();
 +    int nHeight{0};
 +    int64_t min_time{0};
@@ -138,9 +148,8 @@ index b6fbf12..1906874 100644
 +        if (!IsMuhashAttestationActive(nHeight, params)) throw JSONRPCError(RPC_MISC_ERROR, "unsupported-height: batch attestation needs the MuHash attestation");
 +        if (chainman.IsInitialBlockDownload()) throw JSONRPCError(RPC_CLIENT_IN_INITIAL_DOWNLOAD, "node is still syncing");
 +
-+        // The template must leave room for the largest coinbase of this request, otherwise a full block plus a coinbase with many outputs
-+        // would exceed the block weight limit. Upper bound of the weight of a candidate's coinbase: non-witness bytes at 4 WU, plus the
-+        // witness (marker, flag, reserved value) and a margin for the attestation and witness commitment outputs.
++        // Reserve room in the template for the largest coinbase of this request (upper bound: non-witness bytes at 4 WU plus witness and a margin for the
++        // attestation and witness commitment outputs).
 +        size_t max_coinbase_weight{0};
 +        for (const Cand& pc : parsed) {
 +            size_t bytes{4 + 1 + 32 + 4 + 1 + 100 + 4 + 3 + 4 + (8 + 1 + 40) + (8 + 1 + 38)};
@@ -148,7 +157,6 @@ index b6fbf12..1906874 100644
 +            for (const Out& o : pc.tail) bytes += 8 + 3 + o.script.size();
 +            max_coinbase_weight = std::max(max_coinbase_weight, bytes * 4 + 40);
 +        }
-+        // A coinbase that needs more than half of the block is refused (it used to be clamped silently, which could produce an overweight block).
 +        if (max_coinbase_weight + 400 > MAX_BLOCK_WEIGHT / 2) throw JSONRPCError(RPC_INVALID_PARAMETER, "a coinbase would use more than half of the block weight");
 +        const size_t reserved_weight{std::clamp<size_t>(std::max<size_t>(DEFAULT_BLOCK_RESERVED_WEIGHT, max_coinbase_weight + 400), MINIMUM_BLOCK_RESERVED_WEIGHT, MAX_BLOCK_WEIGHT / 2)};
 +        std::unique_ptr<BlockTemplate> tmpl{miner.createNewBlock({.block_reserved_weight = reserved_weight, .coinbase_output_script = CScript() << OP_TRUE, .include_dummy_extranonce = true}, /*cooldown=*/false)};
@@ -187,7 +195,7 @@ index b6fbf12..1906874 100644
 +        if (sig.size() < 2 || sig.size() > 100) throw JSONRPCError(RPC_INVALID_PARAMETER, "coinbase scriptSig must be 2 to 100 bytes");
 +        cb.vin[0].scriptSig = sig;
 +
-+        // Overflow-safe: every value is in 0..MAX_MONEY and reward >= 0, and the check happens before the addition.
++        // Checked before the addition, so the sum cannot overflow.
 +        CAmount fixed{0};
 +        auto add_value = [&](CAmount value) {
 +            if (value < 0 || fixed > reward || value > reward - fixed) throw JSONRPCError(RPC_INVALID_PARAMETER, "outputs exceed the block reward of the template");
@@ -255,7 +263,7 @@ index b6fbf12..1906874 100644
  void RegisterMiningRPCCommands(CRPCTable& t)
  {
      static const CRPCCommand commands[]{
-@@ -1209,6 +1448,7 @@ void RegisterMiningRPCCommands(CRPCTable& t)
+@@ -1209,6 +1444,7 @@ void RegisterMiningRPCCommands(CRPCTable& t)
          {"mining", &prioritisetransaction},
          {"mining", &getprioritisedtransactions},
          {"mining", &getblocktemplate},
@@ -311,20 +319,20 @@ index ffb9ee1..6c7ee14 100644
  {
      for (const CTxOut& out : coinbase.vout) {
 diff --git a/src/validation.h b/src/validation.h
-index 208cffc..616b032 100644
+index 208cffc..25a1f35 100644
 --- a/src/validation.h
 +++ b/src/validation.h
 @@ -136,6 +136,15 @@ inline bool IsIntraBlockAttestationFixActive(int nHeight, const Consensus::Param
   *         instead of a full rescan of the UTXO set. */
  std::optional<uint256> ComputeBlockUTXOAttestationHash(const CBlock& block, int nHeight, CCoinsView& base_view, node::BlockManager& blockman,
                                                           const Consensus::Params& params, const kernel::UTXOMuHashState* tip_muhash);
-+/** Photon patch: attestation base state of a block candidate: the tip's MuHash accumulator with
++/** attestation base state of a block candidate: the tip's MuHash accumulator with
 + *  all non-coinbase transactions of `block` applied (same rules as the incremental path of
 + *  ComputeBlockUTXOAttestationHash, including the intra-block fix gate). Returns std::nullopt before
 + *  the MuHash activation height or if an input cannot be resolved. Existing code paths are unchanged. */
 +std::optional<kernel::UTXOMuHashState> ComputeAttestationBaseState(const CBlock& block, int nHeight, CCoinsView& base_view,
 +                                                                   const Consensus::Params& params, const kernel::UTXOMuHashState& tip_muhash);
-+/** Photon patch: attestation of one coinbase variant on top of a base state. `stripped_coinbase` must not
++/** attestation of one coinbase variant on top of a base state. `stripped_coinbase` must not
 + *  contain the attestation output. Equals ComputeBlockUTXOAttestationHash() for the full block. */
 +uint256 AttestationForCoinbase(const kernel::UTXOMuHashState& base, const CTransaction& stripped_coinbase, int nHeight);
  /** Parse OP_RETURN UTXO attestation from a coinbase at the expected height. */

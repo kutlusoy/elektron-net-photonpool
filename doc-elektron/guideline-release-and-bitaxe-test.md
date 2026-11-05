@@ -10,7 +10,7 @@
 
 ## 1. What this release contains
 
-Release candidate `0.2.0-rc1`: Stratum V1 pool with solo, PPLNS and PPS, ledger, payouts (dry-run by default), public and miner pages, operator UI. The Photon protocol modules exist in `src/photon/` but are **not part of the running daemon yet**; a Bitaxe uses plain Stratum V1. The node patch (`getattestationbatch`) is **off by default**: one miner needs no batch RPC, and the patch is still in review.
+Release candidate `0.2.0-rc1`: Stratum V1 pool with solo, PPLNS and PPS, ledger, payouts (dry-run by default), public and miner pages, operator UI. The Photon protocol modules exist in `src/photon/` but are **not part of the running daemon yet**; a Bitaxe uses plain Stratum V1. The node RPC `getattestationbatch` (branch `photonpool` of `elektron-net`) is used by the Docker setups; one miner needs no batch RPC, and the code is still in review.
 
 ## 2. Why a Bitaxe can work with this pool
 
@@ -70,7 +70,7 @@ Firmware version, pool settings, the first 30 lines of the Bitaxe log after conn
 ## 8. Known limits of this release
 
 - No ASIC test before this one; Stratum V2 is not implemented.
-- The batch RPC patch is opt-in; the differential test passes but the review is not finished. For pools with more than a handful of payout addresses build the node with `NODE_PATCHES=true` after the review.
+- The batch RPC is in the node branch `photonpool`; the differential tests and the sanitizer run pass, but the independent review is not finished. A pool with only a few payout addresses can use `pool.backend = "gbt"`.
 - Docker images are not built in CI; the first image build happens on your server.
 - Mainnet-scale benchmarks are missing (a regtest simulation of 11,000 transactions per block and 10,000 miners is documented in [`guideline-daemon-core.md`](./guideline-daemon-core.md)).
 

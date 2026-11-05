@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Batch Attestation RPC Guideline
 
-- **Version:** 0.2 (draft; implemented as a node patch and tested, see section 3.5)
+- **Version:** 0.3 (draft; implemented in the node branch `photonpool` and tested, see section 3.5)
 - **Date:** November 3, 2026
 - **Audience:** Node developers, pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ValidateUTXOCheckpoint`), `src/kernel/utxo_muhash.h`, `src/crypto/muhash.cpp`, `src/interfaces/mining.h`, `src/node/miner.cpp`, `src/node/types.h`, `src/rpc/mining.cpp` - treat as ground truth for anything the doc references
@@ -98,21 +98,17 @@ vout[2]   witness commitment      (shared)
 vout[3..] extra_outputs, verbatim, last
 ```
 
-### 3.5 As built: the `photonpool` branch of the node (and the patch file)
+### 3.5 As built: the `photonpool` branch of the node
 
-The RPC is part of the branch `photonpool` of `elektron-net` (commits "rpc: add getattestationbatch for mining pools" and the test and guideline commit, see `doc-elektron/guideline-attestation-batch-rpc.md` there). It is always available and does no work unless it is called; the Docker setups of this repository build the node from that branch (`ELEKTRON_REF=photonpool`). When the code is merged to `main`, change `ELEKTRON_REF` back to `main`. `docker/node/patches/0001-photon-getattestationbatch.patch` is the same code and is kept for the tests of the patch file (`check_patch_scope.py`); it does not apply to the `photonpool` branch.
+The RPC is part of the branch `photonpool` of `elektron-net` (see `doc-elektron/guideline-attestation-batch-rpc.md` there and the functional test `test/functional/rpc_getattestationbatch.py`). It is always available and does no work unless it is called. The Docker setups of this repository build the node from that branch (`ELEKTRON_REF=photonpool`); when the code is merged to `main`, change `ELEKTRON_REF` back to `main`. `test/photonpool-node.patch` is the diff of the source changes of that branch against `main`; `test/check_patch_scope.py` checks on it that only lines are added and that no consensus code is touched.
 
-The text below describes the implementation.
-
-
-
-The interface exists as a patch that is applied when the node image is built (`docker/node/patches/0001-photon-getattestationbatch.patch`, `PHOTON_NODE_PATCHES=false` by default until the review is complete, set it to `true` to build the patched node; `NODE_PATCHES` in the stack). It adds three functions and one RPC and changes no existing code path of the node:
+The change adds three functions and one RPC and changes no existing code path of the node:
 
 - `ComputeAttestationBaseState` (`validation.cpp`): the tip's MuHash accumulator with all non-coinbase transactions applied, with the same rules as the incremental path of `ComputeBlockUTXOAttestationHash`, including the intra-block fix gate.
 - `AttestationForCoinbase`: the attestation of one stripped coinbase on top of that base state.
 - RPC `getattestationbatch` (`rpc/mining.cpp`, category `mining`): one block template per call, one attestation per requested coinbase variant.
 
-The patch was developed against a copy of the node source, applies cleanly to `elektron-net` at `596278b` and leaves that repository untouched.
+The change applies cleanly to `elektron-net` at `596278b` (the base of the branch).
 
 Request (JSON-RPC): `{"candidates": [ {"outputs": [{"scriptPubKey": hex, "value": leptons?}], "tail_outputs": [{"scriptPubKey": hex, "value": leptons?}], "script_sig_suffix": hex?} ]}` with 1 to 4096 candidates.
 
@@ -198,7 +194,7 @@ An external static review of the patch (no build, no run) raised the points belo
 
 `step30` is the end-to-end version: a real `photond` with the batch backend on the patched node, Stratum miners in pool mode and in solo mode find blocks, and a second UNPATCHED node accepts every one of them (pool and solo, six blocks in a row, the solo block pays the miner directly).
 
-`step28` tests the budgets, the overflow case, the coinbase size limit, the parallel limit and that the node stays responsive and keeps validating blocks during heavy calls. Sanitizer run (November 5, 2026): the patched node was built with `-DSANITIZERS=address,undefined` (RelWithDebInfo, `-O1`, wallet off) and `step14`, `step15` (seeds 1 and 2), `step16` to `step20`, `step22`, `step23`, `step28`, `step29` and `step30` ran against it, with `ASAN_OPTIONS=detect_leaks=0` and the reports written to files: no AddressSanitizer or UndefinedBehaviorSanitizer report. `step23` is a timing check and failed once by a hair under the slow sanitizer build (83 ms against a limit of 83 ms) and passed on the second run. Leak detection was off, and the fuzz-style input tests are random, not coverage guided. Not done: a coverage-guided fuzzer.
+`step28` tests the budgets, the overflow case, the coinbase size limit, the parallel limit and that the node stays responsive and keeps validating blocks during heavy calls. Sanitizer run (November 5, 2026, repeated on the final branch code): the node was built with `-DSANITIZERS=address,undefined` (RelWithDebInfo, `-O1`, wallet off) and `step14`, `step15` (seeds 1 and 2), `step16` to `step20`, `step22`, `step23`, `step28`, `step29` and `step30` ran against it, with `ASAN_OPTIONS=detect_leaks=0` and the reports written to files: no AddressSanitizer or UndefinedBehaviorSanitizer report. After the option was removed, `step28`, `step29`, `step30` and the functional test `rpc_getattestationbatch.py` of the node repository were run again on a fresh sanitizer build: no report. `step23` is a timing check and failed once by a hair under the slow sanitizer build (83 ms against a limit of 83 ms) and passed on the second run. Leak detection was off, and the fuzz-style input tests are random, not coverage guided. Not done: a coverage-guided fuzzer.
 
 ## 7. Security
 

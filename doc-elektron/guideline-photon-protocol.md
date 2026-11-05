@@ -127,12 +127,12 @@ Sizes (60-second blocks, 525,600 blocks per year, pruning window 197,280 blocks 
 
 ### 6.3 Capacity: what limits the number of outputs
 
-Measured or read from the sources, 60-second blocks, regtest node with the Photon patch:
+Measured or read from the sources, 60-second blocks, regtest node with the `getattestationbatch` RPC:
 
 | Limit | Value | What was done |
 |---|---|---|
 | ESP-Miner line size | 16,384 bytes per Stratum line; a job with 200 outputs is about 13 KB, with 1 output about 0.7 KB | `N_max` default 200; the gateway warns when a job exceeds 16,000 bytes |
-| Block weight reserved for the coinbase | the node reserves 8,000 weight units by default; a coinbase with 128 outputs weighs 16.5 k, with 200 outputs 25.4 k. On a full block this would exceed the block limit | **fixed in the node patch**: `getattestationbatch` reserves room for the largest coinbase of the request (`test/step22_coinbase_weight.py`: blocks of 324, 288 and 255 transactions for 1, 128 and 200 outputs, 92.8 k, 98.3 k and 97.9 k of a 100 k limit) |
+| Block weight reserved for the coinbase | the node reserves 8,000 weight units by default; a coinbase with 128 outputs weighs 16.5 k, with 200 outputs 25.4 k. On a full block this would exceed the block limit | **fixed in the node RPC**: `getattestationbatch` reserves room for the largest coinbase of the request (`test/step22_coinbase_weight.py`: blocks of 324, 288 and 255 transactions for 1, 128 and 200 outputs, 92.8 k, 98.3 k and 97.9 k of a 100 k limit) |
 | Attestation time per candidate | 0.21 ms with 1 output, 2.2 ms with 128, 7.2 ms with 512 (about 0.014 ms per output) | a farm needing 100 variants spends about 0.34 s of node time per tip at 200 outputs |
 | RPC request size | one candidate with 128 outputs is about 19 KB of JSON; the node accepts 32 MB per request (about 1,500 variants) | `attest_all` splits larger requests |
 | Wire frames | plan with 200 outputs about 6 KB, an announced coinbase 6.4 KB, announces are cut at 48 KB (7 variants) | within the 64 KB frame limit |
@@ -166,7 +166,7 @@ If every miner consolidates about as fast as payouts arrive, the set does not gr
 
 **What the plan does to the number of outputs.** Payouts to the same script are separate outputs (one per block and script), so one address per farm creates far fewer outputs than one address per machine, and a farm with several addresses (several channels of a gateway) creates one set of outputs per address. For credits beyond `N_max` the turn-taking of 6.1 pays a small miner one output per cycle instead of one per block: with 22 groups that is 22 times fewer outputs for the same sum.
 
-**Cost of a large set.** Every node has to keep the set (chainstate on disk and the cache in memory); a rough figure is on the order of 100 bytes per entry, which would put the worst case at around 10 GB of additional chainstate per year if nothing were ever spent (an estimate, not measured). The attestation is an incremental accumulator over the set, so each block costs time in proportion to the outputs it creates and spends, not to the size of the set. This was **measured at the node** (`test/step23_attestation_scaling.py`, regtest, node with the Photon patch, medians of 5 blocks of 200 transactions that each spend one output and create two):
+**Cost of a large set.** Every node has to keep the set (chainstate on disk and the cache in memory); a rough figure is on the order of 100 bytes per entry, which would put the worst case at around 10 GB of additional chainstate per year if nothing were ever spent (an estimate, not measured). The attestation is an incremental accumulator over the set, so each block costs time in proportion to the outputs it creates and spends, not to the size of the set. This was **measured at the node** (`test/step23_attestation_scaling.py`, regtest, node with the `getattestationbatch` RPC, medians of 5 blocks of 200 transactions that each spend one output and create two):
 
 | Outputs in the set | `getattestationbatch` (template and attestation) | `submitblock` (validation including the attestation) | `gettxoutsetinfo muhash` (a full pass over the set) |
 |---|---|---|---|
@@ -279,7 +279,7 @@ Limits of this comparison: the sources are secondary (press, blogs, forum thread
 
 ## 14. Implementation plan in this repository
 
-1. **Node patch** (`docker/node/patches/`): `getattestationbatch` with `outputs`, `tail_outputs` and `script_sig_suffix` per candidate, applied when the node image is built. It does not change consensus code paths. Done and tested against the Python oracle, including the multi-output coinbase with commitment and extranonce of this protocol.
+1. **Node RPC** (branch `photonpool` of `elektron-net`): `getattestationbatch` with `outputs`, `tail_outputs` and `script_sig_suffix` per candidate, built into the node. It does not change consensus code paths. Done and tested against the Python oracle, including the multi-output coinbase with commitment and extranonce of this protocol.
 2. **`photond` batch backend**: done (`pool.backend = auto`), replaces the one-`getblocktemplate`-call-per-address bootstrap backend.
 3. **`src/photon/`**: frame codec and Noise session, message types, channel state, plan derivation and Merkle commitment, share verifier with spot checks.
 4. **Gateway** (`photon-gateway` binary): local node client, variant generation, local Stratum V1 server reusing `stratum.rs`, Photon client.
@@ -394,7 +394,7 @@ What this does not settle: the behaviour of other firmware and of larger ASICs (
 
 ## 15. Checklist
 
-- [x] Batch attestation RPC as a node patch, equivalence against the oracle.
+- [x] Batch attestation RPC in the node (branch `photonpool`), equivalence against the oracle.
 - [x] Coinbase with plan-style outputs, commitment and extranonce accepted by an unmodified validating node on regtest (`test/step14_batch_attestation.py`).
 - [x] Message definitions and first test vectors frozen (`msg.rs`, `merkle.rs`).
 - [x] Plan derivation specified and implemented deterministically (rules v1).

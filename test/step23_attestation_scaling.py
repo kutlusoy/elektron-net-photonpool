@@ -1,7 +1,7 @@
 """Does the attestation cost depend on the size of the UTXO set, or only on what a block creates and spends?
 
 The claim (protocol guideline 7.2): the node keeps the attestation as an incremental accumulator, so a block costs time in proportion to the outputs
-it creates and spends, not to the size of the set. Measured on regtest with the node that has the Photon patch:
+it creates and spends, not to the size of the set. Measured on regtest with the node that has the getattestationbatch RPC:
   1. the set grows from about 2,000 to about 72,000 outputs; a block of the same shape is built and submitted at each size
   2. at the largest size, blocks of 50, 200 and 800 transactions are submitted
   3. for contrast, `gettxoutsetinfo muhash` (a full pass over the set) is timed at each size

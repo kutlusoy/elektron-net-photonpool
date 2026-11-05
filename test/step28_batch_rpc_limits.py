@@ -2,9 +2,9 @@ import os, sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import json, threading, time
 from photon_testlib import *
 
-# Hardening of getattestationbatch (review of the node patch): totals over the whole request are budgeted, values are summed overflow-safe, a coinbase of more
+# Hardening of getattestationbatch (review of the node RPC): totals over the whole request are budgeted, values are summed overflow-safe, a coinbase of more
 # than half a block is refused, a third parallel call is refused at once, and the node keeps validating blocks while a heavy request is being answered.
-# Needs an elektrond built with the Photon node patch (ELEKTROND_BATCH).
+# Needs an elektrond of the branch photonpool of elektron-net (ELEKTROND_BATCH).
 
 def refused(n, req, needle):
     try: n.rpc("getattestationbatch", req)

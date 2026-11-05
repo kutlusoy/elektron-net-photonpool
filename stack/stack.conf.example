@@ -24,10 +24,6 @@ ELEKTRON_REPO=https://github.com/kutlusoy/elektron-net.git
 # Options: letters, digits and . _ / - (a branch such as main, a tag, or a commit). Default photonpool: that branch of elektron-net contains the
 # getattestationbatch RPC (switch to main once it is merged there).
 ELEKTRON_REF=photonpool
-# Apply the patch file docker/node/patches to the node source. Not needed with the default ELEKTRON_REF=photonpool, that branch already contains the
-# getattestationbatch RPC (the stack enables it in the node configuration). Only for building another ref that lacks the RPC; the patch must apply to it.
-# Options: true | false (default false).
-NODE_PATCHES=false
 
 # --- Pool wallet (on the node) ---
 # Options: letters, digits, - and _. Default pool.

@@ -5,7 +5,7 @@ from segwit_addr import encode_segwit_address
 from stratum_testlib import *
 
 # End to end: blocks mined through the real pool (photond with the batch backend against a PATCHED node, Stratum miners in pool mode and in solo mode) are
-# accepted by a second, UNPATCHED node. The node patch must never be needed to validate what the pool produces.
+# accepted by a second, UNPATCHED node. The node RPC must never be needed to validate what the pool produces (the second node is a node without it).
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PHOTOND = os.environ.get("PHOTOND", os.path.join(ROOT, "target", "release", "photond"))
 UNPATCHED = os.environ.get("UNPATCHED", "elektrond")

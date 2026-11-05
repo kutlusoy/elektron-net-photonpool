@@ -26,7 +26,7 @@ payout_addresses = [
 refresh_secs = 20
 # Options: whole number of candidates validated per epoch, 0 = none. Default 4.
 spot_check = 4
-# Options: "auto" (default) | "batch" | "gbt". "auto" uses the Photon node patch when the node has it (PHOTON_NODE_PATCHES=true at build time).
+# Options: "auto" (default) | "batch" | "gbt". "auto" uses the getattestationbatch RPC when the node has it (the node built by the Docker setups does).
 # backend = "auto"
 
 [payout]

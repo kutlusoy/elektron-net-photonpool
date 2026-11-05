@@ -87,7 +87,7 @@ impl TxSet {
     }
 }
 
-/// Response of the Photon node patch `getattestationbatch`: one template, many coinbase variants.
+/// Response of the node RPC `getattestationbatch`: one template, many coinbase variants.
 #[derive(Deserialize)]
 pub struct BatchTemplate {
     pub tip: String,

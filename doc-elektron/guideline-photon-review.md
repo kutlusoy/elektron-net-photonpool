@@ -10,7 +10,7 @@
 
 ## 1. Scope and method
 
-A single-reviewer pass over all of `src/photon/` (wire, messages, Noise transport, plan, accounting tree, coinbase checks, share verifier, trust book, pool service, gateway, gateway Stratum front end, load generator) with the question "what can a hostile gateway, a hostile ASIC or a hostile pool do, and what happens on a panic or an overload". It was done by the author of the code with the help of the test suite; it is **not** the independent review that the protocol checklist asks for (Noise handshake, key handling, the node patch). Treat the results as a first pass.
+A single-reviewer pass over all of `src/photon/` (wire, messages, Noise transport, plan, accounting tree, coinbase checks, share verifier, trust book, pool service, gateway, gateway Stratum front end, load generator) with the question "what can a hostile gateway, a hostile ASIC or a hostile pool do, and what happens on a panic or an overload". It was done by the author of the code with the help of the test suite; it is **not** the independent review that the protocol checklist asks for (Noise handshake, key handling, the node RPC). Treat the results as a first pass.
 
 Method: read every file against the threat model of the protocol guideline, list every `unwrap`, index and arithmetic on external data, try to find ways to earn credit without work, to exhaust memory, CPU or the node, and to make honest parties fail. Each finding was fixed with a test where a test is possible.
 
@@ -51,9 +51,9 @@ Robustness tests added: `random_and_mutated_frames_never_panic` (50,000 random f
 | The gateway's Stratum port has no authentication. Anyone who can reach it can mine for any payout address or exhaust the pool's channel limit with fake addresses. | A farm network is normally closed; authentication would need a convention the ASIC firmware supports. | Listen on the farm LAN only, firewall it, `require_address = true`. |
 | Gateways are anonymous (the Noise `NX` pattern authenticates only the pool). A hostile party can open many connections from many addresses. | Identity would need registration, which is a policy question. | Per-address limits, trust per address and per script, budget, channel limit. |
 | The pool key is pinned; there is no certificate or rotation scheme. | Open question 1 of the protocol guideline. | Distribute the key out of band; a rotation means all gateways change one setting. |
-| The Noise handshake, key handling and the node patch were not reviewed by anyone else. | Needs a second person. | Listed in the checklist of the protocol guideline. |
+| The Noise handshake, key handling and the node RPC were not reviewed by anyone else. | Needs a second person. | Listed in the checklist of the protocol guideline. |
 | Photon shares credited between two accounting flushes are lost if the pool is killed instead of stopped with `SIGINT`. | The ledger is written periodically for speed. | The systemd unit uses `KillSignal=SIGINT`; the flush interval is a few seconds. |
-| The gateway needs a node with the Photon patch (an external static review exists, the findings are handled in section 6b of the batch guideline; no sanitizer or fuzzer run yet). | See the patch review plan in `guideline-batch-attestation-rpc.md`. | Differential test against three references. |
+| The gateway needs a node with the `getattestationbatch` RPC (an external static review exists and its findings are handled in section 6b of the batch guideline; sanitizer run done, no fuzzer run yet). | See the patch review plan in `guideline-batch-attestation-rpc.md`. | Differential test against three references. |
 | Real ASIC firmware has not been tested against the gateway front end. | Needs hardware. | `step18`/`step19` use a simulated Stratum client. |
 | Memory and CPU limits were measured on one machine with regtest-sized blocks. | Needs a larger setup. | `test/load_spotchecks.py` can be run with larger blocks. |
 
@@ -61,6 +61,6 @@ Robustness tests added: `random_and_mutated_frames_never_panic` (50,000 random f
 
 - [x] First review pass over `src/photon/` by the author, findings fixed and tested.
 - [ ] Independent review of the Noise handshake, key handling and certificate scheme.
-- [ ] Independent review of the node patch (`guideline-batch-attestation-rpc.md`).
+- [ ] Independent review of the node RPC (`guideline-batch-attestation-rpc.md`).
 - [ ] Fuzzing of the decoders with a coverage-guided fuzzer (the current tests are random and mutation based).
 - [ ] Test with real ASIC firmware.
