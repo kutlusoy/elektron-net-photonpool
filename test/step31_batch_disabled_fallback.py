@@ -1,12 +1,11 @@
 import os, sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-os.environ.pop("ELEKTROND_BATCH_OPTION", None)   # this test runs a node of the photonpool branch WITHOUT -enableattestationbatch
 import asyncio, json, subprocess, time, urllib.request
 from photon_testlib import *
 from segwit_addr import encode_segwit_address
 from stratum_testlib import *
 
-# A node that has getattestationbatch but with the option off answers "disabled". The pool in backend "auto" must treat that like a missing RPC and fall back
-# to one getblocktemplate call per payout address, and still serve work and find blocks.
+# A node without getattestationbatch (ELEKTROND, an unpatched node) answers "Method not found". The pool in backend "auto" must fall back to one
+# getblocktemplate call per payout address, and still serve work and find blocks.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PHOTOND = os.environ.get("PHOTOND", os.path.join(ROOT, "target", "release", "photond"))
 API, STRATUM = 18981, 18333
@@ -37,9 +36,9 @@ ui_dir = "{os.path.join(ROOT, 'ui')}"
 
 async def main(h):
     n = h.node
-    try: n.rpc("getattestationbatch", {"candidates": [{"outputs": [{"scriptPubKey": "51"}]}]}); disabled = False
-    except RuntimeError as e: disabled = "disabled" in str(e)
-    h.check("the node answers that getattestationbatch is disabled", disabled)
+    try: n.rpc("getattestationbatch", {"candidates": [{"outputs": [{"scriptPubKey": "51"}]}]}); missing = False
+    except RuntimeError as e: missing = "Method not found" in str(e)
+    h.check("the node has no getattestationbatch", missing)
     s = None
     for _ in range(200):
         try:
