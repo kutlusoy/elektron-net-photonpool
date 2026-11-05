@@ -296,6 +296,9 @@ pub struct Pool {
     pub device_best: Mutex<HashMap<String, f64>>,
     /// Answers of the history API, cached for a few seconds: range -> (time, json).
     pub hist_cache: Mutex<HashMap<String, (Instant, serde_json::Value)>>,
+    /// The events that are fit for the public page (see `public_message`), newest last: (sequence number, time, level, text).
+    pub public_events: Mutex<VecDeque<(u64, f64, &'static str, String)>>,
+    pub public_seq: AtomicU64,
     pub photon: std::sync::OnceLock<Arc<crate::photon::service::PhotonService>>,
 }
 
@@ -337,7 +340,7 @@ impl Pool {
             cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
             sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
             pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0),
-            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), active_candidates: AtomicUsize::new(active), demand_units: AtomicU64::new(0), device_best: Mutex::new(bests), hist_cache: Mutex::new(HashMap::new()), photon: std::sync::OnceLock::new(),
+            batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), active_candidates: AtomicUsize::new(active), demand_units: AtomicU64::new(0), device_best: Mutex::new(bests), hist_cache: Mutex::new(HashMap::new()), public_events: Mutex::new(VecDeque::new()), public_seq: AtomicU64::new(0), photon: std::sync::OnceLock::new(),
         });
         pool.stats.connected.store(true, Ordering::Relaxed);
         Ok(pool)
@@ -348,6 +351,14 @@ impl Pool {
             "err" => tracing::error!("{msg}"),
             "warn" => tracing::warn!("{msg}"),
             _ => tracing::info!("{msg}"),
+        }
+        if let Some(m) = public_message(lvl, &msg) {
+            let seq = self.public_seq.fetch_add(1, Ordering::Relaxed) + 1;
+            let mut q = self.public_events.lock().unwrap();
+            q.push_back((seq, unix_now(), lvl, m));
+            if q.len() > 200 {
+                q.pop_front();
+            }
         }
         let _ = self.events.send(Event { t: unix_now(), lvl, msg });
     }
@@ -617,6 +628,32 @@ impl Pool {
     }
 }
 
+fn mask_account(a: &str) -> String {
+    if a.len() > 14 { format!("{}..{}", &a[..6], &a[a.len() - 4..]) } else { a.to_string() }
+}
+
+/// The text of an event as the public page may show it, or None when it is not for the public: only epochs, the work space, the candidate backend,
+/// the node link and found blocks (with the finder masked, no worker name). Share, job, error and start-up lines never leave the operator view.
+pub fn public_message(lvl: &str, msg: &str) -> Option<String> {
+    if msg.starts_with("epoch ") && msg.contains(" candidates ready in ") || msg.starts_with("work space:") || msg.starts_with("candidate backend:") {
+        return Some(msg.to_string());
+    }
+    if msg.starts_with("node link lost") {
+        return Some("node link lost".into());
+    }
+    if msg.starts_with("node link restored") {
+        return Some(msg.to_string());
+    }
+    if lvl == "blk" && msg.starts_with("BLOCK FOUND ") {
+        // BLOCK FOUND <height> <hash>.. by <account>.<worker> [<mode>] -> submitblock: accepted
+        let (head, rest) = msg.split_once(" by ")?;
+        let (who, tail) = rest.split_once(" [")?;
+        let account = who.split('.').next().unwrap_or("");
+        return Some(format!("{head} by {} [{tail}", mask_account(account)));
+    }
+    None
+}
+
 /// Candidates needed to hand out `units_per_sec` work units for `horizon_secs` (one epoch) without repeating any, with 25 % headroom, within `min..=max`.
 pub fn candidates_needed(units_per_sec: f64, horizon_secs: f64, slices: u64, min: usize, max: usize) -> usize {
     let per_candidate = (slices * NTIME_SLOTS) as f64;
@@ -629,6 +666,20 @@ pub fn candidates_needed(units_per_sec: f64, horizon_secs: f64, slices: u64, min
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_harmless_events_are_public_and_the_finder_is_masked() {
+        let ok = "epoch 48 height 297373 tip 000000000000.. 1 candidates ready in 2 ms";
+        assert_eq!(public_message("info", ok).as_deref(), Some(ok));
+        assert_eq!(public_message("info", "work space: 16 -> 40 candidates (4000 units/s used, 512 available)").is_some(), true);
+        assert_eq!(public_message("warn", "node link lost: connection refused to http://127.0.0.1:8332 (cookie /node/.cookie)").as_deref(), Some("node link lost"));
+        let blk = public_message("blk", "BLOCK FOUND 131 0123456789abcdef.. by be1qxym6egwr7esxryrayg2fdnnprl9zfepvc9p6z2.bitaxe3 [solo] -> submitblock: accepted").unwrap();
+        assert_eq!(blk, "BLOCK FOUND 131 0123456789abcdef.. by be1qxy..p6z2 [solo] -> submitblock: accepted");
+        assert!(!blk.contains("bitaxe3"));
+        for (l, m) in [("share", "share ok be1q.rig1"), ("err", "ledger could not record block 5: disk full"), ("info", "stratum v1 listening on 0.0.0.0:3333"), ("info", "photond 0.2 listening on 127.0.0.1:8081"), ("err", "block 9 by x.y rejected by node: bad-txns")] {
+            assert_eq!(public_message(l, m), None, "{m}");
+        }
+    }
 
     #[test]
     fn candidates_follow_the_demand() {
