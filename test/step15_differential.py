@@ -1,4 +1,4 @@
-"""Differential test of the getattestationbatch node patch.
+"""Differential test of the getattestationbatch node RPC.
 
 Every candidate of every batch is checked against three independent references:
   1. the Python oracle (own MuHash over the UTXO set, own coinbase serialisation),

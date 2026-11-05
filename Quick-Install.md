@@ -12,7 +12,7 @@
 
 `photond` is a headless pool daemon: it follows your Elektron Net node, builds attested block candidates, serves Stratum V1 to miners and exposes a read-only admin API with a terminal-style web UI.
 
-**Status:** the pool offers solo (direct coinbase payout, no fee), PPLNS and PPS side by side, keeps a SQLite ledger, tracks block maturity and pays out through a node wallet, and serves a public pool page. All of this is tested on regtest against an unmodified node (see the `test/` directory). **Payouts start in dry-run mode** (`payout.dry_run = true`), so nothing is sent until you switch it off. Not tested yet: real ASIC hardware and firmware (the first test, a Bitaxe on mainnet, is described in [`doc-elektron/guideline-release-and-bitaxe-test.md`](doc-elektron/guideline-release-and-bitaxe-test.md)) and mainnet-scale load. The node is built unmodified by default; the optional Photon node patch (`NODE_PATCHES=true`) is only needed for pools with many payout addresses. Details: [`doc-elektron/guideline-payout-modes.md`](doc-elektron/guideline-payout-modes.md).
+**Status:** the pool offers solo (direct coinbase payout, no fee), PPLNS and PPS side by side, keeps a SQLite ledger, tracks block maturity and pays out through a node wallet, and serves a public pool page. All of this is tested on regtest against an unmodified node (see the `test/` directory). **Payouts start in dry-run mode** (`payout.dry_run = true`), so nothing is sent until you switch it off. Not tested yet: real ASIC hardware and firmware (the first test, a Bitaxe on mainnet, is described in [`doc-elektron/guideline-release-and-bitaxe-test.md`](doc-elektron/guideline-release-and-bitaxe-test.md)) and mainnet-scale load. The Docker setups build the node from the branch `photonpool` of `elektron-net`, which adds the `getattestationbatch` RPC (one call for all payout addresses, no consensus change); with a node that lacks it the pool asks once per payout address. Details: [`doc-elektron/guideline-payout-modes.md`](doc-elektron/guideline-payout-modes.md).
 
 ## 1a. Which way to install?
 
@@ -163,8 +163,8 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 | `ledger.stats_keep_days` | Days of pool statistics (one sample per minute, about 6 MB for 60 days) that the public page draws its history from; older samples are deleted (default 60) |
 | `ledger.device_history_minutes` | The history by device type (Bitaxe, NerdMiner, ...) is stored once per this many minutes (default 5, about 70 bytes per device type and sample) |
 | `pool.spot_check` | Candidates per epoch validated against the node |
-| `pool.autoscale_candidates`, `pool.min_candidates` | The pool uses only as many of its payout addresses (candidates) as the work demand needs and grows or shrinks by itself (default on, at least 16). Every candidate offers 960 work units per epoch; a Bitaxe uses about 100 per epoch. With many miners provision enough addresses (`payout.wallet_addresses`, the Docker stack default is 512) and build the node with the batch patch (`NODE_PATCHES=true`) |
-| `pool.backend` | `auto` (default): batch attestation when the node has the Photon patch, else one `getblocktemplate` call per address; `batch`, `gbt` force one |
+| `pool.autoscale_candidates`, `pool.min_candidates` | The pool uses only as many of its payout addresses (candidates) as the work demand needs and grows or shrinks by itself (default on, at least 16). Every candidate offers 960 work units per epoch; a Bitaxe uses about 100 per epoch. With many miners provision enough addresses (`payout.wallet_addresses`, the Docker stack default is 512) and use a node with the `getattestationbatch` RPC (branch `photonpool`, the Docker default) |
+| `pool.backend` | `auto` (default): batch attestation when the node has the `getattestationbatch` RPC, else one `getblocktemplate` call per address; `batch`, `gbt` force one |
 | `stratum.listen`, `stratum.initial_difficulty`, `stratum.share_secs` | Miner port, starting difficulty, target seconds per share |
 | `stratum.max_connections` | Upper bound for sockets |
 | `stratum.adaptive_jobs`, `stratum.adaptive_min_interval_ms` | The job interval of every connection is learned from its duplicate and stale shares (default on, shortest 50 ms) |
@@ -227,7 +227,7 @@ The script generates the node and pool configuration, creates and encrypts the w
 
 ## 11. Photon gateway for farms with their own node (optional)
 
-Instead of mining on the pool's Stratum port, a farm can run its own node (built with the Photon node patch, `NODE_PATCHES=true`) and a gateway next to it. The block reward is then split in the coinbase between all Photon miners, nobody holds anyone's funds, and the pool commits its accounting on chain. The pool enables the listener with `[photon] enabled = true` (see `photond.example.toml`); the farm copies `gateway.example.toml`, sets the pool's address and public key and its own payout address, and points the ASICs at the gateway's Stratum port:
+Instead of mining on the pool's Stratum port, a farm can run its own node (built from the branch `photonpool` of `elektron-net`, which has the `getattestationbatch` RPC) and a gateway next to it. The block reward is then split in the coinbase between all Photon miners, nobody holds anyone's funds, and the pool commits its accounting on chain. The pool enables the listener with `[photon] enabled = true` (see `photond.example.toml`); the farm copies `gateway.example.toml`, sets the pool's address and public key and its own payout address, and points the ASICs at the gateway's Stratum port:
 
 ```bash
 photond gateway --gateway-config gateway.toml

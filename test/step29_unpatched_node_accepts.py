@@ -2,7 +2,7 @@ import os, sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import struct
 from photon_testlib import *
 
-# The core promise of the batch patch: a node WITHOUT the patch accepts every block assembled from the batch response, and rejects a block whose attestation is wrong.
+# The core promise of the batch RPC: a node WITHOUT it accepts every block assembled from the batch response, and rejects a block whose attestation is wrong.
 # Blocks come from a patched node (ELEKTROND, the harness node) and are submitted to a second, unpatched node (UNPATCHED) that has the same chain.
 
 UNPATCHED = os.environ.get("UNPATCHED", "elektrond")

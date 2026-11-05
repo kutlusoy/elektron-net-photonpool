@@ -37,7 +37,7 @@ The repository root additionally has a smaller `docker-compose.yml` for a manual
 
 ## 4. Settings
 
-See `stack.conf.example`. The pool settings correspond to `photond.toml` (modes, fees, PPLNS window, PPS reserve, minimum payout in leptons, payout interval, fee rate, extra Stratum ports), `DOMAIN` and `CADDY_EMAIL` control HTTPS, `EXPLORER_URL` the links to blocks and transactions, `ELEKTRON_REPO` and `ELEKTRON_REF` the node that is built (`NODE_PATCHES=true` applies the Photon node patch with the batch attestation RPC, `false` builds the unmodified node), `WALLET_NAME`, `WALLET_ADDRESSES` (default 512; the pool uses only as many as the work demand needs, see `guideline-stratum-v1.md`) and `WALLET_PASSPHRASE` the pool wallet. `DRY_RUN=true` (default) only logs payouts.
+See `stack.conf.example`. The pool settings correspond to `photond.toml` (modes, fees, PPLNS window, PPS reserve, minimum payout in leptons, payout interval, fee rate, extra Stratum ports), `DOMAIN` and `CADDY_EMAIL` control HTTPS, `EXPLORER_URL` the links to blocks and transactions, `ELEKTRON_REPO` and `ELEKTRON_REF` the node that is built (the default `photonpool` branch contains the batch attestation RPC `getattestationbatch`), `WALLET_NAME`, `WALLET_ADDRESSES` (default 512; the pool uses only as many as the work demand needs, see `guideline-stratum-v1.md`) and `WALLET_PASSPHRASE` the pool wallet. `DRY_RUN=true` (default) only logs payouts.
 
 ## 5. Security notes
 

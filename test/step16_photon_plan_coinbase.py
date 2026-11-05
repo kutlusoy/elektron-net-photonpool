@@ -1,4 +1,4 @@
-"""Photon plan end to end: the Rust plan derivation produces a coinbase layout that the (patched) node attests,
+"""Photon plan end to end: the Rust plan derivation produces a coinbase layout that the node (with the batch RPC) attests,
 the node's validator accepts, the Rust checker accepts, and that pays the miners as planned on chain."""
 import os, sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import json, subprocess

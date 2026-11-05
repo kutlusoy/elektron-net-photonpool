@@ -1,11 +1,11 @@
-# Photon gateway: runs next to your own Elektron Net node (built with the Photon node patch, see
+# Photon gateway: runs next to your own Elektron Net node (built from the branch `photonpool` of elektron-net, see
 # doc-elektron/guideline-batch-attestation-rpc.md) and connects your ASICs to a Photon pool.
 #   photond gateway --gateway-config gateway.toml
 #
 # Every option is listed with its default and the values it accepts ("Options"). Lines without a default are required.
 # Apply a change with `systemctl restart photon-gateway`.
 
-# JSON-RPC of YOUR node (it must have the Photon patch: getattestationbatch). Options: any http URL.
+# JSON-RPC of YOUR node (it must have the getattestationbatch RPC: branch `photonpool` of elektron-net). Options: any http URL.
 node_rpc_url = "http://127.0.0.1:19332"
 # How to log in to the node.
 # Options: "user:password" | "cookie:/path/to/.cookie" | "env:VARIABLE" (the variable holds "user:password")

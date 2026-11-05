@@ -110,8 +110,8 @@ Two things adapt to the load now:
 | 5,000 | 651 (of 2,000) | 0 | not sampled | 77 MB | 30 % of one core |
 | 15,000 | 1,940 (of 2,000) | 0 | 90 to 109 ms | 205 MB | 85 % of one core |
 
-Without autoscaling the same load with 64 candidates overlapped by 438,560 units at 5,000 connections. With a node without the batch patch every candidate costs one `getblocktemplate` call (about 0.7 ms),
-1,900 candidates then take over a second per epoch: build the node with `NODE_PATCHES=true` for pools of this size.
+Without autoscaling the same load with 64 candidates overlapped by 438,560 units at 5,000 connections. With a node without the batch RPC every candidate costs one `getblocktemplate` call (about 0.7 ms),
+1,900 candidates then take over a second per epoch: use a node with the `getattestationbatch` RPC (branch `photonpool`) for pools of this size.
 
 ### Dynamic load: miners joining and leaving
 

@@ -39,7 +39,7 @@ refresh_secs = 20
 # Options: whole number; 0 = none are validated (not recommended). Default 4.
 spot_check = 4
 # How candidates are fetched from the node.
-# Options: "auto"  (batch attestation when the node has the Photon patch, otherwise one getblocktemplate call per address)
+# Options: "auto"  (batch attestation when the node has the getattestationbatch RPC, otherwise one getblocktemplate call per address)
 #          "batch" (always getattestationbatch; fails on an unpatched node)
 #          "gbt"   (always one getblocktemplate call per address; fine for a few addresses and small blocks)
 backend = "auto"

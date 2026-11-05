@@ -1,6 +1,6 @@
 # Elektron Net: `elektron-net-photonpool` Batch Attestation RPC Guideline
 
-- **Version:** 0.2 (draft; implemented as a node patch and tested, see section 3.5)
+- **Version:** 0.3 (draft; implemented in the node branch `photonpool` and tested, see section 3.5)
 - **Date:** November 3, 2026
 - **Audience:** Node developers, pool developers
 - **Reference implementation:** [`elektron-net`](https://github.com/kutlusoy/elektron-net) - `src/validation.cpp` (`ComputeBlockUTXOAttestationHash`, `StripAttestationOutput`, `ValidateUTXOCheckpoint`), `src/kernel/utxo_muhash.h`, `src/crypto/muhash.cpp`, `src/interfaces/mining.h`, `src/node/miner.cpp`, `src/node/types.h`, `src/rpc/mining.cpp` - treat as ground truth for anything the doc references
@@ -98,21 +98,17 @@ vout[2]   witness commitment      (shared)
 vout[3..] extra_outputs, verbatim, last
 ```
 
-### 3.5 As built: the `photonpool` branch of the node (and the patch file)
+### 3.5 As built: the `photonpool` branch of the node
 
-The RPC is part of the branch `photonpool` of `elektron-net` (commits "rpc: add getattestationbatch for mining pools" and the test and guideline commit, see `doc-elektron/guideline-attestation-batch-rpc.md` there). It is always available and does no work unless it is called; the Docker setups of this repository build the node from that branch (`ELEKTRON_REF=photonpool`). When the code is merged to `main`, change `ELEKTRON_REF` back to `main`. `docker/node/patches/0001-photon-getattestationbatch.patch` is the same code and is kept for the tests of the patch file (`check_patch_scope.py`); it does not apply to the `photonpool` branch.
+The RPC is part of the branch `photonpool` of `elektron-net` (see `doc-elektron/guideline-attestation-batch-rpc.md` there and the functional test `test/functional/rpc_getattestationbatch.py`). It is always available and does no work unless it is called. The Docker setups of this repository build the node from that branch (`ELEKTRON_REF=photonpool`); when the code is merged to `main`, change `ELEKTRON_REF` back to `main`. `test/photonpool-node.patch` is the diff of the source changes of that branch against `main`; `test/check_patch_scope.py` checks on it that only lines are added and that no consensus code is touched.
 
-The text below describes the implementation.
-
-
-
-The interface exists as a patch that is applied when the node image is built (`docker/node/patches/0001-photon-getattestationbatch.patch`, `PHOTON_NODE_PATCHES=false` by default until the review is complete, set it to `true` to build the patched node; `NODE_PATCHES` in the stack). It adds three functions and one RPC and changes no existing code path of the node:
+The change adds three functions and one RPC and changes no existing code path of the node:
 
 - `ComputeAttestationBaseState` (`validation.cpp`): the tip's MuHash accumulator with all non-coinbase transactions applied, with the same rules as the incremental path of `ComputeBlockUTXOAttestationHash`, including the intra-block fix gate.
 - `AttestationForCoinbase`: the attestation of one stripped coinbase on top of that base state.
 - RPC `getattestationbatch` (`rpc/mining.cpp`, category `mining`): one block template per call, one attestation per requested coinbase variant.
 
-The patch was developed against a copy of the node source, applies cleanly to `elektron-net` at `596278b` and leaves that repository untouched.
+The change applies cleanly to `elektron-net` at `596278b` (the base of the branch).
 
 Request (JSON-RPC): `{"candidates": [ {"outputs": [{"scriptPubKey": hex, "value": leptons?}], "tail_outputs": [{"scriptPubKey": hex, "value": leptons?}], "script_sig_suffix": hex?} ]}` with 1 to 4096 candidates.
 

@@ -9,7 +9,6 @@ services:
       args:
         ELEKTRON_REPO: ${ELEKTRON_REPO:-https://github.com/kutlusoy/elektron-net.git}
         ELEKTRON_REF: ${ELEKTRON_REF:-photonpool}
-        PHOTON_NODE_PATCHES: ${NODE_PATCHES:-false}
     restart: unless-stopped
     ports:
       - "8333:8333"                    # P2P, public. RPC (8332) is never published.

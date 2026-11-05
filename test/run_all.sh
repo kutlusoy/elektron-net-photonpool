@@ -26,6 +26,6 @@ if [ -n "$ELEKTROND_BATCH" ]; then
   UNPATCHED="${ELEKTROND:-elektrond}" ELEKTROND="$ELEKTROND_BATCH" python3 step30_pool_blocks_unpatched_node.py || rc=1   # blocks mined through the real pool are accepted by an unpatched node
   python3 step31_batch_disabled_fallback.py || rc=1   # a node without the RPC (ELEKTROND, unpatched): the pool falls back to getblocktemplate
 else
-  echo "[step14] skipped (set ELEKTROND_BATCH to an elektrond built with the Photon node patch)"
+  echo "[step14] skipped (set ELEKTROND_BATCH to an elektrond built from the branch photonpool of elektron-net)"
 fi
 exit $rc
