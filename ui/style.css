@@ -293,3 +293,15 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .mtip a { color: var(--c1); word-break: break-all; }
 .music.credit .mtitle:hover + .mtip, .music.credit .mtitle:focus + .mtip, .music.credit .mtip:hover, .music.credit .mtip:focus-within { display: block; }
 @media (max-width: 720px) { .mtitle { max-width: 12ch; } }
+
+/* Single-page shell (spa.js): the view is swapped in place; the title bar with the music player stays */
+.window.spa { grid-template-rows: auto 1fr; }
+#view { display: grid; grid-template-rows: auto 1fr; min-height: 0; view-transition-name: view; }
+.lnk.on { color: var(--c3); text-shadow: 0 0 8px var(--glow); }
+@keyframes pane-in { from { opacity: 0; transform: translateY(16px) scale(.985); filter: blur(5px); } to { opacity: 1; transform: none; filter: none; } }
+.grid.entering .pane { animation: pane-in .6s cubic-bezier(.2, .8, .2, 1) backwards; animation-delay: calc(var(--i, 0) * 55ms); }
+@keyframes view-out { to { opacity: 0; transform: scale(.97); filter: blur(6px); } }
+@keyframes view-in { from { opacity: 0; transform: scale(1.02); filter: blur(6px); } }
+::view-transition-old(view) { animation: view-out .28s ease-in both; }
+::view-transition-new(view) { animation: view-in .42s .08s cubic-bezier(.2, .8, .2, 1) both; }
+@media (prefers-reduced-motion: reduce) { .grid.entering .pane, ::view-transition-old(view), ::view-transition-new(view) { animation: none; } }

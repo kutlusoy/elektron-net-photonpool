@@ -1,4 +1,25 @@
+window.Views = window.Views || {};
+Views.miner = (() => {
 'use strict';
+const timers = [], offs = [];
+const on = (t, ev, fn) => { t.addEventListener(ev, fn); offs.push(() => t.removeEventListener(ev, fn)); };
+const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-live="off"></div>
+  <main class="grid miner">
+    <section class="pane p-acct" aria-label="Account"><h2><span>ACCOUNT</span></h2><pre id="pane-acct"></pre></section>
+    <section class="pane p-bal" aria-label="Balance"><h2><span>BALANCE</span></h2><pre id="pane-bal"></pre></section>
+    <section class="pane p-hr" aria-label="Hashrate"><h2><span>HASHRATE 24H</span></h2><pre id="pane-hr"></pre></section>
+    <section class="pane p-workers" aria-label="Workers"><h2><span>WORKERS</span></h2><pre id="pane-workers"></pre></section>
+    <section class="pane p-pend" aria-label="Pending credits"><h2><span>PENDING</span></h2><pre id="pane-pend"></pre></section>
+    <section class="pane p-pay" aria-label="Payouts"><h2><span>PAYOUTS</span></h2><pre id="pane-pay"></pre></section>
+    <section class="pane p-found" aria-label="Blocks found"><h2><span>BLOCKS FOUND</span></h2><pre id="pane-found"></pre></section>
+    <section class="pane p-tty" aria-label="Console"><h2><span>TTY</span><em>paste your address or <kbd>help</kbd></em></h2>
+      <div class="tty" id="tty" tabindex="-1"></div>
+      <form class="prompt" id="prompt" autocomplete="off">
+        <label for="cmd"><span class="u">miner</span><span class="at">@</span><span class="h">photon</span><span class="sep">:~$</span></label>
+        <input id="cmd" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="command line">
+      </form>
+    </section>
+  </main>`;
 
 const modeLabel = { solo: 'SOLO', pplns: 'PPLNS', pps: 'PPS' };
 const M = { addr: '', acct: null, pool: null, demo: false, timer: null };
@@ -47,14 +68,14 @@ function compress(values, n) {
   return Array.from({ length: n }, (_, i) => { const part = values.slice(Math.floor(i * size), Math.floor((i + 1) * size)); return part.reduce((a, b) => a + b, 0) / Math.max(1, part.length); });
 }
 
-document.addEventListener('depthchange', () => { try { render(); } catch (_) { /* no data yet */ } });
+const onDepth = () => { try { render(); } catch (_) { /* no data yet */ } };
 function render() {
   const p = M.pool, a = M.acct;
   if (p) { $('#pool-name').textContent = p.name; document.title = 'MINER | ' + p.name; }
   if (!a) {
     $('#statusline').innerHTML = `<span>no address selected</span>`;
     for (const id of ['acct', 'bal', 'hr', 'workers', 'pend', 'pay', 'found']) $('#pane-' + id).innerHTML = '';
-    $('#pane-acct').innerHTML = span('dim', 'paste your payout address into the console below\nor open this page as miner.html#<address>');
+    $('#pane-acct').innerHTML = span('dim', 'paste your payout address into the console below\nor open /miner/<address>');
     return;
   }
   const explorer = p ? p.explorerUrl : '';
@@ -167,7 +188,7 @@ Extras.add('found', (el) => {
 
 /* ---------- console ---------- */
 
-const tty = $('#tty');
+let tty;
 function out(html) {
   const d = document.createElement('div');
   d.innerHTML = html;
@@ -180,7 +201,7 @@ async function setAddress(addr) {
   M.addr = addr.trim();
   M.acct = null;
   try { localStorage.setItem('photon-miner-address', M.addr); } catch (_) { /* storage unavailable */ }
-  history.replaceState(null, '', '#' + encodeURIComponent(M.addr));
+  history.replaceState(null, '', '/miner/' + encodeURIComponent(M.addr));
   try { await load(); out(span('ok', 'loaded ' + maskAddr(M.addr))); } catch (e) { out(span('err', e.message)); }
   render();
 }
@@ -202,7 +223,8 @@ const cmds = {
   clear() { tty.innerHTML = ''; },
 };
 
-const input = $('#cmd');
+let input;
+function bindConsole() {
 $('#prompt').addEventListener('submit', async (e) => {
   e.preventDefault();
   const raw = input.value.trim();
@@ -214,24 +236,39 @@ $('#prompt').addEventListener('submit', async (e) => {
   else if (/^[a-z]{1,8}1[0-9a-z]{20,}$/i.test(raw)) await setAddress(raw);
   else out(span('warn', `unknown command: ${c}. try help, or paste your address`));
 });
-document.addEventListener('keydown', (e) => { if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && document.activeElement !== input) input.focus(); });
+on(document, 'keydown', (e) => { if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && document.activeElement !== input) input.focus(); });
+}
 
 /* ---------- boot ---------- */
 
-async function boot() {
+async function boot0() {
   try { const t = localStorage.getItem('photon-theme'); if (t) document.body.dataset.theme = t; } catch (_) { /* storage unavailable */ }
   const params = new URLSearchParams(location.search);
   M.demo = params.has('demo') || location.protocol === 'file:';
+  $('#who').textContent = 'miner';
   const tag = $('#mode-tag');
   tag.textContent = M.demo ? 'DEMO DATA' : 'LIVE';
   tag.className = 'tag ' + (M.demo ? 'demo' : 'live');
-  let addr = decodeURIComponent(location.hash.replace(/^#/, ''));
+  const pm = location.pathname.match(/^\/miner\/([^/]+)/);
+  let addr = pm ? decodeURIComponent(pm[1]) : decodeURIComponent(location.hash.replace(/^#/, ''));
   if (!addr) { try { addr = localStorage.getItem('photon-miner-address') || ''; } catch (_) { addr = ''; } }
   if (M.demo && !addr) addr = 'be1qdemodemodemodemodemodemodemodemodemo';
   out(span('c1', 'miner overview. paste your payout address to see balances, pending credits and payouts.'));
   if (addr) await setAddress(addr); else render();
-  setInterval(async () => { if (!M.addr) return; try { await load(); render(); } catch (_) { /* keep the last data */ } }, 10000);
-  setInterval(() => { $('#clock').textContent = new Date().toISOString().slice(11, 19) + ' UTC'; }, 500);
+  timers.push(setInterval(async () => { if (!M.addr) return; try { await load(); render(); } catch (_) { /* keep the last data */ } }, 10000));
   if (matchMedia('(pointer: fine)').matches) input.focus();
 }
-boot();
+
+async function mount(root) {
+  root.innerHTML = TEMPLATE;
+  tty = $('#tty'); input = $('#cmd');
+  bindConsole();
+  on(document, 'depthchange', onDepth);
+  boot0().catch((e) => out(span('err', 'could not start: ' + e.message)));
+}
+function unmount() {
+  timers.splice(0).forEach(clearInterval);
+  offs.splice(0).forEach((f) => f());
+}
+return { mount, unmount };
+})();

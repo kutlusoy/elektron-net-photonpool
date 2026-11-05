@@ -1,9 +1,14 @@
 'use strict';
 // Depth view: a pane can be maximized (button in its title, double-click on the title, click on a pane in
 // the background); the other panes then recede in 3D and blur. Esc, the button or a double-click goes back.
-(() => {
+const Depth = (() => {
+  let detachCurrent = null;
+  function attach() {
+  detach();
   const grid = document.querySelector('main.grid');
   if (!grid) return;
+  const offs = [];
+  const on = (t, ev, fn) => { t.addEventListener(ev, fn); offs.push(() => t.removeEventListener(ev, fn)); };
   const narrow = matchMedia('(max-width: 720px)');
   let cur = null;
 
@@ -84,13 +89,19 @@
     h.addEventListener('dblclick', () => toggle(p));
     p.addEventListener('click', () => { if (cur && p !== cur) focus(p); });
   }
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') restore(); });
-  grid.addEventListener('mousemove', (e) => {
+  on(document, 'keydown', (e) => { if (e.key === 'Escape') restore(); });
+  on(grid, 'mousemove', (e) => {
     if (!grid.classList.contains('depth')) return;
     const g = grid.getBoundingClientRect();
     grid.style.setProperty('--mx', (((e.clientX - g.left) / g.width) * 2 - 1).toFixed(3));
     grid.style.setProperty('--my', (((e.clientY - g.top) / g.height) * 2 - 1).toFixed(3));
   });
-  narrow.addEventListener('change', () => { if (narrow.matches) { grid.classList.remove('depth'); for (const q of grid.querySelectorAll('.pane')) { clearTimeout(q._t); finish(q); } cur = null; } });
-  addEventListener('resize', () => { if (cur && grid.classList.contains('depth')) place(cur, full()); });
+  on(narrow, 'change', () => { if (narrow.matches) { grid.classList.remove('depth'); for (const q of grid.querySelectorAll('.pane')) { clearTimeout(q._t); finish(q); } cur = null; } });
+  on(window, 'resize', () => { if (cur && grid.classList.contains('depth')) place(cur, full()); });
+  detachCurrent = () => { offs.forEach((f) => f()); for (const q of grid.querySelectorAll('.pane')) { clearTimeout(q._t); q.classList.remove('front', 'leaving'); } grid.classList.remove('depth'); document.dispatchEvent(new Event('depthchange')); };
+  }
+  function detach() { if (detachCurrent) { detachCurrent(); detachCurrent = null; } }
+  return { attach, detach };
 })();
+// pages without the single-page shell (the operator page) attach at once
+if (!window.SPA) Depth.attach();
