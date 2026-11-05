@@ -98,7 +98,13 @@ vout[2]   witness commitment      (shared)
 vout[3..] extra_outputs, verbatim, last
 ```
 
-### 3.5 As built: the Photon node patch
+### 3.5 As built: the `photonpool` branch of the node (and the patch file)
+
+The RPC is part of the branch `photonpool` of `elektron-net` (commits "rpc: add getattestationbatch for mining pools" and the test and guideline commit, see `doc-elektron/guideline-attestation-batch-rpc.md` there). On that branch it is off unless the node runs with `-enableattestationbatch=1`; the Docker setups of this repository build the node from that branch (`ELEKTRON_REF=photonpool`) and enable it in the node configuration. When the code is merged to `main`, change `ELEKTRON_REF` back to `main`. `docker/node/patches/0001-photon-getattestationbatch.patch` is the same code without the enable option and is kept for the tests of the patch file (`check_patch_scope.py`); it does not apply to the `photonpool` branch.
+
+The text below describes the implementation.
+
+
 
 The interface exists as a patch that is applied when the node image is built (`docker/node/patches/0001-photon-getattestationbatch.patch`, `PHOTON_NODE_PATCHES=false` by default until the review is complete, set it to `true` to build the patched node; `NODE_PATCHES` in the stack). It adds three functions and one RPC and changes no existing code path of the node:
 
@@ -171,6 +177,28 @@ Consequence: a pool MUST NOT add any coinbase output beyond the node-provided se
 3. Before returning, compare the tip against the one used. If it changed, return `stale-tip`.
 4. The response carries `tip_hash` and `template_id`. The pool MUST discard results whose tip is not the current one and MUST never submit a block built from them.
 5. The call MUST NOT mutate chainstate or the live accumulator.
+
+## 6a. As built: locking
+
+The JSON-RPC mirror takes `cs_main` only for one consistent snapshot (tip, template, witness commitment, attestation base state, minimum time). The per-candidate work (coinbase assembly, MuHash of the outputs, hex encoding) runs on copies without the lock, so a large request cannot stall block validation. The hold time of the snapshot is logged at debug level (`-debug=rpc`). A change of the tip while a request runs is not detected by the RPC itself; the pool discards stale work (new epoch) and validates every candidate with a `getblocktemplate` proposal before use.
+
+## 6b. Hardening after the external review (November 5, 2026)
+
+An external static review of the patch (no build, no run) raised the points below. Verdicts and what was done:
+
+| Finding | Verdict | Done |
+|---|---|---|
+| Overflow of `fixed += value` | Not reachable with the current caps (at most 2000 values of `MAX_MONEY` = 2.1e15 leptons is 4.2e18, below the `int64` limit of 9.2e18), but fragile when a cap is raised | Every value is checked against `reward - fixed` before it is added |
+| Request size and cost | Partly valid. The HTTP body limit of the node (32 MiB) bounds the request, but the cost is per output (MuHash), so a small JSON body with very many small outputs was still expensive | Budget over the whole request: at most 400,000 outputs and 8 MiB of scripts. The suggested defaults of 64 candidates and 128 outputs were NOT adopted: the pool uses hundreds of candidates and coinbases with up to 1000 outputs, they would break it |
+| `cs_main` held for the whole call | Partly valid. Input parsing and validation already happened before the lock, but the per-candidate loop ran under it although it needs only copies | The loop runs without the lock (section 6a) |
+| Attestation correctness | Valid as a requirement, already covered: `step14` and `step15` compare every candidate with a Python oracle, with the node's own validator and with the unpatched `getblocktemplate` path, including intra-block spends, reorgs, activation heights and no side effects | `step29` adds the two-node test: blocks built from the batch are accepted by an UNPATCHED node, a block with a wrong attestation is rejected by both |
+| No authentication of the RPC | The RPC uses the node's normal authentication (cookie or `rpcauth`) and is only reachable inside the Docker network or on localhost | No code change. Optional hardening: a separate `rpcauth` user for the pool with `rpcwhitelist` (see the Quick-Install); the exact method list is in the Quick-Install and was not tested |
+| Parallel heavy calls | Valid | At most two calls run at the same time, further ones fail at once with "busy" (the pool calls it once per tip) |
+| (own finding) coinbase of more than half a block | The reserved weight was clamped silently, which could produce an overweight block | Such a request is refused |
+
+`step30` is the end-to-end version: a real `photond` with the batch backend on the patched node, Stratum miners in pool mode and in solo mode find blocks, and a second UNPATCHED node accepts every one of them (pool and solo, six blocks in a row, the solo block pays the miner directly).
+
+`step28` tests the budgets, the overflow case, the coinbase size limit, the parallel limit and that the node stays responsive and keeps validating blocks during heavy calls. Sanitizer run (November 5, 2026): the patched node was built with `-DSANITIZERS=address,undefined` (RelWithDebInfo, `-O1`, wallet off) and `step14`, `step15` (seeds 1 and 2), `step16` to `step20`, `step22`, `step23`, `step28`, `step29` and `step30` ran against it, with `ASAN_OPTIONS=detect_leaks=0` and the reports written to files: no AddressSanitizer or UndefinedBehaviorSanitizer report. `step23` is a timing check and failed once by a hair under the slow sanitizer build (83 ms against a limit of 83 ms) and passed on the second run. Leak detection was off, and the fuzz-style input tests are random, not coverage guided. Not done: a coverage-guided fuzzer.
 
 ## 7. Security
 

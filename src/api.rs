@@ -181,7 +181,7 @@ pub fn summary_value(p: &Arc<Pool>, public: bool) -> Value {
         "alloc": {"candidates": cands, "unitsPerSec": live.units_per_sec, "epochUse": used as f64 / total_units as f64, "overlap": overlap},
         "net": {"connections": live.total, "inBps": live.in_bps, "outBps": live.out_bps, "jobsPerSec": live.jobs_per_sec, "connectsPerSec": live.connects_per_sec,
                 "accepted": crate::stratum::NET.accepted.load(Ordering::Relaxed), "closed": crate::stratum::NET.closed.load(Ordering::Relaxed), "refused": crate::stratum::NET.refused.load(Ordering::Relaxed),
-                "bytesIn": crate::stratum::NET.bytes_in.load(Ordering::Relaxed), "bytesOut": crate::stratum::NET.bytes_out.load(Ordering::Relaxed)},
+                "bytesIn": live.tot_in, "bytesOut": live.tot_out},
         "found": s.found.lock().unwrap().len(),
         "modes": modes,
         "photon": p.photon.get().map(|ph| {

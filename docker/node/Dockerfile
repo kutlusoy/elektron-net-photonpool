@@ -1,7 +1,8 @@
-# Elektron Net node built from source. Use a tag or commit in ELEKTRON_REF for reproducible builds.
+# Elektron Net node built from source. ELEKTRON_REF is the branch "photonpool" (it contains the getattestationbatch RPC) until that code is on main;
+# then switch it to main. Use a tag or commit for reproducible builds.
 FROM debian:bookworm-slim AS build
 ARG ELEKTRON_REPO=https://github.com/kutlusoy/elektron-net.git
-ARG ELEKTRON_REF=main
+ARG ELEKTRON_REF=photonpool
 # Photon node patches (getattestationbatch, no consensus code path is changed). Set to false to build the unmodified node;
 # the pool then falls back to one getblocktemplate call per payout address.
 ARG PHOTON_NODE_PATCHES=false

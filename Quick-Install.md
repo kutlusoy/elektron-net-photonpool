@@ -75,7 +75,7 @@ What the compose file does:
 | `node` | Elektron Net node, config in `docker/elektron.conf`, data in the volume `node-data` | `8333` public. RPC `8332` stays inside the Docker network. |
 | `photond` | Pool daemon, config from `./photond.toml` | `3333` public, `8081` on `127.0.0.1` only |
 
-The pool authenticates to the node with the RPC cookie in the shared volume, so no password has to be configured. To pin a node version, set `ELEKTRON_REF` (tag or branch) in `docker-compose.yml`.
+The pool authenticates to the node with the RPC cookie in the shared volume, so no password has to be configured. The node is built from the branch `photonpool` of `elektron-net` (it contains the `getattestationbatch` RPC, enabled in `docker/elektron.conf`); to pin a node version or to switch to `main` later, set `ELEKTRON_REF` (tag or branch) in `docker-compose.yml`.
 
 Update:
 
@@ -90,12 +90,13 @@ Stop: `docker compose down` (keeps the blockchain volume). Remove everything inc
 
 ### 4.1 Node
 
-Install and sync an Elektron Net node as described in the [`elektron-net`](https://github.com/kutlusoy/elektron-net) repository. A minimal `~/.elektron/elektron.conf` for the pool:
+Install and sync an Elektron Net node as described in the [`elektron-net`](https://github.com/kutlusoy/elektron-net) repository. Until the `getattestationbatch` RPC is on its `main` branch, build the node from the branch `photonpool` (`git clone --branch photonpool https://github.com/kutlusoy/elektron-net.git`); `enableattestationbatch=1` below switches the RPC on, without it the pool asks the node once per payout address. A minimal `~/.elektron/elektron.conf` for the pool:
 
 ```ini
 server=1
 rpcbind=127.0.0.1
 rpcallowip=127.0.0.1
+enableattestationbatch=1
 rpcuser=photon
 rpcpassword=CHANGE_ME_TO_A_LONG_RANDOM_PASSWORD
 ```
@@ -171,6 +172,10 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 | `stratum.clean_work_agents`, `stratum.version_space_bits` | Miners whose name contains one of these words (default `bitaxe`, `esp-miner`) get every fresh job marked clean; how many version bits a miner really sweeps per job (default 5), which sets how often fresh work is sent |
 | `api.listen`, `api.ui_dir` | Admin API and UI location |
 | `api.explorer_url` | Optional base URL of a mempool-style block explorer (for example `https://mempool.elektron-net.org`). Found blocks and the chain tip then link to `<explorer_url>/block/<hash>` in the UI and in `/api/v1/blocks`. Must start with `http://` or `https://`. |
+
+### 7a. Optional: restrict the pool's RPC user
+
+The pool talks to the node with one RPC user. Everything the pool calls is listed here, so a dedicated user can be limited to it with `rpcauth` and `rpcwhitelist` in `elektron.conf` (generate the line with the `rpcauth.py` script of the node sources; the pool then uses that user and password in `[node] auth`). The methods are: `getblockchaininfo`, `getblockcount`, `getbestblockhash`, `getblockheader`, `getblocktemplate`, `getattestationbatch`, `submitblock` and, for payouts, `createwallet`, `loadwallet`, `listwallets`, `getnewaddress`, `getaddressesbylabel`, `getbalance`, `listtransactions`, `sendmany`, `walletpassphrase`, `walletlock`. This is a suggestion that has not been tested with the pool; the RPC port is not reachable from outside in the Docker setups in any case.
 
 ## 8. Troubleshooting
 

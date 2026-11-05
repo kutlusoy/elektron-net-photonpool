@@ -53,7 +53,7 @@ Robustness tests added: `random_and_mutated_frames_never_panic` (50,000 random f
 | The pool key is pinned; there is no certificate or rotation scheme. | Open question 1 of the protocol guideline. | Distribute the key out of band; a rotation means all gateways change one setting. |
 | The Noise handshake, key handling and the node patch were not reviewed by anyone else. | Needs a second person. | Listed in the checklist of the protocol guideline. |
 | Photon shares credited between two accounting flushes are lost if the pool is killed instead of stopped with `SIGINT`. | The ledger is written periodically for speed. | The systemd unit uses `KillSignal=SIGINT`; the flush interval is a few seconds. |
-| The gateway needs a node with the Photon patch (not reviewed). | See the patch review plan in `guideline-batch-attestation-rpc.md`. | Differential test against three references. |
+| The gateway needs a node with the Photon patch (an external static review exists, the findings are handled in section 6b of the batch guideline; no sanitizer or fuzzer run yet). | See the patch review plan in `guideline-batch-attestation-rpc.md`. | Differential test against three references. |
 | Real ASIC firmware has not been tested against the gateway front end. | Needs hardware. | `step18`/`step19` use a simulated Stratum client. |
 | Memory and CPU limits were measured on one machine with regtest-sized blocks. | Needs a larger setup. | `test/load_spotchecks.py` can be run with larger blocks. |
 
