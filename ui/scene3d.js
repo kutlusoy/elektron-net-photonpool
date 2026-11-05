@@ -204,7 +204,7 @@ window.Flow3D = (() => {
     let gold = null, assemble = 1, heightLabel = label('', '#' + col.c3.getHexString(), 0.9);
     heightLabel.position.set(X.tpl, 1.7, 0); add(heightLabel); track(heightLabel.material);
 
-    const st = { yaw: 0, yawT: 0, pitch: 0, pitchT: 0, zoom: 1, zoomT: 1, touched: -1e9, modes: [], shake: 0, flash: 0, goldT: 0, bLabel: null, hov: -2, cnt: { ok: 0, stale: 0, bad: 0 }, tipTime: 0, rtt: 0, p50: 0, p95: 0, connected: true, units: 0, hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
+    const st = { hovM: -1, gf: [1, 1, 1], gfg: 1, yaw: 0, yawT: 0, pitch: 0, pitchT: 0, zoom: 1, zoomT: 1, touched: -1e9, modes: [], shake: 0, flash: 0, goldT: 0, bLabel: null, hov: -2, cnt: { ok: 0, stale: 0, bad: 0 }, tipTime: 0, rtt: 0, p50: 0, p95: 0, connected: true, units: 0, hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     // Quality levels. 0: the small pane (few particles, no bloom), 1: maximized on a modest device, 2: maximized (bloom, streaks, many particles).
     // Every level draws every display frame (smooth motion) as long as the device keeps up and at most 25 miners are online; beyond that, or when the frame
@@ -245,6 +245,9 @@ window.Flow3D = (() => {
       // camera sways slowly around the scene
       const k = st.t * 0.12, intro = Math.min(1, (performance.now() - st.t0) / 2200), dolly = (1 + 0.45 * Math.pow(1 - intro, 3)) * Math.min(1.75, Math.max(1, 1.85 / (st.w / st.h))); // the camera glides in when the view opens and keeps the whole scene in narrow panes
       // the visitor can turn the view (drag) and zoom a little (wheel); the slow automatic sway fades while the view is being used and returns after a pause
+      // hovering a payout mode: its miners and particles grow, the others shrink
+      for (let g = 0; g < 3; g++) st.gf[g] += ((st.hovM < 0 ? 1 : g === st.hovM ? 1.5 : 0.4) - st.gf[g]) * (1 - Math.exp(-dt * 10));
+      st.gfg += ((st.hovM < 0 ? 1 : 0.4) - st.gfg) * (1 - Math.exp(-dt * 10));
       const idle = Math.min(1, Math.max(0, (performance.now() - st.touched - 6000) / 3000)), sway = q.sway * idle;
       st.yaw += (st.yawT - st.yaw) * (1 - Math.exp(-dt * 8)); st.pitch += (st.pitchT - st.pitch) * (1 - Math.exp(-dt * 8)); st.zoom += (st.zoomT - st.zoom) * (1 - Math.exp(-dt * 8));
       const tgt = V3a.set(0.5, -0.2, -2);
@@ -286,7 +289,7 @@ window.Flow3D = (() => {
       // miners
       for (let i = 0; i < MAXM; i++) {
         pulse[i] = Math.max(0, pulse[i] - dt * 2.5);
-        if (!activeMask[i]) { D.position.set(0, -50, 0); D.scale.setScalar(0.001); } else { D.position.copy(mpos[i]); D.scale.setScalar(0.8 + 0.9 * pulse[i]); }
+        if (!activeMask[i]) { D.position.set(0, -50, 0); D.scale.setScalar(0.001); } else { D.position.copy(mpos[i]); D.scale.setScalar((0.8 + 0.9 * pulse[i]) * st.gf[Math.floor(i / GC)]); }
         D.rotation.set(st.t * 0.6 + i, st.t * 0.4, 0); D.updateMatrix(); miners.setMatrixAt(i, D.matrix);
       }
       miners.instanceMatrix.needsUpdate = true;
@@ -300,9 +303,9 @@ window.Flow3D = (() => {
         const t = j.t;
         if (t < 0.25) lerp3(W[0], W[1], t / 0.25, P); else if (t < 0.5) lerp3(W[1], W[2], (t - 0.25) / 0.25, P); else lerp3(W[2], mpos[j.m], (t - 0.5) / 0.5, P);
         P.y += Math.sin(t * Math.PI) * 0.7;
-        if (q.trails && j.px !== undefined) { trailTo(j); trails.add(tail, P, col.c1, 2.2, 0, 1); trails.add(tail, P, col.c1, 8, 0, 0.25); }
+        if (q.trails && j.px !== undefined) { trailTo(j); { const f = st.gf[Math.floor(j.m / GC)]; trails.add(tail, P, col.c1, 2.2 * f, 0, Math.min(1, f)); trails.add(tail, P, col.c1, 8 * f, 0, 0.25 * f); } }
         j.px = P.x; j.py = P.y; j.pz = P.z;
-        D.position.copy(P); D.scale.setScalar(0.7 + 0.5 * Math.sin(t * Math.PI)); D.rotation.set(0, 0, 0); D.updateMatrix(); jobs.setMatrixAt(i, D.matrix);
+        D.position.copy(P); D.scale.setScalar((0.7 + 0.5 * Math.sin(t * Math.PI)) * st.gf[Math.floor(j.m / GC)]); D.rotation.set(0, 0, 0); D.updateMatrix(); jobs.setMatrixAt(i, D.matrix);
       }
       jobs.instanceMatrix.needsUpdate = true;
       // shares: miner -> gate -> node (accepted) or down (stale, invalid)
@@ -317,8 +320,8 @@ window.Flow3D = (() => {
         else { P.copy(W[2]); P.y -= (t - 0.5) * 4; P.x += (t - 0.5) * 1.2; }
         if (t >= 0.5 && !s.c) { shares.setColorAt(i, s.o === 0 ? col.ok : s.o === 1 ? col.warn : col.err); recolor = true; s.c = true; }
         if (t < 0.5 && s.c === undefined) { /* neutral until the gate */ }
-        { const cc = t < 0.5 ? (s.g >= 0 ? col.gw : GROUPS[Math.floor(s.m / GC)].c) : s.o === 0 ? col.ok : s.o === 1 ? col.warn : col.err; if (q.trails && s.px !== undefined) { trailTo(s); trails.add(tail, P, cc, 2.2, 0, 1); trails.add(tail, P, cc, 8, 0, 0.25); } s.px = P.x; s.py = P.y; s.pz = P.z; }
-        D.position.copy(P); D.scale.setScalar(t >= 0.5 && s.o ? Math.max(0.1, 1 - (t - 0.5) * 2) : 1); D.rotation.set(0, 0, 0); D.updateMatrix(); shares.setMatrixAt(i, D.matrix);
+        { const cc = t < 0.5 ? (s.g >= 0 ? col.gw : GROUPS[Math.floor(s.m / GC)].c) : s.o === 0 ? col.ok : s.o === 1 ? col.warn : col.err; if (q.trails && s.px !== undefined) { trailTo(s); const f = s.g >= 0 ? st.gfg : st.gf[Math.floor(s.m / GC)]; trails.add(tail, P, cc, 2.2 * f, 0, Math.min(1, f)); trails.add(tail, P, cc, 8 * f, 0, 0.25 * f); } s.px = P.x; s.py = P.y; s.pz = P.z; }
+        D.position.copy(P); D.scale.setScalar((t >= 0.5 && s.o ? Math.max(0.1, 1 - (t - 0.5) * 2) : 1) * (s.g >= 0 ? st.gfg : st.gf[Math.floor(s.m / GC)])); D.rotation.set(0, 0, 0); D.updateMatrix(); shares.setMatrixAt(i, D.matrix);
       }
       trails.commit(); shares.instanceMatrix.needsUpdate = true; if (recolor && shares.instanceColor) shares.instanceColor.needsUpdate = true;
 
@@ -378,14 +381,14 @@ window.Flow3D = (() => {
       const c = st.cnt, tot = Math.max(1, c.ok + c.stale + c.bad), age = st.tipTime ? Math.max(0, Date.now() / 1000 - st.tipTime) : 0;
       switch (k) {
         case 'node': return ['NODE', `height ${nf(st.tip)}`, `tip age ${Math.floor(age / 60)}m ${Math.floor(age % 60)}s`, `link ${st.connected ? 'up' : 'DOWN'}, rtt ${st.rtt.toFixed(1)} ms`, `tip to job p50 ${st.p50.toFixed(0)} ms, p95 ${st.p95.toFixed(0)} ms`];
-        case 'attest': return ['ATTESTATION', `${nf(st.cands)} candidates per tip`, st.batchMs ? `built and attested in ${st.batchMs.toFixed(0)} ms` : '', st.backend ? `backend ${st.backend}` : '', 'every candidate is checked against the node'];
+        case 'attest': return ['ATTESTATION', `${nf(st.cands)} candidates per tip`, st.batchMs ? `built and attested in ${st.batchMs.toFixed(0)} ms` : '', st.backend ? `backend ${st.backend}` : '', 'each candidate checked by the node'];
         case 'tpl': return ['BLOCK TEMPLATE', `${nf(st.cands)} candidate blocks, one per payout script`, `height ${nf(st.tip)}`, 'rebuilt for every new tip'];
-        case 'alloc': return ['ALLOCATOR', `epoch use ${pc(st.used)}`, `${nf(st.units)} work units / s`, `${nf(st.cands)} candidates`, 'a unit is never given twice in an epoch'];
+        case 'alloc': return ['ALLOCATOR', `epoch use ${pc(st.used)}`, `${nf(st.units)} work units / s`, `${nf(st.cands)} candidates`, 'no unit is given twice per epoch'];
         case 'gate': return ['SHARE CHECK', `${st.sharesT.toFixed(1)} shares / s`, `accepted ${nf(c.ok)} (${pc(c.ok / tot)})`, `stale ${nf(c.stale)} (${pc(c.stale / tot)})`, `duplicate or invalid ${nf(c.bad)} (${pc(c.bad / tot)})`];
         case 'm_solo': case 'm_pplns': case 'm_pps': {
           const mk = k.slice(2), m = st.modes.find((o) => o.mode === mk) || { online: 0, hashrate: 0, fee: 0, available: true };
-          const rule = { solo: 'reward paid directly in the coinbase', pplns: 'share of every pool block (last N shares)', pps: 'fixed pay for every share' }[mk];
-          return [mk.toUpperCase() + ' MINERS', `${nf(m.online)} online, ${hrs(m.hashrate)}`, rule, `pool fee ${m.fee}%`, m.available ? '' : 'paused until the pool reserve is funded'];
+          const rule = { solo: 'paid directly in the coinbase', pplns: 'share of each pool block', pps: 'fixed pay per share' }[mk];
+          return [mk.toUpperCase() + ' MINERS', `${nf(m.online)} online, ${hrs(m.hashrate)}`, rule, `pool fee ${m.fee}%`, m.available ? '' : 'paused (reserve not funded)'];
         }
         case 'gw': return ['PHOTON GATEWAYS', `${nf(st.gw)} connected, ${nf(st.chn)} channels`, `${st.pshares.toFixed(1)} shares / s`, `${st.checks.toFixed(1)} spot checks / s`];
         default: return [];
@@ -406,14 +409,14 @@ window.Flow3D = (() => {
     const onMove = (e) => {
       if (drag) return;
       const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, hit = stationAt(mx, my);
-      st.hov = hit ? hit.h : -2;
+      st.hov = hit ? hit.h : -2; st.hovM = hit && hit.k.startsWith('m_') ? modeIdx(hit.k.slice(2)) : -1;
       if (!hit) { tip.hidden = true; return; }
       const lines = info(hit.k).filter(Boolean);
-      tip.innerHTML = lines.map((l, i) => (i ? `<div>${esc(l)}</div>` : `<b>${esc(l)}</b>`)).join('') + '<div class="flowtipnote">numbers are live; single particles are illustrative</div>';
+      tip.innerHTML = lines.map((l, i) => (i ? `<div>${esc(l)}</div>` : `<b>${esc(l)}</b>`)).join('');
       tip.hidden = false;
       tip.style.left = Math.min(mx + 14, st.w - 230) + 'px'; tip.style.top = Math.min(my + 14, st.h - 20 - lines.length * 15) + 'px';
     };
-    const onLeave = () => { tip.hidden = true; st.hov = -2; };
+    const onLeave = () => { tip.hidden = true; st.hov = -2; st.hovM = -1; };
     canvas.addEventListener('pointermove', onMove); canvas.addEventListener('pointerleave', onLeave);
 
     // Orbit controls: drag turns the view (limited, it never goes under the floor), the wheel zooms between 0.7x and 1.5x, a double click resets.
