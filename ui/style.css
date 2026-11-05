@@ -346,3 +346,4 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .mfee { font-size: 26px; text-shadow: 0 0 10px var(--glow); }
 .cbody > div { margin: 2px 0; }
 .crow { transition: grid-template-columns .25s ease; }
+.card h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

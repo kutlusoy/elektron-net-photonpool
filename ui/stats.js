@@ -103,7 +103,7 @@ const Stats = (() => {
   /* ---- extras of the maximized panes ---- */
   function registerExtras() {
     Extras.add('history', (el) => {
-      const k = Extras.card(el, 'pool history', 'wide'), hr = Extras.card(el, 'hash rate', 'wide'), dh = Extras.card(el, 'hash rate by device type', 'wide'), dw = Extras.card(el, 'working connections by device type'), mi = Extras.card(el, 'miners online'), va = Extras.card(el, 'valid shares (%)'), nd = Extras.card(el, 'network difficulty');
+      const k = Extras.card(el, 'pool history', 'wide'), hr = Extras.card(el, 'hash rate', 'wide'), dh = Extras.card(el, 'hash rate by device', 'wide'), dw = Extras.card(el, 'connections by device'), mi = Extras.card(el, 'miners online'), va = Extras.card(el, 'valid shares (%)'), nd = Extras.card(el, 'network difficulty');
       return () => {
         if (!S.hist || !S.hist.points.length) return;
         const p = S.hist.points.map(hist), x = xlabel(S.histRange), avg = (f) => p.reduce((a, q) => a + f(q), 0) / p.length;

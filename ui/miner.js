@@ -140,7 +140,7 @@ const card = Extras.card;
 const wlabel = (w) => trunc(w.name, 24);
 
 Extras.add('hr', (el) => {
-  const k = card(el, 'your hashrate', 'wide'), c = card(el, 'hashrate, last 24 hours (10 minute steps)', 'wide'), sh = card(el, 'shares in 24 h by mode'), sh1 = card(el, 'shares in 1 h by mode');
+  const k = card(el, 'your hashrate', 'wide'), c = card(el, 'hashrate, last 24 hours', 'wide'), sh = card(el, 'shares in 24 h by mode'), sh1 = card(el, 'shares in 1 h by mode');
   return () => {
     const a = M.acct; if (!a) return;
     const h = a.history.map((x) => ({ x: x.time, y: x.hashrate })), ys = h.map((p) => p.y);
@@ -165,7 +165,7 @@ Extras.add('workers', (el) => {
 });
 
 Extras.add('pay', (el) => {
-  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins), oldest to newest', 'wide');
+  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins)', 'wide');
   return () => {
     const a = M.acct; if (!a) return;
     if (!a.payouts.length) { k.innerHTML = '<span class="dim">nothing paid out yet</span>'; return; }

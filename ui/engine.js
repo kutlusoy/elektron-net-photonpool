@@ -83,7 +83,7 @@ const card = Extras.card;
 const timeLine = (host, series, fmt, extra = {}) => Neon.line(host, { series, fmt, xfmt: agoLabel, ...extra });
 
 Extras.add('tip', (el) => {
-  const k = card(el, 'chain and node link', 'wide'), lat = card(el, 'tip to job latency (ms)', 'wide'), iv = card(el, 'seconds between new tips (since this page was opened)', 'wide');
+  const k = card(el, 'chain and node link', 'wide'), lat = card(el, 'tip to job latency (ms)', 'wide'), iv = card(el, 'seconds between new tips', 'wide');
   return () => {
     const s = view.s; if (!s) return;
     Neon.kpis(k, [{ label: 'height', value: s.node.height, fmt: num }, { label: 'tip age', value: Date.now() / 1000 - s.node.tipTime, fmt: (v) => hms(v), color: 'c2' }, { label: 'latency p50', value: s.node.p50, fmt: (v) => v.toFixed(0) + ' ms', color: 'c3' },

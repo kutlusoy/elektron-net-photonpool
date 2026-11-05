@@ -152,7 +152,7 @@ const card = Extras.card;
 const timeLine = (host, series, fmt, extra = {}) => Neon.line(host, { series, fmt, xfmt: agoLabel, ...extra });
 
 Extras.add('pool', (el) => {
-  const k = card(el, 'pool numbers', 'wide'), row = Extras.row(el), hr = card(row, 'pool hashrate (since this page was opened)'), mi = card(row, 'miners and workers online'), bl = card(row, 'blocks');
+  const k = card(el, 'pool numbers', 'wide'), row = Extras.row(el), hr = card(row, 'pool hashrate'), mi = card(row, 'miners and workers'), bl = card(row, 'blocks');
   return () => {
     const p = view.pool; if (!p) return;
     Neon.kpis(k, [{ label: 'hashrate', value: p.hashrate.now, fmt: fmtHash }, { label: '1 h avg', value: p.hashrate.h1, fmt: fmtHash, color: 'c2' }, { label: 'miners', value: p.miners.online, fmt: num }, { label: 'workers', value: p.miners.workers, fmt: num, color: 'c2' },
@@ -168,7 +168,7 @@ const fmtBytes = (v) => { v = Math.max(0, v); const u = ['B', 'KB', 'MB', 'GB', 
 const fmtMs = (v) => (v < 10 ? v.toFixed(1) : Math.round(v)) + ' ms';
 // What the pool does on the network side: traffic, connections and the link to the node. Aggregates only, no address or worker.
 Extras.add('connect', (el) => {
-  const k = card(el, 'network', 'wide'), row = Extras.row(el), tr = card(row, 'traffic to and from the miners (per second)'), cn = card(row, 'connections'), lt = card(row, 'node link: chain tip to new job');
+  const k = card(el, 'network', 'wide'), row = Extras.row(el), tr = card(row, 'traffic per second'), cn = card(row, 'connections'), lt = card(row, 'tip to job latency');
   return () => {
     const e = view.engine; if (!e) { k.innerHTML = '<span class="dim">no network data</span>'; return; }
     const n = e.net;
@@ -186,7 +186,7 @@ const modeColor = { solo: 'c1', pplns: 'c2', pps: 'c3' };
 Extras.add('modes', (el) => {
   const info = Extras.row(el), row = Extras.row(el);
   let cards = null;
-  const ct = card(row, 'connected miners per mode'), ch = card(row, 'hash rate per mode'), cs = card(row, 'share of the pool hash rate');
+  const ct = card(row, 'miners per mode'), ch = card(row, 'hash rate per mode'), cs = card(row, 'hash rate share');
   return () => {
     const p = view.pool; if (!p) return;
     if (!cards) {
@@ -225,7 +225,7 @@ Extras.add('blocks', (el) => {
 });
 
 Extras.add('payouts', (el) => {
-  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins), oldest to newest', 'wide');
+  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins)', 'wide');
   return () => {
     const x = view.payouts; if (!x.length) { k.innerHTML = '<span class="dim">no payouts yet</span>'; return; }
     const tot = x.reduce((a, y) => a + y.amount, 0), sorted = [...x].sort((a, y) => a.time - y.time);

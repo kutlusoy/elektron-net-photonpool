@@ -128,7 +128,7 @@ const card = Extras.card;
 const timeLine = (host, series, fmt, extra = {}) => Neon.line(host, { series, fmt, xfmt: agoLabel, ...extra });
 
 Extras.add('miners', (el) => {
-  const k = card(el, 'fleet', 'wide'), hist = card(el, 'hashrate distribution (workers per hashrate class)'), pr = card(el, 'protocols'), top = card(el, 'top 10 workers by hashrate'), bad = card(el, 'highest stale ratio');
+  const k = card(el, 'fleet', 'wide'), hist = card(el, 'workers per hashrate class'), pr = card(el, 'protocols'), top = card(el, 'top 10 workers by hashrate'), bad = card(el, 'highest stale ratio');
   return () => {
     const all = ui.src.miners(); if (!all.length) return;
     const hrs = all.map((m) => m.hashrate).sort((a, b) => a - b), total = hrs.reduce((a, b) => a + b, 0);
@@ -148,7 +148,7 @@ Extras.add('miners', (el) => {
 
 
 Extras.add('oblocks', (el) => {
-  const k = card(el, 'found blocks', 'wide'), gap = card(el, 'minutes between found blocks', 'wide'), st = card(el, 'status'), wk = card(el, 'blocks per worker');
+  const k = card(el, 'found blocks', 'wide'), gap = card(el, 'minutes between blocks', 'wide'), st = card(el, 'status'), wk = card(el, 'blocks per worker');
   return () => {
     const b = ui.src.blocks(50); if (!b.length) { k.innerHTML = '<span class="dim">no block found yet</span>'; return; }
     const t = b.map((x) => x.time).sort((a, c) => a - c), gaps = t.slice(1).map((x, i) => (x - t[i]) / 60);
