@@ -120,6 +120,23 @@ const Music = (() => {
       P.actx.createMediaElementSource(a).connect(P.an); P.an.connect(P.actx.destination);
     } catch (_) { P.an = null; }
   }
+  // Browsers only let an AudioContext run after a real user gesture (on touch screens the touch end, not the touch start). If it was created in a gesture that
+  // does not count, the player would show "playing" while the audio element is connected to a suspended context: silence and a time that stays at 0.
+  // So every later gesture tries again until the context runs.
+  function unlockAudio() {
+    if (!P.actx || P.unlocking) return;
+    P.unlocking = true;
+    const evs = ['pointerup', 'touchend', 'click', 'keydown'];
+    const done = () => { evs.forEach((n) => document.removeEventListener(n, fix, true)); P.unlocking = false; };
+    function fix() {
+      if (P.actx && P.actx.state === 'suspended') P.actx.resume().catch(() => {});
+      if (P.state === 'playing' && P.audio && P.audio.paused) P.audio.play().catch(() => {});
+      if (!P.actx || P.actx.state === 'running') done();
+    }
+    P.actx.addEventListener('statechange', () => { if (P.actx && P.actx.state === 'running') done(); });
+    evs.forEach((n) => document.addEventListener(n, fix, true));
+  }
+  const muted = () => P.state === 'playing' && !!P.actx && P.actx.state === 'suspended';
   function skip(d) {
     if (!files()) return;
     P.idx = (P.idx + d + P.tracks.length) % P.tracks.length;
@@ -130,7 +147,8 @@ const Music = (() => {
     if (P.state === 'playing') return;
     if (files()) {
       filePlayer();
-      if (P.actx && P.actx.state === 'suspended') P.actx.resume();
+      if (P.actx && P.actx.state === 'suspended') P.actx.resume().catch(() => {});
+      unlockAudio();
       if (P.state === 'stopped' || !P.audio.src) loadTrack(true); else P.audio.play().catch(() => {});
       P.state = 'playing'; return;
     }
@@ -200,7 +218,10 @@ const Music = (() => {
     const tm = document.createElement('span'); tm.className = 'mtime'; w.append(tm);
     const clock = bar.querySelector('.clock'); bar.insertBefore(w, clock);
     const showTime = () => {
-      if (P.armed && P.state === 'stopped') { tm.textContent = 'click anywhere to resume'; return; } tm.textContent = `${P.state === 'stopped' && !files() ? '--:--' : fmt(time())} / ${fmt(length())}`; };
+      if (P.armed && P.state === 'stopped') { tm.textContent = 'click anywhere to resume'; return; }
+      if (muted()) { tm.textContent = 'tap to start sound'; return; }
+      if (P.state === 'playing' && P.audio && P.audio.readyState < 3 && files()) { tm.textContent = 'loading...'; return; }
+      tm.textContent = `${P.state === 'stopped' && !files() ? '--:--' : fmt(time())} / ${fmt(length())}`; };
     showTime();
     // the track and its credit: visible title, tooltip with the credit line, artist link and license code
     P.onTrack = (t) => {
@@ -212,8 +233,8 @@ const Music = (() => {
       if (t.license) line('License code: ' + t.license);
       w.classList.toggle('credit', !!(t.credit || t.url || t.license));
     };
-    const sync = () => { pp.textContent = P.state === 'playing' ? '❚❚' : '▶'; pp.title = P.state === 'playing' ? 'pause music' : 'play music'; w.classList.toggle('on', P.state === 'playing'); };
-    pp.addEventListener('click', () => { if (P.state === 'playing') pause(); else play(); sync(); });
+    const sync = () => { const on = P.state === 'playing' && !muted(); pp.textContent = on ? '❚❚' : '▶'; pp.title = on ? 'pause music' : muted() ? 'start sound' : 'play music'; w.classList.toggle('on', on); };
+    pp.addEventListener('click', () => { if (muted()) { P.actx.resume().catch(() => {}); if (P.audio && P.audio.paused) P.audio.play().catch(() => {}); } else if (P.state === 'playing') pause(); else play(); sync(); });
     st.addEventListener('click', () => { stop(); sync(); showTime(); });
     prev.addEventListener('click', () => skip(-1)); nxt.addEventListener('click', () => skip(1));
     vol.addEventListener('input', () => volume(vol.value / 100));
