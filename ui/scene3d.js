@@ -381,14 +381,14 @@ window.Flow3D = (() => {
       const c = st.cnt, tot = Math.max(1, c.ok + c.stale + c.bad), age = st.tipTime ? Math.max(0, Date.now() / 1000 - st.tipTime) : 0;
       switch (k) {
         case 'node': return ['NODE', `height ${nf(st.tip)}`, `tip age ${Math.floor(age / 60)}m ${Math.floor(age % 60)}s`, `link ${st.connected ? 'up' : 'DOWN'}, rtt ${st.rtt.toFixed(1)} ms`, `tip to job p50 ${st.p50.toFixed(0)} ms, p95 ${st.p95.toFixed(0)} ms`];
-        case 'attest': return ['ATTESTATION', `${nf(st.cands)} candidates per tip`, st.batchMs ? `built and attested in ${st.batchMs.toFixed(0)} ms` : '', st.backend ? `backend ${st.backend}` : '', 'every candidate is checked against the node'];
+        case 'attest': return ['ATTESTATION', `${nf(st.cands)} candidates per tip`, st.batchMs ? `built and attested in ${st.batchMs.toFixed(0)} ms` : '', st.backend ? `backend ${st.backend}` : '', 'each candidate checked by the node'];
         case 'tpl': return ['BLOCK TEMPLATE', `${nf(st.cands)} candidate blocks, one per payout script`, `height ${nf(st.tip)}`, 'rebuilt for every new tip'];
-        case 'alloc': return ['ALLOCATOR', `epoch use ${pc(st.used)}`, `${nf(st.units)} work units / s`, `${nf(st.cands)} candidates`, 'a unit is never given twice in an epoch'];
+        case 'alloc': return ['ALLOCATOR', `epoch use ${pc(st.used)}`, `${nf(st.units)} work units / s`, `${nf(st.cands)} candidates`, 'no unit is given twice per epoch'];
         case 'gate': return ['SHARE CHECK', `${st.sharesT.toFixed(1)} shares / s`, `accepted ${nf(c.ok)} (${pc(c.ok / tot)})`, `stale ${nf(c.stale)} (${pc(c.stale / tot)})`, `duplicate or invalid ${nf(c.bad)} (${pc(c.bad / tot)})`];
         case 'm_solo': case 'm_pplns': case 'm_pps': {
           const mk = k.slice(2), m = st.modes.find((o) => o.mode === mk) || { online: 0, hashrate: 0, fee: 0, available: true };
-          const rule = { solo: 'reward paid directly in the coinbase', pplns: 'share of every pool block (last N shares)', pps: 'fixed pay for every share' }[mk];
-          return [mk.toUpperCase() + ' MINERS', `${nf(m.online)} online, ${hrs(m.hashrate)}`, rule, `pool fee ${m.fee}%`, m.available ? '' : 'paused until the pool reserve is funded'];
+          const rule = { solo: 'paid directly in the coinbase', pplns: 'share of each pool block', pps: 'fixed pay per share' }[mk];
+          return [mk.toUpperCase() + ' MINERS', `${nf(m.online)} online, ${hrs(m.hashrate)}`, rule, `pool fee ${m.fee}%`, m.available ? '' : 'paused (reserve not funded)'];
         }
         case 'gw': return ['PHOTON GATEWAYS', `${nf(st.gw)} connected, ${nf(st.chn)} channels`, `${st.pshares.toFixed(1)} shares / s`, `${st.checks.toFixed(1)} spot checks / s`];
         default: return [];
