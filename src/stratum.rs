@@ -92,9 +92,13 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
             NET.accepted.fetch_add(1, Ordering::Relaxed);
             let stats = Arc::new(SessionStats::new());
             pool.sessions.lock().unwrap().insert(id, stats.clone());
+            let stats_end = stats.clone();
             let res = Session::new(pool.clone(), cfg, port, stats, id).run(stream).await;
             pool.sessions.lock().unwrap().remove(&id);
             NET.closed.fetch_add(1, Ordering::Relaxed);
+            NET.bytes_in.fetch_add(stats_end.net_in.load(Ordering::Relaxed), Ordering::Relaxed);
+            NET.bytes_out.fetch_add(stats_end.net_out.load(Ordering::Relaxed), Ordering::Relaxed);
+            NET.jobs.fetch_add(stats_end.net_jobs.load(Ordering::Relaxed), Ordering::Relaxed);
             if let Err(e) = res {
                 tracing::debug!("session {id} {peer} closed: {e}");
             }
@@ -165,7 +169,8 @@ struct Req<'a> {
     params: Value,
 }
 
-/// Process-wide network counters of the miner-facing listeners, sampled once a second into rates for the engine view.
+/// Network counters of the miner-facing listeners, sampled once a second into rates for the engine view. The hot path (every read and every job) counts in the
+/// session's own atomics (no shared cache line between connections); `bytes_in`, `bytes_out` and `jobs` here hold only what closed sessions have counted.
 use std::sync::atomic::AtomicU64;
 pub struct Net {
     pub bytes_in: AtomicU64,
@@ -178,18 +183,17 @@ pub struct Net {
 pub static NET: Net = Net { bytes_in: AtomicU64::new(0), bytes_out: AtomicU64::new(0), accepted: AtomicU64::new(0), closed: AtomicU64::new(0), refused: AtomicU64::new(0), jobs: AtomicU64::new(0) };
 
 async fn send(wr: &mut OwnedWriteHalf, data: &[u8]) -> Result<()> {
-    NET.bytes_out.fetch_add(data.len() as u64, Ordering::Relaxed);
     timeout(WRITE_TIMEOUT, wr.write_all(data)).await.map_err(|_| anyhow!("write timeout"))??;
     Ok(())
 }
 
-async fn read_chunk(rd: &mut BufReader<OwnedReadHalf>, buf: &mut Vec<u8>) -> Result<Option<bool>> {
+async fn read_chunk(rd: &mut BufReader<OwnedReadHalf>, buf: &mut Vec<u8>, counted: &AtomicU64) -> Result<Option<bool>> {
     if buf.len() > MAX_LINE {
         bail!("line too long");
     }
     let limit = (MAX_LINE + 1 - buf.len()) as u64;
     let n = (&mut *rd).take(limit).read_until(b'\n', buf).await?;
-    NET.bytes_in.fetch_add(n as u64, Ordering::Relaxed);
+    counted.fetch_add(n as u64, Ordering::Relaxed);
     if n == 0 {
         return Ok(None);
     }
@@ -225,7 +229,7 @@ impl Session {
             let next_job = TokioInstant::from_std(self.next_job);
             let started = self.started;
             tokio::select! {
-                r = read_chunk(&mut rd, &mut buf) => match r? {
+                r = read_chunk(&mut rd, &mut buf, &self.stats.net_in) => match r? {
                     None => return Ok(()),
                     Some(false) => {}
                     Some(true) => {
@@ -254,8 +258,13 @@ impl Session {
         }
     }
 
+    async fn tx(&self, wr: &mut OwnedWriteHalf, data: &[u8]) -> Result<()> {
+        self.stats.net_out.fetch_add(data.len() as u64, Ordering::Relaxed);
+        send(wr, data).await
+    }
+
     async fn reply(&self, wr: &mut OwnedWriteHalf, id: &str, result: &str, error: &str) -> Result<()> {
-        send(wr, format!("{{\"id\":{id},\"result\":{result},\"error\":{error}}}\n").as_bytes()).await
+        self.tx(wr, format!("{{\"id\":{id},\"result\":{result},\"error\":{error}}}\n").as_bytes()).await
     }
 
     async fn error(&self, wr: &mut OwnedWriteHalf, id: &str, code: u32, msg: &str) -> Result<()> {
@@ -368,7 +377,7 @@ impl Session {
 
     async fn send_difficulty(&mut self, wr: &mut OwnedWriteHalf) -> Result<()> {
         set_f64(&self.stats.difficulty, self.difficulty);
-        send(wr, format!("{{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[{}]}}\n", self.difficulty).as_bytes()).await
+        self.tx(wr, format!("{{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[{}]}}\n", self.difficulty).as_bytes()).await
     }
 
     async fn set_difficulty(&mut self, wr: &mut OwnedWriteHalf, d: f64) -> Result<()> {
@@ -456,8 +465,8 @@ impl Session {
         let id = (epoch.id << 32) | n as u64;
         let mut msg = String::with_capacity(1024);
         cand.write_notify(&mut msg, id, version, ntime, clean);
-        send(wr, msg.as_bytes()).await?;
-        NET.jobs.fetch_add(1, Ordering::Relaxed);
+        self.tx(wr, msg.as_bytes()).await?;
+        self.stats.net_jobs.fetch_add(1, Ordering::Relaxed);
         self.last_job = Instant::now();
         self.stats.unit.store(((unit.0 as u64) << 16) | ((unit.2 as u64) << 8) | unit.1 as u64, Ordering::Relaxed);
         self.jobs.push_back(JobRef { id, epoch, src, n, version, sent: Instant::now() });
@@ -667,9 +676,13 @@ async fn stats_task(pool: Arc<Pool>) {
         let sessions: Vec<Arc<SessionStats>> = pool.sessions.lock().unwrap().values().cloned().collect();
         let now = unix_now();
         let (mut hr, mut online, mut shares, mut pps_hr) = (0.0, 0u64, 0u64, 0.0);
+        let (mut live_in, mut live_out, mut live_jobs) = (0u64, 0u64, 0u64);
         let mut by_mode = [(0u64, 0.0f64); 3];
         for s in &sessions {
             hr += get_f64(&s.hashrate);
+            live_in += s.net_in.load(Ordering::Relaxed);
+            live_out += s.net_out.load(Ordering::Relaxed);
+            live_jobs += s.net_jobs.load(Ordering::Relaxed);
             if s.mode.load(Ordering::Relaxed) == Mode::Pps as u64 {
                 pps_hr += get_f64(&s.hashrate);
             }
@@ -697,7 +710,9 @@ async fn stats_task(pool: Arc<Pool>) {
         if live.hist.len() > 60 {
             live.hist.pop_front();
         }
-        let net = (NET.bytes_in.load(Ordering::Relaxed), NET.bytes_out.load(Ordering::Relaxed), NET.jobs.load(Ordering::Relaxed), NET.accepted.load(Ordering::Relaxed));
+        let net = (NET.bytes_in.load(Ordering::Relaxed) + live_in, NET.bytes_out.load(Ordering::Relaxed) + live_out, NET.jobs.load(Ordering::Relaxed) + live_jobs, NET.accepted.load(Ordering::Relaxed));
+        live.tot_in = net.0;
+        live.tot_out = net.1;
         live.in_bps = net.0.saturating_sub(prev_net.0) as f64;
         live.out_bps = net.1.saturating_sub(prev_net.1) as f64;
         live.jobs_per_sec = net.2.saturating_sub(prev_net.2) as f64;

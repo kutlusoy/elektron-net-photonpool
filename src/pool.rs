@@ -84,6 +84,10 @@ pub struct SessionStats {
     pub device: Mutex<(String, String)>,
     /// Best share difficulty of this connection, as f64 bits.
     pub best: AtomicU64,
+    /// Network counters of this connection (bytes read, bytes written, jobs sent); summed once a second.
+    pub net_in: AtomicU64,
+    pub net_out: AtomicU64,
+    pub net_jobs: AtomicU64,
 }
 
 impl SessionStats {
@@ -92,7 +96,7 @@ impl SessionStats {
         set_f64(&now, unix_now());
         Self {
             name: Mutex::new(String::new()), ok: AtomicU64::new(0), stale: AtomicU64::new(0), dup: AtomicU64::new(0), inv: AtomicU64::new(0),
-            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0), agent: Mutex::new(String::new()), device: Mutex::new(("other:unknown".into(), "unknown".into())), best: AtomicU64::new(0),
+            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0), agent: Mutex::new(String::new()), device: Mutex::new(("other:unknown".into(), "unknown".into())), best: AtomicU64::new(0), net_in: AtomicU64::new(0), net_out: AtomicU64::new(0), net_jobs: AtomicU64::new(0),
         }
     }
 }
@@ -113,6 +117,9 @@ pub struct Live {
     pub out_bps: f64,
     pub jobs_per_sec: f64,
     pub connects_per_sec: f64,
+    /// Bytes in and out since the start (closed sessions plus live ones), sampled once a second.
+    pub tot_in: u64,
+    pub tot_out: u64,
     /// Started connections and their summed hash rate per payout mode (index: solo, pplns, pps).
     pub by_mode: [(u64, f64); 3],
 }

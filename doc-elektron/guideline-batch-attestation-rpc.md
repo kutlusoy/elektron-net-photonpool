@@ -190,6 +190,8 @@ An external static review of the patch (no build, no run) raised the points belo
 | Parallel heavy calls | Valid | At most two calls run at the same time, further ones fail at once with "busy" (the pool calls it once per tip) |
 | (own finding) coinbase of more than half a block | The reserved weight was clamped silently, which could produce an overweight block | Such a request is refused |
 
+`step30` is the end-to-end version: a real `photond` with the batch backend on the patched node, Stratum miners in pool mode and in solo mode find blocks, and a second UNPATCHED node accepts every one of them (pool and solo, six blocks in a row, the solo block pays the miner directly).
+
 `step28` tests the budgets, the overflow case, the coinbase size limit, the parallel limit and that the node stays responsive and keeps validating blocks during heavy calls. Not done: sanitizer builds (ASan/UBSan) and a coverage-guided fuzzer; the request decoder is covered by the input tests of `step14` and `step28` only.
 
 ## 7. Security

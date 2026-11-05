@@ -23,6 +23,7 @@ if [ -n "$ELEKTROND_BATCH" ]; then
   python3 check_patch_scope.py || rc=1                                          # the patch only adds code, no consensus code is touched
   ELEKTROND="$ELEKTROND_BATCH" python3 step28_batch_rpc_limits.py || rc=1       # budgets, overflow, parallel limit, responsiveness
   UNPATCHED="${ELEKTROND:-elektrond}" ELEKTROND="$ELEKTROND_BATCH" python3 step29_unpatched_node_accepts.py || rc=1   # an unpatched node accepts the batch blocks
+  UNPATCHED="${ELEKTROND:-elektrond}" ELEKTROND="$ELEKTROND_BATCH" python3 step30_pool_blocks_unpatched_node.py || rc=1   # blocks mined through the real pool are accepted by an unpatched node
 else
   echo "[step14] skipped (set ELEKTROND_BATCH to an elektrond built with the Photon node patch)"
 fi

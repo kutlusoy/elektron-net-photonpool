@@ -4,7 +4,7 @@ from photon_testlib import *
 from segwit_addr import encode_segwit_address
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TARGET = os.path.join(ROOT, "target", "release")
+TARGET = os.environ.get("TARGET_DIR", os.path.join(ROOT, "target", "release"))
 API, STRATUM = 18981, 18333
 COUNTS = [int(x) for x in os.environ.get("CONNS", "1000,5000,15000").split(",")]
 AGENT = os.environ.get("AGENT", "bitaxe/BM1370/v2.9.0")
