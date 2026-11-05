@@ -106,7 +106,7 @@ window.Flow3D = (() => {
     const hc = document.createElement('canvas'); hc.width = hc.height = 64; { const g = hc.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32); r.addColorStop(0, 'rgba(255,255,255,.9)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); }
     const haloTex = track(new T.CanvasTexture(hc));
     const halo = (x, y, c, size, o) => { const h = new T.Sprite(track(new T.SpriteMaterial({ map: haloTex, color: c, transparent: true, opacity: o, blending: T.AdditiveBlending, depthWrite: false }))); h.position.set(x, y, 0); h.scale.set(size, size, 1); add(h); return h; };
-    const halos = [halo(X.node, -0.2, col.c1, 5, 0.55), halo(X.attest, -0.2, col.ok, 4, 0.4), halo(X.tpl, -0.2, col.c2, 6, 0.4), halo(X.alloc, -0.4, col.c3, 6, 0.35), halo(X.gate, -0.2, col.ok, 4.5, 0.3), halo(X.miners, -0.2, col.c1, 10, 0.18)];
+    const halos = [halo(X.node, -0.2, col.c1, 4.5, 0.34), halo(X.attest, -0.2, col.ok, 3.6, 0.24), halo(X.tpl, -0.2, col.c2, 5.2, 0.24), halo(X.alloc, -0.4, col.c3, 5.2, 0.2), halo(X.gate, -0.2, col.ok, 4, 0.18), halo(X.miners, -0.2, col.c1, 7, 0.08)];
     labels.forEach(([t, x, y, c]) => { const s = label(t, '#' + c.getHexString(), 0.9 + Math.max(0, (8 - x) / 22)); s.position.set(x, y, 0); add(s); track(s.material); track(s.userData.tex); });
 
     // attestation: the candidates pass this ring on their way from the node to the template and come out checked
@@ -129,7 +129,7 @@ window.Flow3D = (() => {
     const FN = 600, fp = new Float32Array(FN * 3), fv = new Float32Array(FN * 3), fl = new Float32Array(FN), fm = new Float32Array(FN), fc = new Float32Array(FN * 3);
     for (let i = 0; i < FN; i++) { fp[i * 3 + 1] = -50; fl[i] = 0; }
     const fg = track(new T.BufferGeometry()); fg.setAttribute('position', new T.BufferAttribute(fp, 3)); fg.setAttribute('color', new T.BufferAttribute(fc, 3));
-    const fire = add(new T.Points(fg, track(new T.PointsMaterial({ size: 0.45, map: haloTex, vertexColors: true, transparent: true, opacity: 1, blending: T.AdditiveBlending, depthWrite: false })))); fire.frustumCulled = false;
+    const fire = add(new T.Points(fg, track(new T.PointsMaterial({ size: 0.45, map: haloTex, vertexColors: true, transparent: true, opacity: 0.8, blending: T.AdditiveBlending, depthWrite: false })))); fire.frustumCulled = false;
     const white = new T.Color(1, 1, 1); let fireAcc = 0;
     const emit = (i) => {
       const a = Math.random() * 6.283, r = Math.random() * 0.55;
@@ -260,7 +260,7 @@ window.Flow3D = (() => {
       }
       tpl.instanceMatrix.needsUpdate = true; if (tpl.instanceColor) tpl.instanceColor.needsUpdate = true;
       attest.rotation.x += dt * 1.6; attest2.rotation.x -= dt * 2.4; attestFlash = Math.max(0, attestFlash - dt * 3);
-      attest.material.opacity = 0.7 + 0.3 * attestFlash; attest.scale.setScalar(1 + 0.18 * attestFlash); halos[1].material.opacity = 0.35 + 0.5 * attestFlash;
+      attest.material.opacity = 0.7 + 0.3 * attestFlash; attest.scale.setScalar(1 + 0.18 * attestFlash); halos[1].material.opacity = 0.22 + 0.35 * attestFlash;
       parts.forEach((p, i) => { p.position.x = X.tpl + Math.cos(st.t * 0.5 + i * 1.57) * 2.6; p.position.z = Math.sin(st.t * 0.5 + i * 1.57) * 2.6; });
 
       // allocator tiles follow the epoch use
@@ -320,9 +320,9 @@ window.Flow3D = (() => {
       fg.attributes.position.needsUpdate = true; fg.attributes.color.needsUpdate = true;
       // node glimmer
       flare = Math.max(0, flare - dt * 0.8);
-      rays.forEach((r, i) => { r.material.rotation = st.t * (0.05 + (i % 4) * 0.02) * (i % 2 ? 1 : -1) + i * 0.5236; r.material.opacity = 0.14 + 0.1 * Math.sin(st.t * 1.3 + i * 1.9) + 0.55 * flare; r.scale.x = 0.5 + 0.8 * flare; });
+      rays.forEach((r, i) => { r.material.rotation = st.t * (0.05 + (i % 4) * 0.02) * (i % 2 ? 1 : -1) + i * 0.5236; r.material.opacity = 0.09 + 0.07 * Math.sin(st.t * 1.3 + i * 1.9) + 0.4 * flare; r.scale.x = 0.5 + 0.8 * flare; });
       sparkles.rotation.x += dt * 0.25; sparkles.material.opacity = 0.55 + 0.4 * Math.sin(st.t * 5.1) + 0.3 * flare; sparkles.material.size = 0.1 + 0.08 * Math.sin(st.t * 3.3) + 0.12 * flare;
-      halos[0].material.opacity = 0.5 + 0.12 * Math.sin(st.t * 1.7) + 0.4 * flare; halos[0].scale.setScalar(5 + 0.6 * Math.sin(st.t * 1.7) + 2 * flare);
+      halos[0].material.opacity = 0.32 + 0.08 * Math.sin(st.t * 1.7) + 0.3 * flare; halos[0].scale.setScalar(4.5 + 0.4 * Math.sin(st.t * 1.7) + 1.2 * flare);
       // gateways
       const gn = st.photon ? Math.min(MAXG, Math.max(st.gw, 0)) : 0;
       for (let i = 0; i < MAXG; i++) {
@@ -335,9 +335,9 @@ window.Flow3D = (() => {
         }
       }
       gwMesh.instanceMatrix.needsUpdate = true; chGeo.attributes.position.needsUpdate = true;
-      gwHalo.material.opacity = st.photon ? 0.15 + 0.1 * Math.min(1, gn / 4) + 0.3 * gateFlash : 0; gateFlash = Math.max(0, gateFlash - dt * 2.5); halos[4].material.opacity = 0.3 + 0.5 * gateFlash;
+      gwHalo.material.opacity = st.photon ? 0.15 + 0.1 * Math.min(1, gn / 4) + 0.3 * gateFlash : 0; gateFlash = Math.max(0, gateFlash - dt * 2.5); halos[4].material.opacity = 0.18 + 0.35 * gateFlash;
       if (st.checks > 0) { st.accC = (st.accC || 0) + dt * Math.min(4, st.checks); if (st.accC >= 1) { st.accC = 0; gateFlash = 1; } }
-      if (st.hov >= 0) halos[st.hov].material.opacity = Math.min(1, halos[st.hov].material.opacity + 0.35);
+      if (st.hov >= 0) halos[st.hov].material.opacity = Math.min(0.5, halos[st.hov].material.opacity + 0.12);
       // chain, rings, found block
       chain.forEach((c) => { c.m.position.x += (c.tx - c.m.position.x) * (1 - Math.exp(-dt * 4)); c.m.scale.setScalar(Math.min(1, c.m.scale.x + dt * 2)); c.m.rotation.y += dt * 0.3; });
       for (const r of rings) { r.t += dt; r.m.visible = r.t >= 0; if (r.t >= 0) { r.m.scale.setScalar(1 + r.t * 7); r.m.material.opacity = Math.max(0, 0.9 - r.t * 0.6); } }
@@ -401,7 +401,7 @@ window.Flow3D = (() => {
     const ortho = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1), quadGeo = track(new T.PlaneGeometry(2, 2)), quadScene = new T.Scene();
     const quad = new T.Mesh(quadGeo, null); quad.frustumCulled = false; quadScene.add(quad);
     const pass = (frag, uniforms) => new T.ShaderMaterial({ vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: frag, uniforms, depthTest: false, depthWrite: false, blending: T.NoBlending });
-    const matBright = pass('uniform sampler2D t; uniform vec2 px; varying vec2 vUv; void main() { vec4 c = (texture2D(t, vUv + px * vec2(-1., -1.)) + texture2D(t, vUv + px * vec2(1., -1.)) + texture2D(t, vUv + px * vec2(-1., 1.)) + texture2D(t, vUv + px * vec2(1., 1.))) * 0.25; float m = max(max(c.r, c.g), c.b); gl_FragColor = vec4(c.rgb * smoothstep(0.32, 0.8, m), 1.0); }', { t: { value: null }, px: { value: new T.Vector2() } });
+    const matBright = pass('uniform sampler2D t; uniform vec2 px; varying vec2 vUv; void main() { vec4 c = (texture2D(t, vUv + px * vec2(-1., -1.)) + texture2D(t, vUv + px * vec2(1., -1.)) + texture2D(t, vUv + px * vec2(-1., 1.)) + texture2D(t, vUv + px * vec2(1., 1.))) * 0.25; float m = max(max(c.r, c.g), c.b); gl_FragColor = vec4(c.rgb * smoothstep(0.45, 0.95, m), 1.0); }', { t: { value: null }, px: { value: new T.Vector2() } });
     const matBlur = pass('uniform sampler2D t; uniform vec2 dir; varying vec2 vUv; void main() { vec4 s = texture2D(t, vUv) * 0.2270270; s += (texture2D(t, vUv + dir * 1.3846) + texture2D(t, vUv - dir * 1.3846)) * 0.3162162; s += (texture2D(t, vUv + dir * 3.2308) + texture2D(t, vUv - dir * 3.2308)) * 0.0702703; gl_FragColor = s; }', { t: { value: null }, dir: { value: new T.Vector2() } });
     const matMix = pass('uniform sampler2D t; uniform sampler2D b; uniform float k; varying vec2 vUv; void main() { vec4 s = texture2D(t, vUv); vec3 c = s.rgb + texture2D(b, vUv).rgb * k; gl_FragColor = vec4(c, clamp(max(max(c.r, c.g), max(c.b, s.a)), 0.0, 1.0)); }', { t: { value: null }, b: { value: null }, k: { value: 1 } });
     track(matBright); track(matBlur); track(matMix);
@@ -424,7 +424,7 @@ window.Flow3D = (() => {
       matBlur.uniforms.t.value = rtB.texture; matBlur.uniforms.dir.value.set(0, 1 / rtA.height); full(matBlur, rtA);
       matBlur.uniforms.t.value = rtA.texture; matBlur.uniforms.dir.value.set(2 / rtA.width, 0); full(matBlur, rtB); // a second, wider round for a soft halo
       matBlur.uniforms.t.value = rtB.texture; matBlur.uniforms.dir.value.set(0, 2 / rtA.height); full(matBlur, rtA);
-      matMix.uniforms.t.value = rtS.texture; matMix.uniforms.b.value = rtA.texture; matMix.uniforms.k.value = 1.15 + 1.6 * st.flash; full(matMix, null);
+      matMix.uniforms.t.value = rtS.texture; matMix.uniforms.b.value = rtA.texture; matMix.uniforms.k.value = 0.7 + 1.1 * st.flash; full(matMix, null);
     }
     function setLevel(l) {
       if (l === st.lv) return;

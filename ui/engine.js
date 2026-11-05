@@ -23,7 +23,9 @@ async function startFlow() {
   let make = null;
   try {
     const gl = (() => { try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); } catch (_) { return false; } })();
-    if (gl) { await loadScript('/vendor/three.min.js'); await loadScript('/scene3d.js'); if (window.Flow3D) make = Flow3D; }
+    // phones and other touch-only devices get the light 2D scene (no WebGL, no 600 KB library)
+    const phone = matchMedia('(pointer: coarse) and (hover: none)').matches || matchMedia('(max-width: 720px)').matches;
+    if (gl && !phone) { await loadScript('/vendor/three.min.js'); await loadScript('/scene3d.js'); if (window.Flow3D) make = Flow3D; }
   } catch (_) { /* fall back to the 2D scene */ }
   if (!$('#flow')) return; // the view was left while loading
   try { flow = (make || Flow).create(canvas); } catch (_) { flow = Flow.create(canvas); }
