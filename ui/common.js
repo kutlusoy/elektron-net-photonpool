@@ -79,3 +79,6 @@ document.addEventListener('click', (e) => {
   if (s.k === t.dataset.k) s.d = -s.d; else { s.k = t.dataset.k; s.d = +t.dataset.d; }
   document.dispatchEvent(new Event('depthchange'));
 });
+
+// Long hashes in a log line: short while the pane is small, complete while it is maximized (both are in the line, CSS picks one).
+const hashSpans = (text) => esc(text).replace(/\b([0-9a-f]{12})([0-9a-f]{52})\b/g, '<span class="h-short">$1..</span><span class="h-full">$1$2</span>');

@@ -212,7 +212,7 @@ Extras.add('modes', (el) => {
 });
 
 Extras.add('blocks', (el) => {
-  const k = card(el, 'found blocks', 'wide'), gap = card(el, 'minutes between blocks', 'wide'), md = card(el, 'blocks by mode'), st = card(el, 'status');
+  const k = card(el, 'found blocks', 'wide'), row = Extras.row(el), gap = card(row, 'minutes between blocks'), md = card(row, 'blocks by mode'), st = card(row, 'status');
   return () => {
     const b = view.blocks; if (!b.length) { k.innerHTML = '<span class="dim">no block found yet</span>'; return; }
     const t = b.map((x) => x.time).sort((x, y) => x - y), gaps = t.slice(1).map((x, i) => (x - t[i]) / 60);
@@ -225,12 +225,16 @@ Extras.add('blocks', (el) => {
 });
 
 Extras.add('payouts', (el) => {
-  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins)', 'wide');
+  const k = card(el, 'payouts', 'wide'), row = Extras.row(el), c = card(row, 'amount per payout (coins)'), cum = card(row, 'paid out in total (coins)');
+  row.style.gridTemplateColumns = '2fr 1fr';
   return () => {
     const x = view.payouts; if (!x.length) { k.innerHTML = '<span class="dim">no payouts yet</span>'; return; }
     const tot = x.reduce((a, y) => a + y.amount, 0), sorted = [...x].sort((a, y) => a.time - y.time);
     Neon.kpis(k, [{ label: 'listed', value: x.length, fmt: num }, { label: 'total', value: tot, fmt: coins, color: 'c2' }, { label: 'average', value: tot / x.length, fmt: coins, color: 'c2' }, { label: 'largest', value: Math.max(...x.map((y) => y.amount)), fmt: coins, color: 'c3' }]);
     Neon.columns(c, sorted.map((y) => ({ key: y.txid || y.time, label: '', value: y.amount, text: coins(y.amount), tip: agoLabel(y.time) })), { color: 'c2' });
+    let run = 0;
+    if (sorted.length > 1) timeLine(cum, [{ name: 'total', data: sorted.map((y) => ({ x: y.time, y: (run += y.amount) })), color: 'c3' }], (v) => (v / LEPTON).toFixed(2));
+    else cum.innerHTML = '<span class="dim">needs at least two payouts</span>';
   };
 });
 

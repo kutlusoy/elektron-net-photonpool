@@ -157,7 +157,7 @@ impl Pool {
             let hh = hash.clone();
             self.ledger.call(move |c| ledger::set_block_status(c, &hh, status)).await?;
             if status != "maturing" {
-                self.event("info", format!("block {}.. is {status}", &hash[..16.min(hash.len())]));
+                self.event("info", format!("block {hash} is {status}"));
             }
         }
         Ok(())

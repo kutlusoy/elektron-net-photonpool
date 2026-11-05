@@ -158,7 +158,7 @@ Extras.add('workers', (el) => {
   return () => {
     const a = M.acct; if (!a || !a.workerList.length) return;
     Neon.bars(h, [...a.workerList].sort((x, y) => y.hashrate - x.hashrate).slice(0, 12).map((w) => ({ key: w.name, label: wlabel(w), value: w.hashrate, text: fmtHash(w.hashrate) })));
-    Neon.bars(s, a.workerList.filter((w) => w.accepted + w.stale > 0).map((w) => ({ key: w.name, label: wlabel(w), value: w.stale / (w.accepted + w.stale), text: pct(w.stale / (w.accepted + w.stale)), color: 'warn' })).slice(0, 12), { max: 0.05 });
+    Neon.bars(s, a.workerList.filter((w) => w.accepted + w.stale > 0).map((w) => ({ key: w.name, label: wlabel(w), value: w.stale / (w.accepted + w.stale), text: pct(w.stale / (w.accepted + w.stale)) + `  ${num(w.stale)} of ${num(w.accepted + w.stale)}`, color: 'warn' })).slice(0, 12), { max: 0.05 });
     const c = {}; a.workerList.forEach((w) => { c[w.mode] = (c[w.mode] || 0) + 1; });
     Neon.donut(m, Object.entries(c).map(([n, v]) => ({ label: modeLabel[n] || n, value: v, text: num(v) })), { big: num(a.workerList.length), sub: 'workers' });
   };

@@ -362,3 +362,4 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .nchart { margin: 0 -4px; }
 .nkpis { gap: 12px; }
 .nrow { padding: 1px 0; }
+.pane:not(.front) .h-full, .pane.front .h-short { display: none; }

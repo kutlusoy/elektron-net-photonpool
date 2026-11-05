@@ -56,7 +56,7 @@ function line(html) {
 function logEvent(e) {
   const t = new Date(e.t * 1000).toTimeString().slice(0, 8);
   const lv = (e.lvl || 'info').toLowerCase();
-  line(`<span class="t">${t}</span> <span class="lv lv-${lv}">${esc(lv.toUpperCase().padEnd(5))}</span>${esc(e.msg)}`);
+  line(`<span class="t">${t}</span> <span class="lv lv-${lv}">${esc(lv.toUpperCase().padEnd(5))}</span>${hashSpans(e.msg)}`);
   ui.log.push(e); if (ui.log.length > 600) ui.log.shift();
 }
 const out = (html) => line(html);
@@ -71,7 +71,7 @@ function render() {
     `<span>height <b>${num(s.node.height)}</b></span>`,
     `<span>pool <b>${fmtHash(s.hashrate.now)}</b></span>`,
     `<span>miners <b>${num(s.miners.online)}</b>/${num(s.miners.total)}</span>`,
-    `<span class="${efficiency === null || efficiency > 0.985 ? 'ok' : 'warn'}">valid <b>${efficiency === null ? 'n/a' : pct(efficiency)}</b></span>`,
+    `<span class="${efficiency === null || efficiency > 0.985 ? 'ok' : 'warn'}">valid <b>${efficiency === null ? 'n/a' : pct(efficiency)}</b> of ${num(s.shares.total)}</span>`,
     `<span class="${s.node.connected ? 'ok' : 'warn'}">node <b>${s.node.connected ? 'UP' : 'DOWN'}</b> ${esc(s.node.transport)}</span>`,
     `<span>tip age <b>${hms(age)}</b></span>`,
   ].join('');
@@ -142,7 +142,7 @@ Extras.add('miners', (el) => {
     const cp = {}; all.forEach((m) => { cp[m.proto] = (cp[m.proto] || 0) + 1; });
     Neon.donut(pr, Object.entries(cp).map(([p, c], i) => ({ label: p, value: c, color: p === 'V2' ? 'c2' : p === 'EDGE' ? 'c3' : 'c1', text: num(c) })), { big: num(all.length), sub: 'workers' });
     Neon.bars(top, [...all].sort((a, b) => b.hashrate - a.hashrate).slice(0, 10).map((m) => ({ key: m.name, label: trunc(workerLabel(m.name), 22), value: m.hashrate, text: fmtHash(m.hashrate) })));
-    Neon.bars(bad, all.filter((m) => m.ok + m.stale > 20).map((m) => ({ key: m.name, label: trunc(workerLabel(m.name), 22), value: m.stale / (m.ok + m.stale), text: pct(m.stale / (m.ok + m.stale)), color: 'warn' })).sort((a, b) => b.value - a.value).slice(0, 10), { max: 0.05 });
+    Neon.bars(bad, all.filter((m) => m.ok + m.stale > 20).map((m) => ({ key: m.name, label: trunc(workerLabel(m.name), 22), value: m.stale / (m.ok + m.stale), text: pct(m.stale / (m.ok + m.stale)) + `  ${num(m.stale)} of ${num(m.ok + m.stale)}`, color: 'warn' })).sort((a, b) => b.value - a.value).slice(0, 10), { max: 0.05 });
   };
 });
 
@@ -176,7 +176,7 @@ const cmds = {
   },
   status() {
     const s = ui.src.summary();
-    out(`${span('c1', 'pool')}    ${fmtHash(s.hashrate.now)}  ${num(s.miners.online)}/${num(s.miners.total)} miners  valid ${pct(s.shares.ok)}`);
+    out(`${span('c1', 'pool')}    ${fmtHash(s.hashrate.now)}  ${num(s.miners.online)}/${num(s.miners.total)} miners  valid ${pct(s.shares.ok)} of ${num(s.shares.total)} shares`);
     out(`${span('c1', 'chain')}   height ${num(s.node.height)}  tip ${short(s.node.tip)}  ${s.node.connected ? span('ok', 'node up') : span('err', 'node down')}`);
     out(`${span('c1', 'alloc')}   ${num(s.alloc.candidates)} candidates  ${num(s.alloc.unitsPerSec)} units/s  overlap ${s.alloc.overlap}`);
   },

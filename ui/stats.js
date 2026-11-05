@@ -103,27 +103,37 @@ const Stats = (() => {
   /* ---- extras of the maximized panes ---- */
   function registerExtras() {
     Extras.add('history', (el) => {
-      const k = Extras.card(el, 'pool history', 'wide'), hr = Extras.card(el, 'hash rate', 'wide'), dh = Extras.card(el, 'hash rate by device', 'wide'), dw = Extras.card(el, 'connections by device'), mi = Extras.card(el, 'miners online'), va = Extras.card(el, 'valid shares (%)'), nd = Extras.card(el, 'network difficulty');
+      const k = Extras.card(el, 'pool history', 'wide'), r1 = Extras.row(el), alt = Extras.card(r1, 'hash rate by device'), dw = Extras.card(r1, 'connections by device'), r2 = Extras.row(el), mi = Extras.card(r2, 'miners online'), va = Extras.card(r2, 'valid shares (%)'), nd = Extras.card(r2, 'network difficulty');
+      r1.style.gridTemplateColumns = '2fr 1fr';
+      r2.style.gridTemplateColumns = 'repeat(3, 1fr)';
       return () => {
         if (!S.hist || !S.hist.points.length) return;
         const p = S.hist.points.map(hist), x = xlabel(S.histRange), avg = (f) => p.reduce((a, q) => a + f(q), 0) / p.length;
         const ok = p.reduce((a, q) => a + q.ok, 0), bad = p.reduce((a, q) => a + q.stale + q.dup, 0);
         Neon.kpis(k, [{ label: 'now', value: p[p.length - 1].hr, fmt: fmtHash }, { label: 'average', value: avg((q) => q.hr), fmt: fmtHash, color: 'c2' }, { label: 'peak', value: Math.max(...p.map((q) => q.hr)), fmt: fmtHash, color: 'c3' },
-          { label: 'miners peak', value: Math.max(...p.map((q) => q.miners)), fmt: num, color: 'ok' }, { label: 'valid shares', value: ok + bad ? ok / (ok + bad) * 100 : 100, fmt: (v) => v.toFixed(2) + '%', color: 'ok' },
+          { label: 'miners peak', value: Math.max(...p.map((q) => q.miners)), fmt: num, color: 'ok' }, { label: 'valid shares', value: ok + bad ? ok / (ok + bad) * 100 : 100, fmt: (v) => v.toFixed(2) + '%', color: 'ok', sub: `${num(ok)} of ${num(ok + bad)} shares` },
           { label: 'kept for', value: S.keepDays || 0, fmt: (v) => v + ' days', color: 'c2', sub: S.hist.points.length + ' points' }]);
-        Neon.line(hr, { series: [{ name: 'hash rate', data: p.map((q) => ({ x: q.t, y: q.hr })), color: 'c1' }], fmt: fmtHash, xfmt: x });
+        // the chart of the pane itself shows what the toggle selects; this card shows the other view, so nothing appears twice
+        const devMode = S.histMode === 'devices';
+        alt.parentElement.querySelector('h3').textContent = devMode ? 'pool hash rate' : 'hash rate by device';
         const dv = (S.dhist && S.dhist.devices) || [];
         if (dv.length) {
-          Neon.line(dh, { series: dv.map((d, i) => ({ name: d.name, data: d.points.map((q) => ({ x: q[0], y: q[1] })), color: DEV_COLORS[i % DEV_COLORS.length] })), fmt: fmtHash, xfmt: x });
+          if (devMode) Neon.line(alt, { series: [{ name: 'hash rate', data: p.map((q) => ({ x: q.t, y: q.hr })), color: 'c1' }], fmt: fmtHash, xfmt: x });
+          else Neon.line(alt, { series: dv.map((d, i) => ({ name: d.name, data: d.points.map((q) => ({ x: q[0], y: q[1] })), color: DEV_COLORS[i % DEV_COLORS.length] })), fmt: fmtHash, xfmt: x });
           Neon.line(dw, { series: dv.map((d, i) => ({ name: d.name, data: d.points.map((q) => ({ x: q[0], y: q[2] })), color: DEV_COLORS[i % DEV_COLORS.length] })), fmt: num, xfmt: x });
-        } else { dh.innerHTML = dw.innerHTML = '<span class="dim">no device statistics stored yet</span>'; }
+        } else {
+          if (devMode) Neon.line(alt, { series: [{ name: 'hash rate', data: p.map((q) => ({ x: q.t, y: q.hr })), color: 'c1' }], fmt: fmtHash, xfmt: x });
+          else alt.innerHTML = '<span class="dim">no device statistics stored yet</span>';
+          dw.innerHTML = '<span class="dim">no device statistics stored yet</span>';
+        }
         Neon.line(mi, { series: [{ name: 'miners', data: p.map((q) => ({ x: q.t, y: q.miners })), color: 'ok' }], fmt: num, xfmt: x });
         Neon.line(va, { series: [{ name: 'valid %', data: p.map((q) => ({ x: q.t, y: q.ok + q.stale + q.dup ? q.ok / (q.ok + q.stale + q.dup) * 100 : 100 })), color: 'c3' }], fmt: (v) => v.toFixed(1), xfmt: x });
         Neon.line(nd, { series: [{ name: 'difficulty', data: p.map((q) => ({ x: q.t, y: q.nd })), color: 'c2' }], fmt: fmtDiff, xfmt: x });
       };
     });
     Extras.add('devices', (el) => {
-      const k = Extras.card(el, 'devices', 'wide'), hr = Extras.card(el, 'hash rate by device'), wk = Extras.card(el, 'working connections'), bs = Extras.card(el, 'best share by device');
+      const k = Extras.card(el, 'devices', 'wide'), row = Extras.row(el), hr = Extras.card(row, 'hash rate by device'), wk = Extras.card(row, 'connections'), bs = Extras.card(row, 'best share by device');
+      row.style.gridTemplateColumns = 'repeat(3, 1fr)';
       return () => {
         const d = S.devices; if (!d || !d.length) return;
         const tot = d.reduce((a, x) => a + x.hashrate, 0), conns = d.reduce((a, x) => a + x.working, 0);

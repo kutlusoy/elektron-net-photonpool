@@ -641,7 +641,7 @@ impl Session {
                     if let Err(e) = pool.record_block(height, reward, subsidy, net_diff, hash.clone(), account, worker.clone(), mode).await {
                         pool.event("err", format!("ledger could not record block {height}: {e}"));
                     }
-                    pool.event("blk", format!("BLOCK FOUND {height} {}.. by {worker} [{}] -> submitblock: accepted", &hash[..16], mode.as_str()));
+                    pool.event("blk", format!("BLOCK FOUND {height} {hash} by {worker} [{}] -> submitblock: accepted", mode.as_str()));
                 }
                 Ok(Some(r)) => pool.event("err", format!("block {height} by {worker} rejected by node: {r}")),
                 Err(e) => pool.event("err", format!("submitblock failed for {height}: {e}")),
@@ -655,6 +655,7 @@ async fn stats_task(pool: Arc<Pool>) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let (mut prev_shares, mut prev_units, mut prev_epoch) = (0u64, 0u64, 0u64);
     let mut prev_net = (0u64, 0u64, 0u64, 0u64);
+    let (mut told_online, mut told_at) = (0u64, Instant::now());
     // one history sample per minute for the public statistics
     let (mut hist_minute, mut hist_sum, mut hist_n, mut hist_base) = (unix_now() as i64 / 60, 0.0f64, 0u32, (0u64, 0u64, 0u64));
     // per device type: (name, summed hash rate of the seconds, seconds, peak working connections), written once per device_history_minutes
@@ -703,6 +704,14 @@ async fn stats_task(pool: Arc<Pool>) {
         live.connects_per_sec = net.3.saturating_sub(prev_net.3) as f64;
         prev_net = net;
         live.by_mode = by_mode;
+        // a changed number of connected miners is worth a line in the feed, at most one every 30 seconds
+        if online != told_online && told_at.elapsed() >= Duration::from_secs(30) {
+            let d = online as i64 - told_online as i64;
+            told_online = online;
+            told_at = Instant::now();
+            let p = pool.clone();
+            p.event("info", format!("miners online: {online} ({}{d})", if d >= 0 { "+" } else { "" }));
+        }
         live.online = online;
         live.total = sessions.len() as u64;
         drop(live);

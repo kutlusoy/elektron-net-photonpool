@@ -21,7 +21,7 @@ function addEvent(e) {
   if (!box) return;
   const d = document.createElement('div');
   const t = new Date(e.t * 1000).toTimeString().slice(0, 8), lv = String(e.lvl || 'info').toLowerCase().replace(/[^a-z]/g, '');
-  d.innerHTML = `<span class="t">${t}</span> <span class="lv lv-${lv}">${esc(lv.toUpperCase().padEnd(5))}</span>${esc(e.msg)}`;
+  d.innerHTML = `<span class="t">${t}</span> <span class="lv lv-${lv}">${esc(lv.toUpperCase().padEnd(5))}</span>${hashSpans(e.msg)}`;
   box.appendChild(d);
   while (box.childElementCount > 300) box.firstChild.remove();
   if (view.follow) box.scrollTop = box.scrollHeight;
@@ -70,10 +70,10 @@ function render() {
   ].join('\n');
   $('#pane-shares').innerHTML = [
     `${span('dim', 'shares/s  ')}${s.shares.perSec.toFixed(1)}`,
-    `${span('dim', 'accepted  ')}${span('ok', pct(s.shares.ok))}`,
-    `${span('dim', 'stale     ')}${span('warn', pct(s.shares.stale))}`,
-    `${span('dim', 'duplicate ')}${pct(s.shares.dup)}`,
-    `${span('dim', 'invalid   ')}${span('err', pct(s.shares.inv))}`,
+    `${span('dim', 'accepted  ')}${span('ok', pct(s.shares.ok))}  ${num(s.shares.okN)}`,
+    `${span('dim', 'stale     ')}${span('warn', pct(s.shares.stale))}  ${num(s.shares.staleN)}`,
+    `${span('dim', 'duplicate ')}${pct(s.shares.dup)}  ${num(s.shares.dupN)}`,
+    `${span('dim', 'invalid   ')}${span('err', pct(s.shares.inv))}  ${num(s.shares.invN)}`,
     `${span('dim', 'total     ')}${num(s.shares.total)}`,
   ].join('\n');
   Extras.tick();
@@ -111,9 +111,9 @@ Extras.add('shares', (el) => {
   const k = card(el, 'share quality', 'wide'), q = card(el, 'share outcome'), r = card(el, 'shares per second');
   return () => {
     const s = view.s; if (!s) return;
-    Neon.kpis(k, [{ label: 'shares / s', value: s.shares.perSec, fmt: (v) => v.toFixed(1), color: 'c3' }, { label: 'accepted', value: s.shares.ok * 100, fmt: (v) => v.toFixed(2) + '%', color: 'ok' },
-      { label: 'stale', value: s.shares.stale * 100, fmt: (v) => v.toFixed(2) + '%', color: 'warn' }, { label: 'total', value: s.shares.total, fmt: num, color: 'c2' }]);
-    Neon.donut(q, [{ label: 'accepted', value: s.shares.ok, color: 'ok', text: pct(s.shares.ok) }, { label: 'stale', value: s.shares.stale, color: 'warn', text: pct(s.shares.stale) }, { label: 'duplicate', value: s.shares.dup, color: 'c3', text: pct(s.shares.dup) }, { label: 'invalid', value: s.shares.inv, color: 'err', text: pct(s.shares.inv) }], { big: pct(s.shares.ok), sub: 'accepted' });
+    Neon.kpis(k, [{ label: 'shares / s', value: s.shares.perSec, fmt: (v) => v.toFixed(1), color: 'c3' }, { label: 'accepted', value: s.shares.ok * 100, fmt: (v) => v.toFixed(2) + '%', color: 'ok', sub: num(s.shares.okN) + ' shares' },
+      { label: 'stale', value: s.shares.stale * 100, fmt: (v) => v.toFixed(2) + '%', color: 'warn', sub: num(s.shares.staleN) + ' shares' }, { label: 'duplicate / invalid', value: s.shares.dupN + s.shares.invN, fmt: num, color: 'c3', sub: `${num(s.shares.dupN)} duplicate, ${num(s.shares.invN)} invalid` }, { label: 'total', value: s.shares.total, fmt: num, color: 'c2', sub: 'shares since start' }]);
+    Neon.donut(q, [{ label: 'accepted', value: s.shares.ok, color: 'ok', text: pct(s.shares.ok) + '  ' + num(s.shares.okN) }, { label: 'stale', value: s.shares.stale, color: 'warn', text: pct(s.shares.stale) + '  ' + num(s.shares.staleN) }, { label: 'duplicate', value: s.shares.dup, color: 'c3', text: pct(s.shares.dup) + '  ' + num(s.shares.dupN) }, { label: 'invalid', value: s.shares.inv, color: 'err', text: pct(s.shares.inv) + '  ' + num(s.shares.invN) }], { big: num(s.shares.total), sub: 'shares' });
     timeLine(r, [{ name: 'shares/s', data: Series.get('sps'), color: 'c2' }], (v) => v.toFixed(1));
   };
 });
