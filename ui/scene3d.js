@@ -12,9 +12,9 @@ window.Flow3D = (() => {
   const ease = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
 
   function label(text, color, scale = 1) {
-    const c = document.createElement('canvas'); c.width = 256; c.height = 64;
-    const g = c.getContext('2d'); g.font = '600 28px ui-monospace, Menlo, monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillStyle = color; g.fillText(text, 128, 34);
+    const c = document.createElement('canvas'); c.width = 512; c.height = 128;
+    const g = c.getContext('2d'); g.font = '600 56px ui-monospace, Menlo, monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = color; g.fillText(text, 256, 68);
     const tex = new T.CanvasTexture(c);
     const m = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
     m.scale.set(4 * scale, 1 * scale, 1); m.userData.tex = tex;
@@ -206,7 +206,7 @@ window.Flow3D = (() => {
       { fps: 30, dpr: 1.75, bloom: true, jobs: 150, shares: 90, fire: 600, rate: 1, trails: true, sway: 1 },
     ];
     canvas.dataset.level = '0'; st.lv = 0; st.cap = 2; st.slow = 0; st.avg = 0; st.t0 = performance.now(); let q = LV[0];
-    const pane = canvas.closest('.pane'), isFront = () => !!(pane && pane.classList.contains('front'));
+    const pane = canvas.closest('.pane'), isFront = () => !!(pane && pane.classList.contains('front')), otherFront = () => !!document.querySelector('.pane.front') && !isFront();
     const size = () => { const r = canvas.getBoundingClientRect(); st.w = Math.max(10, r.width); st.h = Math.max(10, r.height); const dpr = Math.min(q.dpr, devicePixelRatio || 1); st.dpr = dpr; renderer.setPixelRatio(dpr); renderer.setSize(st.w, st.h, false); cam.aspect = st.w / st.h; cam.updateProjectionMatrix(); for (const f of [lines, trails]) { f.mat.uniforms.res.value.set(st.w * dpr, st.h * dpr); f.mat.uniforms.pxr.value = dpr; } bloomSize(); };
     const ro = new ResizeObserver(size); ro.observe(canvas);
     const io = new IntersectionObserver((e) => { st.vis = e[0].isIntersecting; kick(); }); io.observe(canvas);
@@ -382,7 +382,7 @@ window.Flow3D = (() => {
     }
     let lvChecked = 0;
     function control(ts, frameMs) {
-      if (ts - lvChecked > 300) { lvChecked = ts; const want = Math.min(isFront() ? 2 : 0, st.cap); if (want !== st.lv) setLevel(want); }
+      if (ts - lvChecked > 300) { lvChecked = ts; st.bg = otherFront(); if (st.bg) { st.last = 0; return; } const want = Math.min(isFront() ? 2 : 0, st.cap); if (want !== st.lv) setLevel(want); }
       // the frame rate cannot keep up: step down for good (until the page is reloaded)
       st.avg = st.avg ? st.avg * 0.94 + frameMs * 0.06 : frameMs;
       if (st.lv > 0 && st.avg > 1000 / q.fps * 1.7) { if (++st.slow > 45) { st.cap = st.lv - 1; setLevel(Math.min(st.lv, st.cap)); } } else st.slow = Math.max(0, st.slow - 1);
@@ -391,6 +391,7 @@ window.Flow3D = (() => {
     function frame(ts) {
       st.raf = 0; if (!st.run) return;
       if (document.hidden || !st.vis) { st.last = 0; return; }
+      if (st.bg) { st.raf = requestAnimationFrame(frame); if (ts - lvChecked > 300) control(ts, 1000); return; } // another pane is in front: nothing to animate
       if (!st.last || ts - st.last >= 1000 / q.fps - 2) {
         const t0 = performance.now(), gap = st.last ? ts - st.last : 1000 / q.fps, dt = st.last ? Math.min(0.1, gap / 1000) : 0.033;
         update(dt); renderScene(); st.last = ts;
