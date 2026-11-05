@@ -28,6 +28,7 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/api/v1/events", get(events))
         .route("/api/v1/ledger", get(ledger_view))
         .route("/api/v1/devices", get(|State(p): State<Arc<Pool>>| async move { Json(devices_view(&p)) }))
+        .route("/api/v1/history/devices", get(|State(p): State<Arc<Pool>>, Query(q): Query<RangeQ>| async move { Json(device_history_view(&p, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/api/v1/history", get(|State(p): State<Arc<Pool>>, Query(q): Query<RangeQ>| async move { Json(history_view(&p, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/api/v1/account/:address", get(account))
         .route("/music/playlist.json", get(|State(p): State<Arc<Pool>>| crate::music::playlist_response(crate::music::dir(&p.cfg.api.music_dir, &p.cfg.api.ui_dir))))
@@ -89,6 +90,41 @@ pub async fn history_view(p: &Arc<Pool>, range: &str) -> Value {
     let rows = p.ledger.call(move |c| crate::ledger::history(c, since, slot)).await.unwrap_or_default();
     let points: Vec<Value> = rows.into_iter().map(|(m, hr, miners, ok, stale, dup, nd)| json!([m * 60, hr, miners, ok, stale, dup, nd])).collect();
     let v = json!({"range": range, "minutes": minutes, "stepMinutes": slot, "keepDays": p.cfg.ledger.stats_keep_days, "points": points});
+    p.hist_cache.lock().unwrap().insert(key, (std::time::Instant::now(), v.clone()));
+    v
+}
+
+/// History per device type: for the eight types with the most hash rate in the range, `points` of `[time, hash rate, working connections]` in slots of `stepMinutes`.
+pub async fn device_history_view(p: &Arc<Pool>, range: &str) -> Value {
+    let keep = p.cfg.ledger.stats_keep_days.max(1) * 1440;
+    let base = p.cfg.ledger.device_history_minutes.max(1);
+    let (minutes, slot): (i64, i64) = match range {
+        "1h" => (60, base),
+        "7d" => (7 * 1440, 30.max(base)),
+        "30d" => (30 * 1440, 120.max(base)),
+        "all" => (keep, (keep / 400).max(base)),
+        _ => (1440, 5.max(base)),
+    };
+    let minutes = minutes.min(keep);
+    let key = format!("devices/{minutes}/{slot}");
+    if let Some((t, v)) = p.hist_cache.lock().unwrap().get(&key) {
+        if t.elapsed() < std::time::Duration::from_secs(20) {
+            return v.clone();
+        }
+    }
+    let since = unix_now() as i64 / 60 - minutes;
+    let rows = p.ledger.call(move |c| crate::ledger::device_history(c, since, slot)).await.unwrap_or_default();
+    let mut by: std::collections::HashMap<String, (String, f64, Vec<Value>)> = std::collections::HashMap::new();
+    for (m, dev, name, hr, workers) in rows {
+        let e = by.entry(dev).or_insert((name, 0.0, Vec::new()));
+        e.1 += hr;
+        e.2.push(json!([m * 60, hr, workers]));
+    }
+    let mut list: Vec<(String, (String, f64, Vec<Value>))> = by.into_iter().collect();
+    list.sort_by(|a, b| b.1 .1.partial_cmp(&a.1 .1).unwrap_or(std::cmp::Ordering::Equal));
+    list.truncate(8);
+    let devices: Vec<Value> = list.into_iter().map(|(k, (name, _, pts))| json!({"key": k, "name": name, "points": pts})).collect();
+    let v = json!({"range": range, "minutes": minutes, "stepMinutes": slot, "keepDays": p.cfg.ledger.stats_keep_days, "devices": devices});
     p.hist_cache.lock().unwrap().insert(key, (std::time::Instant::now(), v.clone()));
     v
 }

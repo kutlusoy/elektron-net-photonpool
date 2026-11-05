@@ -78,6 +78,7 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/public/v1/blocks", get(blocks))
         .route("/public/v1/payouts", get(payouts))
         .route("/public/v1/devices", get(|State(s): State<St>| async move { Json(crate::api::devices_view(&s.pool)) }))
+        .route("/public/v1/history/devices", get(|State(s): State<St>, Query(q): Query<crate::api::RangeQ>| async move { Json(crate::api::device_history_view(&s.pool, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/public/v1/history", get(|State(s): State<St>, Query(q): Query<crate::api::RangeQ>| async move { Json(crate::api::history_view(&s.pool, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/public/v1/account/:address", get(account))
         .route("/", get(|State(s): State<St>| file(s, "public.html", "text/html; charset=utf-8")))

@@ -316,3 +316,10 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .rbtn:hover { color: var(--c1); }
 .rbtn.on { color: var(--c3); border-color: var(--c3); text-shadow: 0 0 8px var(--glow); }
 .pane.front .chartpane { flex: 0 1 auto; height: 28%; }
+
+.rng .sep2 { display: inline-block; width: 1px; margin: 2px 4px; background: var(--line); }
+
+.hleg { position: absolute; top: 2px; right: 14px; display: flex; gap: 12px; font-size: 10px; color: var(--dim); pointer-events: none; }
+.hleg .sw { display: inline-block; width: 8px; height: 8px; margin-right: 5px; box-shadow: 0 0 6px currentColor; }
+.hleg .sw.c1 { background: var(--c1); color: var(--c1); } .hleg .sw.c2 { background: var(--c2); color: var(--c2); } .hleg .sw.c3 { background: var(--c3); color: var(--c3); }
+.hleg .sw.ok { background: var(--ok); color: var(--ok); } .hleg .sw.warn { background: var(--warn); color: var(--warn); } .hleg .sw.err { background: var(--err); color: var(--err); }

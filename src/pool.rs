@@ -80,6 +80,8 @@ pub struct SessionStats {
     pub job_ms: AtomicU64,
     /// User agent sent with mining.subscribe (printable ASCII, at most 64 characters).
     pub agent: Mutex<String>,
+    /// (key, name) of the device type, from the agent (set when the miner subscribes).
+    pub device: Mutex<(String, String)>,
     /// Best share difficulty of this connection, as f64 bits.
     pub best: AtomicU64,
 }
@@ -90,7 +92,7 @@ impl SessionStats {
         set_f64(&now, unix_now());
         Self {
             name: Mutex::new(String::new()), ok: AtomicU64::new(0), stale: AtomicU64::new(0), dup: AtomicU64::new(0), inv: AtomicU64::new(0),
-            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0), agent: Mutex::new(String::new()), best: AtomicU64::new(0),
+            hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0), agent: Mutex::new(String::new()), device: Mutex::new(("other:unknown".into(), "unknown".into())), best: AtomicU64::new(0),
         }
     }
 }

@@ -30,6 +30,7 @@ listen = "127.0.0.1:{PUB}"
 [ledger]
 path = "{path}.db"
 stats_keep_days = 7
+device_history_minutes = 1
 [api]
 listen = "127.0.0.1:{API}"
 ui_dir = "{os.path.join(ROOT, 'ui')}"
@@ -76,6 +77,20 @@ async def main(h):
     h.check("the history has a stored sample after a minute", len(pts) >= 1, str(pts[:1]))
     if pts:
         h.check("a sample is [time, hash rate, miners, ok, stale, dup, network difficulty]", len(pts[0]) == 7 and pts[0][2] >= 4, str(pts[0]))
+    # history per device type (stored once per minute here)
+    t0 = time.time(); dv = []
+    while time.time() - t0 < 80:
+        dv = get(PUB, "/public/v1/history/devices?range=1h")["devices"]
+        if dv: break
+        await asyncio.sleep(3)
+    names = {d["name"]: d for d in dv}
+    h.check("the history by device type has the device types", {"Bitaxe", "NerdMiner", "MyOwnMiner"} <= set(names), str(sorted(names)))
+    if "Bitaxe" in names:
+        pt = names["Bitaxe"]["points"][0]
+        h.check("a device point is [time, hash rate, working connections] with the two Bitaxes", len(pt) == 3 and pt[2] == 2, str(pt))
+    for r in ("24h", "7d", "30d", "all"):
+        v = get(PUB, f"/public/v1/history/devices?range={r}")
+        h.check(f"device history range {r} is served", v["range"] == r and isinstance(v["devices"], list))
     for r in ("24h", "7d", "30d", "all"):
         v = get(PUB, f"/public/v1/history?range={r}")
         h.check(f"range {r} is served", v["range"] == r and v["keepDays"] == 7 and isinstance(v["points"], list))

@@ -188,6 +188,9 @@ keep_days = 14
 # Pool statistics (one sample per minute: hash rate, miners, shares) are kept this many days and then deleted, so new visitors see the recent history
 # of the pool and the database does not grow without end (about 70 bytes per minute, 6 MB for 60 days). Options: whole number of days. Default 60.
 stats_keep_days = 60
+# Hash rate and working connections per device type (Bitaxe, NerdMiner, ...) are stored once per this many minutes for the history by device type; they are kept
+# for stats_keep_days as well (about 70 bytes per device type and sample). Options: whole number of minutes >= 1. Default 5.
+device_history_minutes = 5
 
 [api]
 # Read-only admin API and web UI. Keep this on loopback or a management network; never publish it.

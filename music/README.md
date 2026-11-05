@@ -4,6 +4,8 @@ Optional music for the web pages (operator page, public pool page, miner page). 
 (mp3, ogg, opus, m4a, wav, flac); the pages then show a player in the title bar (play, pause, stop, previous, next,
 volume). The playlist loops. Without files here the pages use a built-in generated score instead.
 
+If the music was playing when a visitor left, it resumes at the first click or key press on their next visit, on the same track and position (browsers only allow sound after such an interaction); pause and stop switch this off.
+
 Files are streamed by the browser, so they do not use memory on the server or in the page.
 
 ## Playlist and credits

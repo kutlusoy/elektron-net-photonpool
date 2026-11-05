@@ -14,12 +14,12 @@ The daemon can serve a public page for miners on its own listener (`[public]`, o
 
 ## 1.0 One page, several views
 
-The public pages are one single-page app (`public.html` with `spa.js`): the pool view (`/`) and the miner view (`/miner`, `/miner/<address>`, also `/miner.html#<address>`) are swapped in place with a short view transition and no reload, so the title bar with the **music player** and the clock stays and **the music keeps playing** when a visitor changes the page. A visitor who opens a path directly or reloads starts without music (browsers allow sound only after a click). The browser's back button and the command `miner <address>` in the terminal work as navigation. There is no build step: plain JavaScript files, no framework.
+The public pages are one single-page app (`public.html` with `spa.js`): the pool view (`/`) and the miner view (`/miner`, `/miner/<address>`, also `/miner.html#<address>`) are swapped in place with a short view transition and no reload, so the title bar with the **music player** and the clock stays and **the music keeps playing** when a visitor changes the page. A visitor who opens a path directly or reloads starts without music at first (browsers allow sound only after a click or key press); if the music was playing, it **resumes at the first click or key press anywhere on the page**, on the same track and at the same position (the browser remembers this locally; pause and stop are remembered too, so nothing starts that the visitor switched off). While it waits the player shows "click anywhere to resume". The browser's back button and the command `miner <address>` in the terminal work as navigation. There is no build step: plain JavaScript files, no framework.
 
 The pool view also shows the **device table** and the **pool history**:
 
 - **Devices:** the miners listed by the name they send when they connect (user agent), for example Bitaxe, NerdMiner, NerdQAxe+, cpuminer, with the number of working connections, their hash rate and the best share difficulty ever seen from that type. Known open source miners are linked to their project and marked with a star (open source software and hardware); unknown names are listed as they are. The list of known miners is in `src/devices.rs`.
-- **History:** a hash rate chart with the ranges 1 h, 24 h, 7 d, 30 d and all, read from the statistics that the pool stores (below). The maximized pane adds miners online, the share of valid shares, the network difficulty and how long the history is kept.
+- **History:** a hash rate chart with the ranges 1 h, 24 h, 7 d, 30 d and all, read from the statistics that the pool stores (below). A switch changes between the whole pool and **one line per device type** (the eight types with the most hash rate); the maximized pane adds the hash rate and the working connections by device type. The maximized pane adds miners online, the share of valid shares, the network difficulty and how long the history is kept.
 
 ## 1.1 The miner page
 
@@ -33,6 +33,7 @@ The pool view also shows the **device table** and the **pool history**:
 | `GET /blocks?limit=n` | height, hash, time, mode, status, **masked** finder (`be1q..abcd`), explorer link |
 | `GET /payouts?limit=n` | time, txid, total amount, status |
 | `GET /devices` | `devices[]` with `name`, project `url` (null for unknown types), `openSource`, `working` connections, `hashrate` and `best` share difficulty per device type, sorted by hash rate; no worker names, no agent strings other than the type name |
+| `GET /history/devices?range=1h\|24h\|7d\|30d\|all` | the same by device type: `devices[]` with `key`, `name` and `points` of `[time, hash rate, working connections]` for the eight types with the most hash rate; stored once per `ledger.device_history_minutes` (default 5) |
 | `GET /history?range=1h\|24h\|7d\|30d\|all` | stored pool statistics: `points` of `[time, hash rate, miners, ok, stale, dup, network difficulty]` in slots of `stepMinutes`, and `keepDays`; the answer is cached for 20 s |
 | `GET /account/<address>` | hashrate, online workers (`workerList` with mode, hashrate, difficulty, accepted, stale, invalid, last seen), shares of the last hour and 24 h per mode, pending, payable and paid balance in leptons, minimum payout, last payouts, PPLNS credits per block with the blocks until maturity (`credits`), blocks found by the address, and a 24 h hashrate history in 10 minute slots. `400` for an address that is not valid for the configured network. |
 

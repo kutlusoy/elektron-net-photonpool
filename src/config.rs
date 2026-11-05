@@ -58,6 +58,9 @@ pub struct LedgerCfg {
     /// Pool statistics (one sample per minute: hash rate, miners, shares) are kept for this many days and then deleted; the public pages draw their history from them.
     #[serde(default = "d_stats_keep")]
     pub stats_keep_days: i64,
+    /// Hash rate and working connections per device type are stored once per this many minutes (the pool-wide history is stored every minute).
+    #[serde(default = "d_dev_slot")]
+    pub device_history_minutes: i64,
 }
 
 impl Default for LedgerCfg {
@@ -69,6 +72,7 @@ impl Default for LedgerCfg {
 fn d_db() -> String { "photond.db".into() }
 fn d_keep() -> i64 { 14 }
 fn d_stats_keep() -> i64 { 60 }
+fn d_dev_slot() -> i64 { 5 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -569,7 +573,7 @@ mod tests {
         same!(payout.default_mode, payout.modes, payout.min_payout_leptons, payout.max_solo_accounts, payout.dry_run, payout.interval_secs, payout.wallet, payout.wallet_addresses, payout.wallet_passphrase_env, payout.maturity_poll_secs, payout.max_outputs_per_tx, payout.fee_rate);
         same!(payout.fee_pct.pplns, payout.fee_pct.pps, payout.pplns.window_factor, payout.pps.enabled, payout.pps.reserve_min, payout.pps.max_hashrate_share);
         same!(public.enabled, public.listen, public.name, public.stratum_host, public.trust_proxy, public.rate_per_min);
-        same!(ledger.path, ledger.keep_days, ledger.stats_keep_days, api.listen, api.ui_dir);
+        same!(ledger.path, ledger.keep_days, ledger.stats_keep_days, ledger.device_history_minutes, api.listen, api.ui_dir);
         same!(photon.enabled, photon.listen, photon.key_file, photon.fee_pct, photon.max_outputs, photon.window_factor, photon.initial_difficulty, photon.min_difficulty, photon.max_difficulty, photon.share_secs, photon.max_connections, photon.max_connections_per_ip, photon.max_channels_per_connection, photon.max_reward_over_subsidy_pct, photon.max_check_bytes, photon.idle_secs, photon.max_checks_per_tip, photon.max_concurrent_checks);
     }
 }

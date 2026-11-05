@@ -2,8 +2,8 @@
 // Shared statistics panes of the public page and the operator page: the device table (what the miners call themselves, with links to the
 // open source projects) and the stored pool history with a range switch. Both read /public/v1 or /api/v1 (`base`), with demo data as a fallback.
 const Stats = (() => {
-  const RANGES = ['1h', '24h', '7d', '30d', 'all'];
-  const S = { devices: null, hist: null, histRange: '24h', keepDays: 0 };
+  const RANGES = ['1h', '24h', '7d', '30d', 'all'], DEV_COLORS = ['c1', 'c2', 'c3', 'ok', 'warn', 'err'];
+  const S = { devices: null, hist: null, dhist: null, histRange: '24h', histMode: 'total', keepDays: 0 };
 
   /* ---- devices ---- */
   const DEV_KEYS = { name: (d) => d.name.toLowerCase(), working: (d) => d.working, hashrate: (d) => d.hashrate, best: (d) => d.best };
@@ -49,27 +49,52 @@ const Stats = (() => {
     if (!r.ok) throw new Error(r.status);
     return r.json();
   }
+  async function loadDeviceHistory(base, range) {
+    const r = await fetch(`${base}/history/devices?range=${range}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }
+  function demoDeviceHistory(range) {
+    const t = demoHistory(range), mix = [['bitaxe', 'Bitaxe', 0.62], ['nerdqaxe+', 'NerdQAxe+', 0.2], ['cgminer', 'cgminer', 0.14], ['nerdminer', 'NerdMiner', 0.04]];
+    return { range, stepMinutes: t.stepMinutes, keepDays: 60, devices: mix.map(([key, name, share], d) => ({ key, name, points: t.points.map((p, i) => [p[0], p[1] * share * (1 + Math.sin(i / (4 + d)) * 0.05), Math.round(p[2] * share)]) })) };
+  }
   const xlabel = (range) => (x) => { const d = new Date(x * 1000).toISOString(); return range === '1h' || range === '24h' ? d.slice(11, 16) : d.slice(5, 10) + (range === '7d' ? ' ' + d.slice(11, 13) + 'h' : ''); };
 
   /* A pane with range buttons and a hash rate chart. `pane` is the .pane element with .rng and .chartpane inside. */
   function historyPane(pane, base, demo) {
     const chart = pane.querySelector('.chartpane'), rng = pane.querySelector('.rng');
     try { const r = localStorage.getItem('photon-hist-range'); if (RANGES.includes(r)) S.histRange = r; } catch (_) { /* storage unavailable */ }
-    rng.innerHTML = RANGES.map((r) => `<button type="button" class="rbtn" data-r="${r}">${r}</button>`).join('');
-    const mark = () => rng.querySelectorAll('.rbtn').forEach((b) => b.classList.toggle('on', b.dataset.r === S.histRange));
+    try { const m = localStorage.getItem('photon-hist-mode'); if (m === 'devices' || m === 'total') S.histMode = m; } catch (_) { /* ignore */ }
+    rng.innerHTML = ['total', 'devices'].map((m) => `<button type="button" class="rbtn mbtn2" data-m="${m}" title="${m === 'total' ? 'whole pool' : 'by device type'}">${m === 'total' ? 'pool' : 'devices'}</button>`).join('') + '<i class="sep2"></i>' + RANGES.map((r) => `<button type="button" class="rbtn" data-r="${r}">${r}</button>`).join('');
+    const mark = () => { rng.querySelectorAll('.rbtn[data-r]').forEach((b) => b.classList.toggle('on', b.dataset.r === S.histRange)); rng.querySelectorAll('.rbtn[data-m]').forEach((b) => b.classList.toggle('on', b.dataset.m === S.histMode)); };
     let dead = false;
     const draw = () => {
       if (dead || !S.hist) return;
       const pts = S.hist.points.map(hist);
       S.keepDays = S.hist.keepDays;
+      if (S.histMode === 'devices') {
+        const dv = (S.dhist && S.dhist.devices) || [];
+        if (!dv.length) { chart.innerHTML = '<span class="dim">no device statistics stored yet; they are written every few minutes</span>'; delete chart._neon; return; }
+        Neon.line(chart, { series: dv.map((d, i) => ({ name: d.name, data: d.points.map((p) => ({ x: p[0], y: p[1] })), color: DEV_COLORS[i % DEV_COLORS.length] })), fmt: fmtHash, xfmt: xlabel(S.histRange) });
+        let leg = chart.querySelector('.hleg');
+        if (!leg) { leg = document.createElement('div'); leg.className = 'hleg'; chart.append(leg); }
+        leg.textContent = '';
+        dv.forEach((d, i) => { const e = document.createElement('span'), sw = document.createElement('i'); sw.className = 'sw ' + DEV_COLORS[i % DEV_COLORS.length]; e.append(sw, d.name); leg.append(e); });
+        return;
+      }
       if (!pts.length) { chart.innerHTML = '<span class="dim">no statistics stored yet; one sample is added every minute</span>'; delete chart._neon; return; }
       Neon.line(chart, { series: [{ name: 'hashrate', data: pts.map((p) => ({ x: p.t, y: p.hr })), color: 'c1' }], fmt: fmtHash, xfmt: xlabel(S.histRange) });
     };
     async function load() {
       try { S.hist = demo ? demoHistory(S.histRange) : await loadHistory(base, S.histRange); } catch (_) { S.hist = demoHistory(S.histRange); }
+      try { S.dhist = demo ? demoDeviceHistory(S.histRange) : await loadDeviceHistory(base, S.histRange); } catch (_) { S.dhist = demoDeviceHistory(S.histRange); }
       draw();
     }
-    rng.addEventListener('click', (e) => { const b = e.target.closest('.rbtn'); if (!b) return; S.histRange = b.dataset.r; try { localStorage.setItem('photon-hist-range', S.histRange); } catch (_) { /* ignore */ } mark(); chart.textContent = ''; delete chart._neon; load(); });
+    rng.addEventListener('click', (e) => {
+      const b = e.target.closest('.rbtn'); if (!b) return;
+      if (b.dataset.m) { S.histMode = b.dataset.m; try { localStorage.setItem('photon-hist-mode', S.histMode); } catch (_) { /* ignore */ } mark(); chart.textContent = ''; delete chart._neon; draw(); return; }
+      S.histRange = b.dataset.r; try { localStorage.setItem('photon-hist-range', S.histRange); } catch (_) { /* ignore */ } mark(); chart.textContent = ''; delete chart._neon; load();
+    });
     mark(); load();
     const timer = setInterval(load, 60000);
     return { destroy() { dead = true; clearInterval(timer); }, draw };
@@ -78,7 +103,7 @@ const Stats = (() => {
   /* ---- extras of the maximized panes ---- */
   function registerExtras() {
     Extras.add('history', (el) => {
-      const k = Extras.card(el, 'pool history', 'wide'), hr = Extras.card(el, 'hash rate', 'wide'), mi = Extras.card(el, 'miners online'), va = Extras.card(el, 'valid shares (%)'), nd = Extras.card(el, 'network difficulty');
+      const k = Extras.card(el, 'pool history', 'wide'), hr = Extras.card(el, 'hash rate', 'wide'), dh = Extras.card(el, 'hash rate by device type', 'wide'), dw = Extras.card(el, 'working connections by device type'), mi = Extras.card(el, 'miners online'), va = Extras.card(el, 'valid shares (%)'), nd = Extras.card(el, 'network difficulty');
       return () => {
         if (!S.hist || !S.hist.points.length) return;
         const p = S.hist.points.map(hist), x = xlabel(S.histRange), avg = (f) => p.reduce((a, q) => a + f(q), 0) / p.length;
@@ -87,6 +112,11 @@ const Stats = (() => {
           { label: 'miners peak', value: Math.max(...p.map((q) => q.miners)), fmt: num, color: 'ok' }, { label: 'valid shares', value: ok + bad ? ok / (ok + bad) * 100 : 100, fmt: (v) => v.toFixed(2) + '%', color: 'ok' },
           { label: 'kept for', value: S.keepDays || 0, fmt: (v) => v + ' days', color: 'c2', sub: S.hist.points.length + ' points' }]);
         Neon.line(hr, { series: [{ name: 'hash rate', data: p.map((q) => ({ x: q.t, y: q.hr })), color: 'c1' }], fmt: fmtHash, xfmt: x });
+        const dv = (S.dhist && S.dhist.devices) || [];
+        if (dv.length) {
+          Neon.line(dh, { series: dv.map((d, i) => ({ name: d.name, data: d.points.map((q) => ({ x: q[0], y: q[1] })), color: DEV_COLORS[i % DEV_COLORS.length] })), fmt: fmtHash, xfmt: x });
+          Neon.line(dw, { series: dv.map((d, i) => ({ name: d.name, data: d.points.map((q) => ({ x: q[0], y: q[2] })), color: DEV_COLORS[i % DEV_COLORS.length] })), fmt: num, xfmt: x });
+        } else { dh.innerHTML = dw.innerHTML = '<span class="dim">no device statistics stored yet</span>'; }
         Neon.line(mi, { series: [{ name: 'miners', data: p.map((q) => ({ x: q.t, y: q.miners })), color: 'ok' }], fmt: num, xfmt: x });
         Neon.line(va, { series: [{ name: 'valid %', data: p.map((q) => ({ x: q.t, y: q.ok + q.stale + q.dup ? q.ok / (q.ok + q.stale + q.dup) * 100 : 100 })), color: 'c3' }], fmt: (v) => v.toFixed(1), xfmt: x });
         Neon.line(nd, { series: [{ name: 'difficulty', data: p.map((q) => ({ x: q.t, y: q.nd })), color: 'c2' }], fmt: fmtDiff, xfmt: x });
