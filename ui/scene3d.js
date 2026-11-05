@@ -198,14 +198,16 @@ window.Flow3D = (() => {
 
     const st = { hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    // Quality levels. 0: the small pane (few particles, 12 fps, no bloom), 1: maximized on a modest device, 2: maximized (bloom, streaks, 30 fps).
-    // The controller never goes above 0 while the pane is small and steps down by itself when the frame rate cannot keep up.
+    // Quality levels. 0: the small pane (few particles, no bloom), 1: maximized on a modest device, 2: maximized (bloom, streaks, many particles).
+    // Every level draws every display frame (smooth motion) as long as the device keeps up and at most 25 miners are online; beyond that, or when the frame
+    // rate falls below ~45, it draws every second frame (a steady 30), and only if even that fails it steps down a level. A fixed frame rate that does
+    // not divide the display rate would judder, so there are only these two rates.
     const LV = [
-      { fps: 12, dpr: 1, bloom: false, jobs: 36, shares: 24, fire: 140, rate: 0.5, trails: false, sway: 0.35 },
-      { fps: 24, dpr: 1.25, bloom: true, jobs: 100, shares: 60, fire: 320, rate: 0.8, trails: true, sway: 0.7 },
-      { fps: 30, dpr: 1.75, bloom: true, jobs: 150, shares: 90, fire: 600, rate: 1, trails: true, sway: 1 },
+      { dpr: 1, bloom: false, jobs: 36, shares: 24, fire: 140, rate: 0.5, trails: false, sway: 0.35 },
+      { dpr: 1.25, bloom: true, jobs: 100, shares: 60, fire: 320, rate: 0.8, trails: true, sway: 0.7 },
+      { dpr: 1.75, bloom: true, jobs: 150, shares: 90, fire: 600, rate: 1, trails: true, sway: 1 },
     ];
-    canvas.dataset.level = '0'; st.lv = 0; st.cap = 2; st.slow = 0; st.avg = 0; st.t0 = performance.now(); let q = LV[0];
+    canvas.dataset.level = '0'; st.lv = 0; st.cap = 2; st.slow = 0; st.avg = 0; st.half = false; st.t0 = performance.now(); let q = LV[0];
     const pane = canvas.closest('.pane'), isFront = () => !!(pane && pane.classList.contains('front')), otherFront = () => !!document.querySelector('.pane.front') && !isFront();
     const size = () => { const r = canvas.getBoundingClientRect(); st.w = Math.max(10, r.width); st.h = Math.max(10, r.height); const dpr = Math.min(q.dpr, devicePixelRatio || 1); st.dpr = dpr; renderer.setPixelRatio(dpr); renderer.setSize(st.w, st.h, false); cam.aspect = st.w / st.h; cam.updateProjectionMatrix(); for (const f of [lines, trails]) { f.mat.uniforms.res.value.set(st.w * dpr, st.h * dpr); f.mat.uniforms.pxr.value = dpr; } bloomSize(); };
     const ro = new ResizeObserver(size); ro.observe(canvas);
@@ -383,17 +385,20 @@ window.Flow3D = (() => {
     let lvChecked = 0;
     function control(ts, frameMs) {
       if (ts - lvChecked > 300) { lvChecked = ts; st.bg = otherFront(); if (st.bg) { st.last = 0; return; } const want = Math.min(isFront() ? 2 : 0, st.cap); if (want !== st.lv) setLevel(want); }
-      // the frame rate cannot keep up: step down for good (until the page is reloaded)
+      // the frame rate cannot keep up: first every second frame, then a lower level (for good, until the page is reloaded)
       st.avg = st.avg ? st.avg * 0.94 + frameMs * 0.06 : frameMs;
-      if (st.lv > 0 && st.avg > 1000 / q.fps * 1.7) { if (++st.slow > 45) { st.cap = st.lv - 1; setLevel(Math.min(st.lv, st.cap)); } } else st.slow = Math.max(0, st.slow - 1);
+      const halved = st.half || (st.lv === 0 && st.online > 25);
+      if (!halved && st.avg > 24) { if (++st.slow > 45) { st.half = true; st.slow = 0; st.avg = 0; } }
+      else if (halved && st.lv > 0 && st.avg > 52) { if (++st.slow > 45) { st.cap = st.lv - 1; setLevel(Math.min(st.lv, st.cap)); } }
+      else st.slow = Math.max(0, st.slow - 1);
     }
 
     function frame(ts) {
       st.raf = 0; if (!st.run) return;
       if (document.hidden || !st.vis) { st.last = 0; return; }
       if (st.bg) { st.raf = requestAnimationFrame(frame); if (ts - lvChecked > 300) control(ts, 1000); return; } // another pane is in front: nothing to animate
-      if (!st.last || ts - st.last >= 1000 / q.fps - 2) {
-        const t0 = performance.now(), gap = st.last ? ts - st.last : 1000 / q.fps, dt = st.last ? Math.min(0.1, gap / 1000) : 0.033;
+      if (!st.last || ts - st.last >= ((st.half || (st.lv === 0 && st.online > 25)) ? 30 : 0)) {
+        const t0 = performance.now(), gap = st.last ? ts - st.last : 33, dt = st.last ? Math.min(0.1, gap / 1000) : 0.033;
         update(dt); renderScene(); st.last = ts;
         if (canvas.style.opacity !== '1') canvas.style.opacity = '1'; // fades in with the first frame
         control(ts, gap);
