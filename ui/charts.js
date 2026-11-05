@@ -67,12 +67,16 @@ const Neon = (() => {
       st.sx = sx; st.x0 = x0; st.x1 = x1;
       grid.textContent = '';
       const fy = o.fmt || ((v) => String(+v.toPrecision(3)));
+      let prevLabel = null;
       for (const t of ticks) {
         svg('line', { x1: m.l, x2: W - m.r, y1: sy(t), y2: sy(t), class: 'ngrid' }, grid);
-        svg('text', { x: m.l - 6, y: sy(t) + 3.5, class: 'ntxt', 'text-anchor': 'end' }, grid).textContent = fy(t);
+        const lab = fy(t);
+        if (lab !== prevLabel) svg('text', { x: m.l - 6, y: sy(t) + 3.5, class: 'ntxt', 'text-anchor': 'end' }, grid).textContent = lab; // a repeated label (integer format of a flat series) adds nothing
+        prevLabel = lab;
       }
       const fx = o.xfmt || ((x) => String(Math.round(x)));
-      [[x0, 'start'], [(x0 + x1) / 2, 'middle'], [x1, 'end']].forEach(([x, a]) => svg('text', { x: sx(x), y: H - 5, class: 'ntxt', 'text-anchor': a }, grid).textContent = fx(x));
+      let prevX = null;
+      [[x0, 'start'], [(x0 + x1) / 2, 'middle'], [x1, 'end']].forEach(([x, a]) => { const lab = fx(x); if (lab !== prevX || a === 'end') svg('text', { x: sx(x), y: H - 5, class: 'ntxt', 'text-anchor': a }, grid).textContent = lab; prevX = lab; });
       sets.forEach((pts, i) => {
         const e = st.els[i]; if (!pts.length) return;
         const d = pts.map((p, k) => `${k ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join('');

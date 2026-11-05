@@ -179,6 +179,9 @@ pub fn summary_value(p: &Arc<Pool>, public: bool) -> Value {
         "miners": {"online": live.online, "total": live.total, "v1": live.total, "v2": 0, "edge": 0},
         "shares": {"perSec": live.shares_per_sec, "ok": frac(ok), "stale": frac(stale), "dup": frac(dup), "inv": frac(inv), "total": total},
         "alloc": {"candidates": cands, "unitsPerSec": live.units_per_sec, "epochUse": used as f64 / total_units as f64, "overlap": overlap},
+        "net": {"connections": live.total, "inBps": live.in_bps, "outBps": live.out_bps, "jobsPerSec": live.jobs_per_sec, "connectsPerSec": live.connects_per_sec,
+                "accepted": crate::stratum::NET.accepted.load(Ordering::Relaxed), "closed": crate::stratum::NET.closed.load(Ordering::Relaxed), "refused": crate::stratum::NET.refused.load(Ordering::Relaxed),
+                "bytesIn": crate::stratum::NET.bytes_in.load(Ordering::Relaxed), "bytesOut": crate::stratum::NET.bytes_out.load(Ordering::Relaxed)},
         "found": s.found.lock().unwrap().len(),
         "modes": modes,
         "photon": p.photon.get().map(|ph| {

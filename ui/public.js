@@ -38,7 +38,7 @@ function liveSource() {
   const get = async (p) => { const r = await fetch('/public/v1' + p, { cache: 'no-store' }); if (!r.ok) throw new Error(r.status); return r.json(); };
   return {
     demo: false,
-    async refresh() { let d; [view.pool, view.blocks, view.payouts, d] = await Promise.all([get('/pool'), get('/blocks?limit=12'), get('/payouts?limit=8'), get('/devices').catch(() => ({ devices: [] }))]); view.devices = d.devices; },
+    async refresh() { let d; [view.pool, view.blocks, view.payouts, d, view.engine] = await Promise.all([get('/pool'), get('/blocks?limit=12'), get('/payouts?limit=8'), get('/devices').catch(() => ({ devices: [] })), get('/engine').catch(() => null)]); view.devices = d.devices; },
     async account(addr) { const r = await fetch('/public/v1/account/' + encodeURIComponent(addr), { cache: 'no-store' }); if (!r.ok) throw new Error(r.status === 400 ? 'not a valid address for this network' : 'HTTP ' + r.status); return r.json(); },
   };
 }
@@ -63,6 +63,8 @@ function demoSource() {
         node: { height: 132457, tip: hex(r, 64), tipTime: now() - 23 }, networkDifficulty: 1.2e9,
       };
       view.blocks = blocks; view.payouts = payouts;
+      view.engine = { node: { connected: true, rttMs: 0.4 + r() * 0.3, p50: 28 + r() * 10, p95: 55 + r() * 20 },
+        net: { connections: 1000, inBps: 20000 + r() * 8000, outBps: 300000 + r() * 40000, jobsPerSec: 900 + r() * 100, connectsPerSec: r() < 0.2 ? 1 : 0, accepted: 1450, closed: 450, refused: 0, bytesIn: 3e8, bytesOut: 4e9 } };
     },
     async account(addr) {
       return { address: addr, hashrate: 1.2e14, workers: 3, shares1h: { pplns: { difficulty: 5200, count: 310 } }, shares24h: { pplns: { difficulty: 120000, count: 7400 } },
@@ -141,6 +143,8 @@ function render() {
 
 function trackSeries(p) {
   Series.seed('hr', p.hashrate.hist, 5);
+  const en = view.engine;
+  if (en) { Series.push('inbps', en.net.inBps); Series.push('outbps', en.net.outBps); Series.push('jobsps', en.net.jobsPerSec); Series.push('conns', en.net.connections); Series.push('cps', en.net.connectsPerSec); Series.push('nlat50', en.node.p50); Series.push('nlat95', en.node.p95); Series.push('nrtt', en.node.rttMs); }
   Series.push('hr', p.hashrate.now); Series.push('h1', p.hashrate.h1); Series.push('online', p.miners.online); Series.push('workers', p.miners.workers);
 }
 const card = Extras.card;
@@ -156,6 +160,23 @@ Extras.add('pool', (el) => {
     timeLine(mi, [{ name: 'miners', data: Series.get('online'), color: 'ok' }, { name: 'workers', data: Series.get('workers'), color: 'c2' }], num);
     const b = p.blocks || {};
     Neon.donut(bl, Object.entries({ maturing: b.maturing || 0, mature: b.mature || 0, orphaned: b.orphaned || 0, found: b.found || 0 }).filter(([, v]) => v > 0).map(([n, v]) => ({ label: n, value: v, color: n === 'orphaned' ? 'err' : n === 'maturing' ? 'c3' : n === 'found' ? 'ok' : 'c1', text: num(v) })), { big: num((b.maturing || 0) + (b.mature || 0) + (b.orphaned || 0) + (b.found || 0)), sub: 'blocks' });
+  };
+});
+
+const fmtBytes = (v) => { v = Math.max(0, v); const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; } return (i ? v.toFixed(v < 10 ? 2 : 1) : Math.round(v)) + ' ' + u[i]; };
+const fmtMs = (v) => (v < 10 ? v.toFixed(1) : Math.round(v)) + ' ms';
+// What the pool does on the network side: traffic, connections and the link to the node. Aggregates only, no address or worker.
+Extras.add('connect', (el) => {
+  const k = card(el, 'network', 'wide'), row = Extras.row(el), tr = card(row, 'traffic to and from the miners (per second)'), cn = card(row, 'connections'), lt = card(row, 'node link: chain tip to new job');
+  return () => {
+    const e = view.engine; if (!e) { k.innerHTML = '<span class="dim">no network data</span>'; return; }
+    const n = e.net;
+    Neon.kpis(k, [{ label: 'connections', value: n.connections, fmt: num }, { label: 'jobs / s', value: n.jobsPerSec, fmt: num, color: 'c2' }, { label: 'accepted / closed / refused', value: n.accepted, fmt: (v) => `${num(v)} / ${num(n.closed)} / ${num(n.refused)}`, color: 'c3' }, { label: 'in', value: n.inBps, fmt: (v) => fmtBytes(v) + '/s', color: 'c2' },
+      { label: 'out', value: n.outBps, fmt: (v) => fmtBytes(v) + '/s', color: 'c3' }, { label: 'node link', value: e.node.connected ? 1 : 0, fmt: (v) => (v ? 'UP' : 'DOWN'), color: e.node.connected ? 'ok' : 'err', sub: 'rtt ' + fmtMs(e.node.rttMs) },
+      { label: 'since start', value: n.bytesIn + n.bytesOut, fmt: fmtBytes, color: 'c3', sub: `${fmtBytes(n.bytesIn)} in, ${fmtBytes(n.bytesOut)} out` }]);
+    timeLine(tr, [{ name: 'in', data: Series.get('inbps'), color: 'c2' }, { name: 'out', data: Series.get('outbps'), color: 'c3' }], (v) => fmtBytes(v) + '/s');
+    timeLine(cn, [{ name: 'connected', data: Series.get('conns'), color: 'ok' }], num);
+    timeLine(lt, [{ name: 'p50', data: Series.get('nlat50'), color: 'c1' }, { name: 'p95', data: Series.get('nlat95'), color: 'c3' }, { name: 'rpc rtt', data: Series.get('nrtt'), color: 'c2' }], fmtMs);
   };
 });
 

@@ -108,6 +108,11 @@ pub struct Live {
     pub online: u64,
     pub total: u64,
     pub pps_hashrate: f64,
+    /// Network rates of the last second: bytes in and out, jobs sent, new connections.
+    pub in_bps: f64,
+    pub out_bps: f64,
+    pub jobs_per_sec: f64,
+    pub connects_per_sec: f64,
 }
 
 pub struct Unit {
