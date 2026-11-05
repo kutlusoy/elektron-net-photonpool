@@ -1,5 +1,5 @@
 //! Miner devices by the user agent they send with `mining.subscribe`: a display name, a link to the project and whether the
-//! software and hardware are open source (the star in the device table). Unknown agents are listed under their own name.
+//! software and hardware are open source (the star in the device table). Unknown agents are listed under their own name, but only for the first `MAX_OTHER` different names; every further one is counted as "Other", so random agents cannot blow up the statistics.
 
 /// (word searched in the lower-cased agent, name, project link, open source software and hardware). More specific words come first.
 const KNOWN: &[(&str, &str, &str, bool)] = &[
@@ -19,10 +19,18 @@ const KNOWN: &[(&str, &str, &str, bool)] = &[
     ("bitaxe", "Bitaxe", "https://github.com/skot/bitaxe/", true),
     ("leafminer", "LeafMiner", "https://github.com/matteocrippa/leafminer", true),
     ("cpuminer", "cpuminer", "https://github.com/pooler/cpuminer", false),
+    ("antminer", "Antminer", "https://www.bitmain.com/", false),
+    ("bmminer", "Bitmain bmminer", "https://www.bitmain.com/", false),
+    ("whatsminer", "Whatsminer", "https://www.microbt.com/", false),
+    ("avalon", "Avalon", "https://www.canaan.io/", false),
     ("cgminer", "cgminer", "https://cgminer.info/", false),
     ("braiins", "Braiins OS", "https://braiins.com/os/plus", false),
     ("termux-miner", "termux-miner", "https://github.com/wong-fi-hung/termux-miner", false),
 ];
+
+/// Distinct names of unknown agents that get their own row (the rest is "Other").
+const MAX_OTHER: usize = 24;
+static OTHER: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(Default::default);
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Device {
@@ -39,6 +47,10 @@ pub fn clean_agent(agent: &str) -> String {
 }
 
 pub fn classify(agent: &str) -> Device {
+    classify_in(agent, &OTHER, MAX_OTHER)
+}
+
+fn classify_in(agent: &str, other: &std::sync::Mutex<std::collections::HashSet<String>>, max_other: usize) -> Device {
     let agent = clean_agent(agent);
     let low = agent.to_ascii_lowercase();
     for (word, name, url, open) in KNOWN {
@@ -48,12 +60,29 @@ pub fn classify(agent: &str) -> Device {
     }
     let token: String = agent.split(|c: char| c == '/' || c == ' ').next().unwrap_or("").to_string();
     let name = if token.is_empty() { "unknown".to_string() } else { token };
-    Device { key: format!("other:{}", name.to_ascii_lowercase()), name, url: None, open_source: false }
+    let key = format!("other:{}", name.to_ascii_lowercase());
+    let mut seen = other.lock().unwrap();
+    if seen.contains(&key) || (seen.len() < max_other && seen.insert(key.clone())) {
+        return Device { key, name, url: None, open_source: false };
+    }
+    Device { key: "other".to_string(), name: "Other".to_string(), url: None, open_source: false }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_agents_are_capped() {
+        let set = std::sync::Mutex::new(std::collections::HashSet::new());
+        for i in 0..3 {
+            assert_eq!(classify_in(&format!("weird{i}/1.0"), &set, 3).key, format!("other:weird{i}"));
+        }
+        assert_eq!(classify_in("brandnew/1.0", &set, 3).key, "other");
+        assert_eq!(classify_in("brandnew/1.0", &set, 3).name, "Other");
+        assert_eq!(classify_in("weird1/2.0", &set, 3).key, "other:weird1");
+        assert_eq!(classify("Antminer S19").name, "Antminer");
+    }
 
     #[test]
     fn known_agents_are_named_and_linked() {

@@ -2,6 +2,14 @@
 // Shared statistics panes of the public page and the operator page: the device table (what the miners call themselves, with links to the
 // open source projects) and the stored pool history with a range switch. Both read /public/v1 or /api/v1 (`base`), with demo data as a fallback.
 const Stats = (() => {
+  // Many device types would make unreadable charts: the strongest ones keep a line, all others are summed into one "Other" line (6 colors, 6 lines at most).
+  function groupTop(dv, n = 5) {
+    if (dv.length <= n + 1) return dv;
+    const mean = (d) => d.points.reduce((a, p) => a + p[1], 0) / Math.max(1, d.points.length);
+    const sorted = [...dv].sort((a, b) => mean(b) - mean(a)), rest = sorted.slice(n), by = new Map();
+    rest.forEach((d) => d.points.forEach((p) => { const e = by.get(p[0]) || [p[0], 0, 0]; e[1] += p[1]; e[2] += p[2]; by.set(p[0], e); }));
+    return sorted.slice(0, n).concat([{ name: `Other (${rest.length} types)`, points: [...by.values()].sort((a, b) => a[0] - b[0]) }]);
+  }
   const RANGES = ['1h', '24h', '7d', '30d', 'all'], DEV_COLORS = ['c1', 'c2', 'c3', 'ok', 'warn', 'err'];
   const S = { devices: null, hist: null, dhist: null, histRange: '24h', histMode: 'total', keepDays: 0 };
 
@@ -73,7 +81,7 @@ const Stats = (() => {
       const pts = S.hist.points.map(hist);
       S.keepDays = S.hist.keepDays;
       if (S.histMode === 'devices') {
-        const dv = (S.dhist && S.dhist.devices) || [];
+        const dv = groupTop((S.dhist && S.dhist.devices) || []);
         if (!dv.length) { chart.innerHTML = '<span class="dim">no device statistics stored yet; they are written every few minutes</span>'; delete chart._neon; return; }
         Neon.line(chart, { series: dv.map((d, i) => ({ name: d.name, data: d.points.map((p) => ({ x: p[0], y: p[1] })), color: DEV_COLORS[i % DEV_COLORS.length] })), fmt: fmtHash, xfmt: xlabel(S.histRange) });
         let leg = chart.querySelector('.hleg');
@@ -116,7 +124,7 @@ const Stats = (() => {
         // the chart of the pane itself shows what the toggle selects; this card shows the other view, so nothing appears twice
         const devMode = S.histMode === 'devices';
         alt.parentElement.querySelector('h3').textContent = devMode ? 'pool hash rate' : 'hash rate by device';
-        const dv = (S.dhist && S.dhist.devices) || [];
+        const dv = groupTop((S.dhist && S.dhist.devices) || []);
         if (dv.length) {
           if (devMode) Neon.line(alt, { series: [{ name: 'hash rate', data: p.map((q) => ({ x: q.t, y: q.hr })), color: 'c1' }], fmt: fmtHash, xfmt: x });
           else Neon.line(alt, { series: dv.map((d, i) => ({ name: d.name, data: d.points.map((q) => ({ x: q[0], y: q[1] })), color: DEV_COLORS[i % DEV_COLORS.length] })), fmt: fmtHash, xfmt: x });
