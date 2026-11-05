@@ -381,3 +381,4 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .blkrow { animation: blkrow 4s ease-out; }
 @keyframes blkrow { 0% { background: color-mix(in srgb, var(--warn) 45%, transparent); } 100% { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .flowbanner { animation: none; } .blkrow { animation: none; } }
+.flowtip .flowtipnote { margin-top: 4px; padding-top: 3px; border-top: 1px dashed var(--line); font-size: 9px; opacity: .7; }

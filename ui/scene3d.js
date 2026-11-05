@@ -79,7 +79,7 @@ window.Flow3D = (() => {
     const col = {}, disposables = [];
     const cs = getComputedStyle(document.body);
     for (const k of ['c1', 'c2', 'c3', 'ok', 'warn', 'err', 'dim']) col[k] = new T.Color(cs.getPropertyValue('--' + k).trim() || '#00e5ff');
-    col.line = col.c1.clone().multiplyScalar(0.35); // the CSS line color is a color-mix() that Three.js cannot read
+    col.gw = new T.Color(0xb48cff); col.line = col.c1.clone().multiplyScalar(0.35); // the CSS line color is a color-mix() that Three.js cannot read
     const track = (o) => { disposables.push(o); return o; };
     const add = (o) => { world.add(o); return o; };
     const glow = (c, o = 1) => track(new T.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: T.AdditiveBlending, depthWrite: false }));
@@ -99,9 +99,12 @@ window.Flow3D = (() => {
       const E = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
       for (const [i, j] of E) { lines.add(P8[i], P8[j], c, 1.4, 0.8, 0.8); lines.add(P8[i], P8[j], c, 7, 0.14, 0.14); }
     };
-    box(X.node, 2.4, 2.4, 2.4, col.c1); box(X.attest, 0.6, 3.2, 3.2, col.ok); box(X.tpl, 3.6, 2.4, 3.6, col.c2); box(X.alloc, 3.6, 0.6, 3.6, col.c3); box(X.gate, 0.5, 3.2, 4.4, col.ok); box(X.miners, 6, 3.6, 10, col.c1);
+    const boxAt = (x, z, w, h, d, c) => { const xs = [x - w / 2, x + w / 2], ys = [-0.2 - h / 2, -0.2 + h / 2], zs = [z - d / 2, z + d / 2], P8 = []; for (const X1 of xs) for (const Y1 of ys) for (const Z1 of zs) P8.push(V(X1, Y1, Z1)); const E = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]]; for (const [i, j] of E) { lines.add(P8[i], P8[j], c, 1.4, 0.8, 0.8); lines.add(P8[i], P8[j], c, 7, 0.14, 0.14); } };
+    box(X.node, 2.4, 2.4, 2.4, col.c1); box(X.attest, 0.6, 3.2, 3.2, col.ok); box(X.tpl, 3.6, 2.4, 3.6, col.c2); box(X.alloc, 3.6, 0.6, 3.6, col.c3); box(X.gate, 0.5, 3.2, 4.4, col.ok); // the miners sit in one field per payout mode (solo, PPLNS, PPS), each with its own color
+    const GC = 50, GROUPS = [{ k: 'solo', z: 5.4, c: col.c1 }, { k: 'pplns', z: 0, c: col.c2 }, { k: 'pps', z: -5.4, c: col.c3 }];
+    GROUPS.forEach((g) => boxAt(X.miners, g.z, 3, 3.2, 3.4, g.c));
     lines.commit();
-    const labels = [['NODE', X.node, 2.6, col.c1], ['ATTEST', X.attest, 4.1, col.ok], ['TEMPLATE', X.tpl, 2.9, col.c2], ['ALLOCATOR', X.alloc, 1.6, col.c3], ['SHARE CHECK', X.gate, 3.8, col.ok], ['MINERS', X.miners, 3.4, col.c1]];
+    const labels = [['NODE', X.node, 2.6, col.c1], ['ATTEST', X.attest, 4.1, col.ok], ['TEMPLATE', X.tpl, 2.9, col.c2], ['ALLOCATOR', X.alloc, 1.6, col.c3], ['SHARE CHECK', X.gate, 3.8, col.ok]];
     // soft halos behind the stations (one radial texture, additive sprites)
     const hc = document.createElement('canvas'); hc.width = hc.height = 64; { const g = hc.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32); r.addColorStop(0, 'rgba(255,255,255,.9)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); }
     const haloTex = track(new T.CanvasTexture(hc));
@@ -164,19 +167,24 @@ window.Flow3D = (() => {
     let usedShown = -1;
 
     // miners: a faint field of slots, the online ones lit
-    const mpos = Array.from({ length: MAXM }, (_, i) => { const a = i * 2.399963, r = 0.6 + 3.8 * Math.sqrt((i + 0.5) / MAXM); return new T.Vector3(X.miners + Math.cos(a) * r * 0.55, -1.2 + ((i * 37) % 17) / 17 * 2.6, Math.sin(a) * r); });
-    const mGeo = track(new T.OctahedronGeometry(0.22)), miners = add(new T.InstancedMesh(mGeo, glow(col.ok, 0.95), MAXM));
+    const mpos = Array.from({ length: MAXM }, (_, i) => { const g = Math.floor(i / GC), j = i % GC, a = j * 2.399963, r = 0.3 + 1.1 * Math.sqrt((j + 0.5) / GC); return new T.Vector3(X.miners + Math.cos(a) * r * 0.8, -1.4 + ((j * 37) % 17) / 17 * 2.4, GROUPS[g].z + Math.sin(a) * r); });
+    const mGeo = track(new T.OctahedronGeometry(0.22)), miners = add(new T.InstancedMesh(mGeo, glow(0xffffff, 0.95), MAXM));
+    for (let i = 0; i < MAXM; i++) miners.setColorAt(i, GROUPS[Math.floor(i / GC)].c);
     const pg = track(new T.BufferGeometry()); pg.setAttribute('position', new T.Float32BufferAttribute(mpos.flatMap((p) => [p.x, p.y, p.z]), 3));
-    add(new T.Points(pg, track(new T.PointsMaterial({ color: col.dim, size: 0.09, transparent: true, opacity: 0.45 }))));
+    add(new T.Points(pg, track(new T.PointsMaterial({ color: col.dim, size: 0.08, transparent: true, opacity: 0.4 }))));
+    const active = [], activeMask = new Uint8Array(MAXM); // slots of the online miners, filled from the per-mode counts
+    const modeIdx = (k) => GROUPS.findIndex((g) => g.k === k);
+    const pick = () => (active.length ? active[(Math.random() * active.length) | 0] : -1);
+    let mlabels = GROUPS.map((g) => { const l = label(g.k.toUpperCase(), '#' + g.c.getHexString(), 0.8); l.position.set(X.miners, 2.4, g.z); add(l); track(l.material); return l; }), mkey = '';
     const pulse = new Float32Array(MAXM);
 
     // gateways (Photon): mining gateways of other operators that connect to the pool and bring the shares of their own miners
-    const MAXG = 12, gwGeo = track(new T.OctahedronGeometry(0.38)), gwMesh = add(new T.InstancedMesh(gwGeo, glow(col.c3, 0.95), MAXG));
+    const MAXG = 12, gwGeo = track(new T.OctahedronGeometry(0.38)), gwMesh = add(new T.InstancedMesh(gwGeo, glow(col.gw, 0.95), MAXG));
     const gwPos = Array.from({ length: MAXG }, (_, i) => new T.Vector3(X.miners - 3.2 + (i % 3) * 1.5, -0.4 + (Math.floor(i / 3) % 2) * 1.1, -7.2 - Math.floor(i / 3) * 1.5));
     const CH = 6, chArr = new Float32Array(MAXG * CH * 3), chGeo = track(new T.BufferGeometry()); chGeo.setAttribute('position', new T.BufferAttribute(chArr, 3));
-    const chPts = add(new T.Points(chGeo, track(new T.PointsMaterial({ color: col.c3, size: 0.1, transparent: true, opacity: 0.8, blending: T.AdditiveBlending, depthWrite: false }))));
-    let gwLabel = label('', '#' + col.c3.getHexString(), 0.8); gwLabel.position.set(X.miners - 1.6, 2.4, -8.6); add(gwLabel); track(gwLabel.material);
-    const gwHalo = halo(X.miners - 1.6, -0.2, col.c3, 6, 0); let gwShown = -1, gateFlash = 0;
+    const chPts = add(new T.Points(chGeo, track(new T.PointsMaterial({ color: col.gw, size: 0.1, transparent: true, opacity: 0.8, blending: T.AdditiveBlending, depthWrite: false }))));
+    let gwLabel = label('', '#' + col.gw.getHexString(), 0.8); gwLabel.position.set(X.miners - 1.6, 2.4, -8.6); add(gwLabel); track(gwLabel.material);
+    const gwHalo = halo(X.miners - 1.6, -0.2, col.gw, 6, 0); let gwShown = -1, gateFlash = 0;
     // particles
     const sph = track(new T.SphereGeometry(0.11, 6, 5));
     const jobs = add(new T.InstancedMesh(sph, glow(col.c1, 0.95), MAXJ)), shares = add(new T.InstancedMesh(sph, track(new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, blending: T.AdditiveBlending, depthWrite: false })), MAXS));
@@ -196,7 +204,7 @@ window.Flow3D = (() => {
     let gold = null, assemble = 1, heightLabel = label('', '#' + col.c3.getHexString(), 0.9);
     heightLabel.position.set(X.tpl, 1.7, 0); add(heightLabel); track(heightLabel.material);
 
-    const st = { shake: 0, flash: 0, goldT: 0, bLabel: null, hov: -2, cnt: { ok: 0, stale: 0, bad: 0 }, tipTime: 0, rtt: 0, p50: 0, p95: 0, connected: true, units: 0, hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
+    const st = { yaw: 0, yawT: 0, pitch: 0, pitchT: 0, zoom: 1, zoomT: 1, touched: -1e9, modes: [], shake: 0, flash: 0, goldT: 0, bLabel: null, hov: -2, cnt: { ok: 0, stale: 0, bad: 0 }, tipTime: 0, rtt: 0, p50: 0, p95: 0, connected: true, units: 0, hr: 0, gw: 0, chn: 0, photon: false, pshares: 0, pRej: 0, checks: 0, accG: 0, w: 0, h: 0, run: false, raf: 0, last: 0, vis: true, jobsT: 0, sharesT: 0, jobs: 0, shares: 0, accJ: 0, accS: 0, cands: 8, used: 0, online: 0, okF: 1, staleF: 0, badF: 0, tip: 0, t: 0 };
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     // Quality levels. 0: the small pane (few particles, no bloom), 1: maximized on a modest device, 2: maximized (bloom, streaks, many particles).
     // Every level draws every display frame (smooth motion) as long as the device keeps up and at most 25 miners are online; beyond that, or when the frame
@@ -214,13 +222,13 @@ window.Flow3D = (() => {
     const io = new IntersectionObserver((e) => { st.vis = e[0].isIntersecting; kick(); }); io.observe(canvas);
     const onVis = () => kick(); document.addEventListener('visibilitychange', onVis);
 
-    function spawnJob() { const j = J.slice(0, q.jobs).find((o) => !o.on); if (!j) return; Object.assign(j, { px: undefined, on: true, t: 0, v: 0.22 + Math.random() * 0.16, m: (Math.random() * Math.max(1, Math.min(MAXM, st.online))) | 0 }); }
+    function spawnJob() { const j = J.slice(0, q.jobs).find((o) => !o.on); if (!j) return; Object.assign(j, { px: undefined, on: true, t: 0, v: 0.22 + Math.random() * 0.16, m: pick() }); if (j.m < 0) j.on = false; }
     function spawnShare(viaGateway) {
       const idx = S.slice(0, q.shares).findIndex((o) => !o.on); if (idx < 0) return;
-      const s = S[idx], n = Math.max(1, Math.min(MAXM, st.online)), r = Math.random();
+      const s = S[idx], r = Math.random(), slot = viaGateway ? 0 : pick(); if (slot < 0) return;
       const o = viaGateway ? (r < st.pRej ? 2 : 0) : (r < st.okF ? 0 : r < st.okF + st.staleF ? 1 : 2);
-      Object.assign(s, { px: undefined, on: true, t: 0, v: 0.3 + Math.random() * 0.2, m: viaGateway ? 0 : (Math.random() * n) | 0, o, c: false, g: viaGateway ? (Math.random() * Math.min(MAXG, Math.max(1, st.gw))) | 0 : -1 });
-      shares.setColorAt(idx, viaGateway ? col.c3 : col.c1); if (shares.instanceColor) shares.instanceColor.needsUpdate = true;
+      Object.assign(s, { px: undefined, on: true, t: 0, v: 0.3 + Math.random() * 0.2, m: slot, o, c: false, g: viaGateway ? (Math.random() * Math.min(MAXG, Math.max(1, st.gw))) | 0 : -1 });
+      shares.setColorAt(idx, viaGateway ? col.gw : GROUPS[Math.floor(slot / GC)].c); if (shares.instanceColor) shares.instanceColor.needsUpdate = true;
       if (!viaGateway) pulse[s.m] = 1;
     }
 
@@ -231,13 +239,21 @@ window.Flow3D = (() => {
       // a small base keeps the scene alive; above it the number of particles grows logarithmically with the real rate
       st.accJ += dt * q.rate * (2.5 + 8 * Math.log10(1 + st.jobs)); st.accS += dt * q.rate * (0.8 + 6 * Math.log10(1 + st.shares * 4));
       while (st.accJ >= 1) { st.accJ -= 1; spawnJob(); }
-      while (st.accS >= 1 && st.online > 0) { st.accS -= 1; spawnShare(false); }
+      while (st.accS >= 1 && active.length > 0) { st.accS -= 1; spawnShare(false); }
       st.accS = Math.min(st.accS, 2);
       if (st.gw > 0) { st.accG += dt * q.rate * (0.5 + 6 * Math.log10(1 + st.pshares * 4)); while (st.accG >= 1) { st.accG -= 1; spawnShare(true); } st.accG = Math.min(st.accG, 2); }
       // camera sways slowly around the scene
       const k = st.t * 0.12, intro = Math.min(1, (performance.now() - st.t0) / 2200), dolly = (1 + 0.45 * Math.pow(1 - intro, 3)) * Math.min(1.75, Math.max(1, 1.85 / (st.w / st.h))); // the camera glides in when the view opens and keeps the whole scene in narrow panes
-      cam.position.set((1 + Math.sin(k) * 2.2 * q.sway) * dolly, (5.8 + Math.sin(k * 1.7) * 0.5 * q.sway) * dolly, (17 + Math.cos(k * 0.8) * 0.6 * q.sway) * dolly); if (st.shake > 0.01) cam.position.add(new T.Vector3(Math.sin(st.t * 53) * 0.35, Math.sin(st.t * 61) * 0.25, 0).multiplyScalar(st.shake * q.sway));
-      cam.lookAt(0.5, -0.2, -2);
+      // the visitor can turn the view (drag) and zoom a little (wheel); the slow automatic sway fades while the view is being used and returns after a pause
+      const idle = Math.min(1, Math.max(0, (performance.now() - st.touched - 6000) / 3000)), sway = q.sway * idle;
+      st.yaw += (st.yawT - st.yaw) * (1 - Math.exp(-dt * 8)); st.pitch += (st.pitchT - st.pitch) * (1 - Math.exp(-dt * 8)); st.zoom += (st.zoomT - st.zoom) * (1 - Math.exp(-dt * 8));
+      const tgt = V3a.set(0.5, -0.2, -2);
+      cam.position.set((1 + Math.sin(k) * 2.2 * sway) * dolly, (5.8 + Math.sin(k * 1.7) * 0.5 * sway) * dolly, (17 + Math.cos(k * 0.8) * 0.6 * sway) * dolly);
+      V3b.copy(cam.position).sub(tgt).multiplyScalar(st.zoom);
+      V3b.applyAxisAngle(AXY, st.yaw); V3b.applyAxisAngle(AXX.set(Math.cos(st.yaw), 0, -Math.sin(st.yaw)), -st.pitch); // pitch around the camera's right axis
+      cam.position.copy(tgt).add(V3b);
+      if (st.shake > 0.01) cam.position.add(new T.Vector3(Math.sin(st.t * 53) * 0.35, Math.sin(st.t * 61) * 0.25, 0).multiplyScalar(st.shake * q.sway));
+      cam.lookAt(tgt);
       const fov = 52 - 7 * st.flash; if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }
       st.shake = Math.max(0, st.shake - dt * 1.1); st.flash = Math.max(0, st.flash - dt * 0.8); st.goldT = Math.max(0, st.goldT - dt);
       core.rotation.y += dt * 0.8; core.scale.setScalar(1 + 0.06 * Math.sin(st.t * 2.4));
@@ -268,10 +284,9 @@ window.Flow3D = (() => {
       if (used !== usedShown) { for (let i = 0; i < TILES; i++) tiles.setColorAt(i, i < used ? col.c3 : col.dim); tiles.instanceColor.needsUpdate = true; usedShown = used; }
 
       // miners
-      const on = Math.min(MAXM, st.online | 0);
       for (let i = 0; i < MAXM; i++) {
         pulse[i] = Math.max(0, pulse[i] - dt * 2.5);
-        if (i >= on) { D.position.set(0, -50, 0); D.scale.setScalar(0.001); } else { D.position.copy(mpos[i]); D.scale.setScalar(0.8 + 0.9 * pulse[i]); }
+        if (!activeMask[i]) { D.position.set(0, -50, 0); D.scale.setScalar(0.001); } else { D.position.copy(mpos[i]); D.scale.setScalar(0.8 + 0.9 * pulse[i]); }
         D.rotation.set(st.t * 0.6 + i, st.t * 0.4, 0); D.updateMatrix(); miners.setMatrixAt(i, D.matrix);
       }
       miners.instanceMatrix.needsUpdate = true;
@@ -281,7 +296,7 @@ window.Flow3D = (() => {
       for (let i = 0; i < MAXJ; i++) {
         const j = J[i]; if (!j.on) continue;
         j.t += dt * j.v;
-        if (j.t >= 1 || j.m >= on) { j.on = false; hide(jobs, i); continue; }
+        if (j.t >= 1 || !activeMask[j.m]) { j.on = false; hide(jobs, i); continue; }
         const t = j.t;
         if (t < 0.25) lerp3(W[0], W[1], t / 0.25, P); else if (t < 0.5) lerp3(W[1], W[2], (t - 0.25) / 0.25, P); else lerp3(W[2], mpos[j.m], (t - 0.5) / 0.5, P);
         P.y += Math.sin(t * Math.PI) * 0.7;
@@ -295,14 +310,14 @@ window.Flow3D = (() => {
       for (let i = 0; i < MAXS; i++) {
         const s = S[i]; if (!s.on) continue;
         s.t += dt * s.v;
-        if (s.t >= 1 || (s.g < 0 && s.m >= on)) { s.on = false; hide(shares, i); continue; }
+        if (s.t >= 1 || (s.g < 0 && !activeMask[s.m])) { s.on = false; hide(shares, i); continue; }
         const t = s.t;
         if (t < 0.5) lerp3(s.g >= 0 ? gwPos[s.g] : mpos[s.m], W[2], t / 0.5, P);
         else if (s.o === 0) { lerp3(W[2], nodePos, (t - 0.5) / 0.5, P); P.y += Math.sin((t - 0.5) * 2 * Math.PI) * 1.4; }
         else { P.copy(W[2]); P.y -= (t - 0.5) * 4; P.x += (t - 0.5) * 1.2; }
         if (t >= 0.5 && !s.c) { shares.setColorAt(i, s.o === 0 ? col.ok : s.o === 1 ? col.warn : col.err); recolor = true; s.c = true; }
         if (t < 0.5 && s.c === undefined) { /* neutral until the gate */ }
-        { const cc = t < 0.5 ? (s.g >= 0 ? col.c3 : col.c1) : s.o === 0 ? col.ok : s.o === 1 ? col.warn : col.err; if (q.trails && s.px !== undefined) { trailTo(s); trails.add(tail, P, cc, 2.2, 0, 1); trails.add(tail, P, cc, 8, 0, 0.25); } s.px = P.x; s.py = P.y; s.pz = P.z; }
+        { const cc = t < 0.5 ? (s.g >= 0 ? col.gw : GROUPS[Math.floor(s.m / GC)].c) : s.o === 0 ? col.ok : s.o === 1 ? col.warn : col.err; if (q.trails && s.px !== undefined) { trailTo(s); trails.add(tail, P, cc, 2.2, 0, 1); trails.add(tail, P, cc, 8, 0, 0.25); } s.px = P.x; s.py = P.y; s.pz = P.z; }
         D.position.copy(P); D.scale.setScalar(t >= 0.5 && s.o ? Math.max(0.1, 1 - (t - 0.5) * 2) : 1); D.rotation.set(0, 0, 0); D.updateMatrix(); shares.setMatrixAt(i, D.matrix);
       }
       trails.commit(); shares.instanceMatrix.needsUpdate = true; if (recolor && shares.instanceColor) shares.instanceColor.needsUpdate = true;
@@ -344,7 +359,7 @@ window.Flow3D = (() => {
       for (let i = rings.length - 1; i >= 0; i--) if (rings[i].t > 1.9) { world.remove(rings[i].m); rings.splice(i, 1); }
       if (gold) {
         gold.t += dt * 0.45;
-        const k = ease(gold.t); gold.m.position.set(X.miners + (X.node - X.miners) * k, -0.2 + Math.sin(k * Math.PI) * 3, 0); gold.m.rotation.y += dt * 3; gold.m.scale.setScalar(1.4 - 0.4 * k);
+        const k = ease(gold.t); gold.m.position.set(X.miners + (X.node - X.miners) * k, -0.2 + Math.sin(k * Math.PI) * 3, gold.z * (1 - k)); gold.m.rotation.y += dt * 3; gold.m.scale.setScalar(1.4 - 0.4 * k);
         if (q.trails && gold.px !== undefined) { tail.set(gold.px, gold.py, gold.pz); trails.add(tail, gold.m.position, col.warn, 3, 0, 1); trails.add(tail, gold.m.position, col.warn, 14, 0, 0.3); }
         gold.px = gold.m.position.x; gold.py = gold.m.position.y; gold.pz = gold.m.position.z;
         if (gold.t >= 1) {
@@ -356,8 +371,9 @@ window.Flow3D = (() => {
     }
     // Tooltips: the real numbers behind a station while the mouse is near it (an HTML label over the canvas, positioned from the projected station).
     const tip = document.createElement('div'); tip.className = 'flowtip'; tip.hidden = true; canvas.parentElement.appendChild(tip);
-    const anchors = [['node', X.node, 0], ['attest', X.attest, 1], ['tpl', X.tpl, 2], ['alloc', X.alloc, 3], ['gate', X.gate, 4], ['miners', X.miners, 5]];
+    const anchors = [['node', X.node, 0], ['attest', X.attest, 1], ['tpl', X.tpl, 2], ['alloc', X.alloc, 3], ['gate', X.gate, 4], ['m_solo', X.miners, 5, GROUPS[0].z], ['m_pplns', X.miners, 5, GROUPS[1].z], ['m_pps', X.miners, 5, GROUPS[2].z]];
     const nf = (v) => Math.round(v).toLocaleString('en-US'), pc = (v) => (v * 100).toFixed(1) + '%';
+    const hrs = (h) => (h >= 1e12 ? (h / 1e12).toFixed(2) + ' TH/s' : h >= 1e9 ? (h / 1e9).toFixed(2) + ' GH/s' : h >= 1e6 ? (h / 1e6).toFixed(2) + ' MH/s' : (h / 1e3).toFixed(1) + ' kH/s');
     const info = (k) => {
       const c = st.cnt, tot = Math.max(1, c.ok + c.stale + c.bad), age = st.tipTime ? Math.max(0, Date.now() / 1000 - st.tipTime) : 0;
       switch (k) {
@@ -366,17 +382,21 @@ window.Flow3D = (() => {
         case 'tpl': return ['BLOCK TEMPLATE', `${nf(st.cands)} candidate blocks, one per payout script`, `height ${nf(st.tip)}`, 'rebuilt for every new tip'];
         case 'alloc': return ['ALLOCATOR', `epoch use ${pc(st.used)}`, `${nf(st.units)} work units / s`, `${nf(st.cands)} candidates`, 'a unit is never given twice in an epoch'];
         case 'gate': return ['SHARE CHECK', `${st.sharesT.toFixed(1)} shares / s`, `accepted ${nf(c.ok)} (${pc(c.ok / tot)})`, `stale ${nf(c.stale)} (${pc(c.stale / tot)})`, `duplicate or invalid ${nf(c.bad)} (${pc(c.bad / tot)})`];
-        case 'miners': return ['MINERS', `${nf(st.online)} online`, `${nf(st.jobsT)} jobs / s sent`, st.hr ? `hash rate ${st.hr >= 1e12 ? (st.hr / 1e12).toFixed(2) + ' TH/s' : st.hr >= 1e9 ? (st.hr / 1e9).toFixed(2) + ' GH/s' : st.hr >= 1e6 ? (st.hr / 1e6).toFixed(2) + ' MH/s' : (st.hr / 1e3).toFixed(1) + ' kH/s'}` : ''];
+        case 'm_solo': case 'm_pplns': case 'm_pps': {
+          const mk = k.slice(2), m = st.modes.find((o) => o.mode === mk) || { online: 0, hashrate: 0, fee: 0, available: true };
+          const rule = { solo: 'reward paid directly in the coinbase', pplns: 'share of every pool block (last N shares)', pps: 'fixed pay for every share' }[mk];
+          return [mk.toUpperCase() + ' MINERS', `${nf(m.online)} online, ${hrs(m.hashrate)}`, rule, `pool fee ${m.fee}%`, m.available ? '' : 'paused until the pool reserve is funded'];
+        }
         case 'gw': return ['PHOTON GATEWAYS', `${nf(st.gw)} connected, ${nf(st.chn)} channels`, `${st.pshares.toFixed(1)} shares / s`, `${st.checks.toFixed(1)} spot checks / s`];
         default: return [];
       }
     };
-    const proj = new T.Vector3();
+    const proj = new T.Vector3(), V3a = new T.Vector3(), V3b = new T.Vector3(), AXY = new T.Vector3(0, 1, 0), AXX = new T.Vector3(1, 0, 0);
     const stationAt = (mx, my) => {
       const list = anchors.slice(); if (st.photon && st.gw > 0) list.push(['gw', X.miners - 1.6, -1]);
       let best = null, bd = 64 * 64;
-      for (const [k, x, h] of list) {
-        proj.set(x, k === 'gw' ? -0.2 : -0.2, k === 'gw' ? -7.5 : 0).applyMatrix4(world.matrixWorld).project(cam);
+      for (const [k, x, h, z] of list) {
+        proj.set(x, -0.2, k === 'gw' ? -7.5 : (z || 0)).applyMatrix4(world.matrixWorld).project(cam);
         if (proj.z > 1) continue;
         const px = (proj.x * 0.5 + 0.5) * st.w, py = (-proj.y * 0.5 + 0.5) * st.h, d = (px - mx) ** 2 + (py - my) ** 2;
         if (d < bd) { bd = d; best = { k, h }; }
@@ -384,16 +404,35 @@ window.Flow3D = (() => {
       return best;
     };
     const onMove = (e) => {
+      if (drag) return;
       const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, hit = stationAt(mx, my);
       st.hov = hit ? hit.h : -2;
       if (!hit) { tip.hidden = true; return; }
       const lines = info(hit.k).filter(Boolean);
-      tip.innerHTML = lines.map((l, i) => (i ? `<div>${esc(l)}</div>` : `<b>${esc(l)}</b>`)).join('');
+      tip.innerHTML = lines.map((l, i) => (i ? `<div>${esc(l)}</div>` : `<b>${esc(l)}</b>`)).join('') + '<div class="flowtipnote">numbers are live; single particles are illustrative</div>';
       tip.hidden = false;
       tip.style.left = Math.min(mx + 14, st.w - 230) + 'px'; tip.style.top = Math.min(my + 14, st.h - 20 - lines.length * 15) + 'px';
     };
     const onLeave = () => { tip.hidden = true; st.hov = -2; };
     canvas.addEventListener('pointermove', onMove); canvas.addEventListener('pointerleave', onLeave);
+
+    // Orbit controls: drag turns the view (limited, it never goes under the floor), the wheel zooms between 0.7x and 1.5x, a double click resets.
+    let drag = null;
+    const LIM = { yaw: 1.1, pitchMin: -0.15, pitchMax: 0.5, zMin: 0.7, zMax: 1.5 };
+    const touch = () => { st.touched = performance.now(); };
+    const onDown = (e) => { if (e.button !== 0) return; drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; tip.hidden = true; touch(); };
+    const onDrag = (e) => {
+      if (!drag) return;
+      st.yawT = Math.max(-LIM.yaw, Math.min(LIM.yaw, st.yawT - (e.clientX - drag.x) * 0.006));
+      st.pitchT = Math.max(LIM.pitchMin, Math.min(LIM.pitchMax, st.pitchT + (e.clientY - drag.y) * 0.004));
+      drag.x = e.clientX; drag.y = e.clientY; touch();
+    };
+    const onUp = (e) => { if (!drag) return; drag = null; canvas.style.cursor = 'grab'; try { canvas.releasePointerCapture(e.pointerId); } catch (_) { /* already released */ } };
+    const onWheel = (e) => { e.preventDefault(); st.zoomT = Math.max(LIM.zMin, Math.min(LIM.zMax, st.zoomT * Math.exp(e.deltaY * 0.0012))); touch(); };
+    const onReset = () => { st.yawT = 0; st.pitchT = 0; st.zoomT = 1; st.touched = -1e9; };
+    canvas.style.cursor = 'grab'; canvas.style.touchAction = 'none';
+    canvas.addEventListener('pointerdown', onDown); canvas.addEventListener('pointermove', onDrag); canvas.addEventListener('pointerup', onUp); canvas.addEventListener('pointercancel', onUp);
+    canvas.addEventListener('wheel', onWheel, { passive: false }); canvas.addEventListener('dblclick', onReset);
 
     // Bloom without the post-processing add-ons of three.js: the scene goes into a render target, the bright parts are shrunk to a quarter of the size,
     // blurred (two separable passes) and added back. Only used from level 1 on; below that the scene is drawn straight to the canvas.
@@ -433,6 +472,20 @@ window.Flow3D = (() => {
       for (let i = q.fire; i < FN; i++) { fl[i] = 0; fp[i * 3 + 1] = -50; }
       st.slow = 0; st.avg = 0;
     }
+    function setModes(modes, online) {
+      st.modes = modes;
+      const cnt = GROUPS.map((g) => { const m = modes.find((o) => o.mode === g.k); return m ? m.online : 0; });
+      if (!modes.length) cnt[1] = online; // an older pool without per-mode numbers: show everybody as PPLNS
+      active.length = 0; activeMask.fill(0);
+      cnt.forEach((n, g) => { for (let j = 0; j < Math.min(GC, n); j++) { active.push(g * GC + j); activeMask[g * GC + j] = 1; } });
+      const key = GROUPS.map((g, i) => { const m = modes.find((o) => o.mode === g.k); return g.k + cnt[i] + (m && !m.available ? 'p' : '') + (m ? '' : 'x'); }).join(',');
+      if (key === mkey) return; mkey = key;
+      mlabels.forEach((l, i) => {
+        const g = GROUPS[i], m = modes.find((o) => o.mode === g.k), offered = !modes.length || !!m, paused = m && !m.available;
+        const l2 = label(offered ? `${g.k.toUpperCase()} ${cnt[i]}${paused ? ' paused' : ''}` : '', '#' + (paused ? col.dim : g.c).getHexString(), 0.8);
+        l2.position.copy(l.position); world.remove(l); l.material.map.dispose(); add(l2); track(l2.material); mlabels[i] = l2;
+      });
+    }
     let lvChecked = 0;
     function control(ts, frameMs) {
       if (ts - lvChecked > 300) { lvChecked = ts; st.bg = otherFront(); if (st.bg) { st.last = 0; return; } const want = Math.min(isFront() ? 2 : 0, st.cap); if (want !== st.lv) setLevel(want); }
@@ -462,14 +515,14 @@ window.Flow3D = (() => {
     return {
       start() { st.run = true; canvas.style.opacity = '0'; canvas.style.transition = 'opacity .9s ease'; st.t0 = performance.now(); if (reduce) { update(0.5); renderScene(); canvas.style.opacity = '1'; return; } kick(); },
       stop() {
-        canvas.removeEventListener('pointermove', onMove); canvas.removeEventListener('pointerleave', onLeave); tip.remove();
+        canvas.removeEventListener('pointerdown', onDown); canvas.removeEventListener('pointermove', onDrag); canvas.removeEventListener('pointerup', onUp); canvas.removeEventListener('pointercancel', onUp); canvas.removeEventListener('wheel', onWheel); canvas.removeEventListener('dblclick', onReset); canvas.removeEventListener('pointermove', onMove); canvas.removeEventListener('pointerleave', onLeave); tip.remove();
         st.run = false; cancelAnimationFrame(st.raf); ro.disconnect(); io.disconnect(); document.removeEventListener('visibilitychange', onVis);
         disposables.forEach((d) => { try { d.dispose(); } catch (_) { /* already gone */ } });
         [tpl, tiles, miners, jobs, shares].forEach((m) => m.dispose()); renderer.dispose();
         try { renderer.forceContextLoss(); } catch (_) { /* not supported */ }
       },
       feed(d) {
-        st.hr = d.hr || 0; st.units = d.units || 0; st.tipTime = d.tipTime || st.tipTime; st.rtt = d.rtt || 0; st.p50 = d.p50 || 0; st.p95 = d.p95 || 0; if (d.connected !== undefined) st.connected = d.connected; st.cnt = { ok: d.ok || 0, stale: d.stale || 0, bad: d.bad || 0 }; st.batchMs = d.batchMs || 0; st.backend = d.backend || ''; st.jobsT = d.jobs || 0; st.sharesT = d.shares || 0; st.cands = d.cands || st.cands; st.used = d.epochUse || 0; st.online = d.miners || 0;
+        st.hr = d.hr || 0; st.units = d.units || 0; st.tipTime = d.tipTime || st.tipTime; st.rtt = d.rtt || 0; st.p50 = d.p50 || 0; st.p95 = d.p95 || 0; if (d.connected !== undefined) st.connected = d.connected; st.cnt = { ok: d.ok || 0, stale: d.stale || 0, bad: d.bad || 0 }; st.batchMs = d.batchMs || 0; st.backend = d.backend || ''; st.jobsT = d.jobs || 0; st.sharesT = d.shares || 0; st.cands = d.cands || st.cands; st.used = d.epochUse || 0; st.online = d.miners || 0; if (d.modes) setModes(d.modes, d.miners || 0);
         const tot = (d.ok || 0) + (d.stale || 0) + (d.bad || 0);
         if (tot > 0) { st.okF = d.ok / tot; st.staleF = d.stale / tot; st.badF = d.bad / tot; }
       },
@@ -482,10 +535,11 @@ window.Flow3D = (() => {
         }
         st.tip = height;
       },
-      block(height) {
+      block(height, mode) {
         if (gold) return;
-        const m = new T.Mesh(chainGeo, track(new T.MeshBasicMaterial({ color: col.warn }))); m.position.set(X.miners, -0.2, 0); add(m); gold = { m, t: 0 };
-        ring(col.warn, X.miners); st.goldT = 4; st.shake = 0.5; st.flash = Math.max(st.flash, 0.5);
+        const gz = (GROUPS[modeIdx(mode)] || GROUPS[1]).z;
+        const m = new T.Mesh(chainGeo, track(new T.MeshBasicMaterial({ color: col.warn }))); m.position.set(X.miners, -0.2, gz); add(m); gold = { m, t: 0, z: gz };
+        ring((GROUPS[modeIdx(mode)] || GROUPS[1]).c, X.miners); st.goldT = 4; st.shake = 0.5; st.flash = Math.max(st.flash, 0.5);
       },
     };
   }
