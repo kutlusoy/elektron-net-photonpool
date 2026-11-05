@@ -11,7 +11,7 @@ const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-liv
     <section class="pane p-alloc" aria-label="Allocator"><h2><span>ALLOCATOR</span></h2><pre id="pane-alloc"></pre></section>
     <section class="pane p-shares" aria-label="Shares"><h2><span>SHARES</span></h2><pre id="pane-shares"></pre></section>
     <section class="pane p-events" aria-label="Events"><h2><span>EVENTS</span><em>public feed, no miner data</em></h2><div class="tty" id="events" tabindex="-1"></div></section>
-    <section class="pane p-flow" aria-label="Engine flow"><h2><span>FLOW</span><em>jobs out, shares back</em></h2><div class="flowbox"><canvas id="flow"></canvas></div></section>
+    <section class="pane p-flow" aria-label="Engine flow"><h2><span>FLOW</span><em>real rates, schematic particles</em></h2><div class="flowbox"><canvas id="flow"></canvas></div></section>
   </main>`;
 let flow = null;
 const view = { s: null, seq: 0, lastTip: { h: null, t: 0 }, follow: true };
@@ -83,7 +83,7 @@ async function refresh() {
   Series.push('sps', s.shares.perSec);
   if (view.lastTip.h !== null && n.height !== view.lastTip.h && view.lastTip.t) Series.push('tipint', n.tipTime - view.lastTip.t, n.tipTime);
   if (n.height !== view.lastTip.h) view.lastTip = { h: n.height, t: n.tipTime };
-  if (flow) { flow.feed({ jobs: s.net ? s.net.jobsPerSec : 0, shares: s.shares.perSec, units: s.alloc.unitsPerSec, cands: s.alloc.candidates, hr: s.hashrate.now, miners: s.miners.online, ok: s.shares.okN, stale: s.shares.staleN, bad: s.shares.dupN + s.shares.invN, epochUse: s.alloc.epochUse, batchMs: n.batchMs, backend: n.backend, ...photonRates(s) }); flow.tip(n.height); }
+  if (flow) { flow.feed({ jobs: s.net ? s.net.jobsPerSec : 0, shares: s.shares.perSec, units: s.alloc.unitsPerSec, cands: s.alloc.candidates, hr: s.hashrate.now, miners: s.miners.online, ok: s.shares.okN, stale: s.shares.staleN, bad: s.shares.dupN + s.shares.invN, epochUse: s.alloc.epochUse, batchMs: n.batchMs, backend: n.backend, units: s.alloc.unitsPerSec, tipTime: n.tipTime, rtt: n.rttMs, p50: n.p50, p95: n.p95, connected: n.connected, ...photonRates(s) }); flow.tip(n.height); }
   (ev.events || []).forEach((x) => { addEvent(x); if (flow && x.lvl === 'blk') flow.block(); });
   if (typeof ev.last === 'number') view.seq = ev.last;
 }

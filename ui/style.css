@@ -373,3 +373,6 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 @media (max-width: 720px) { .grid.engine { grid-template-columns: 1fr; grid-template-areas: "tip" "alloc" "shares" "flow" "events"; } .flowbox { min-height: 240px; } }
 .grid.engine .p-events .tty { white-space: nowrap; overflow-x: hidden; }
 .grid.engine .p-events .tty div { white-space: nowrap; }
+.flowtip { position: absolute; z-index: 5; pointer-events: none; max-width: 240px; padding: 6px 10px; font-size: 11px; line-height: 1.4; color: var(--fg); background: rgba(2, 6, 12, .93); border: 1px solid var(--c1); box-shadow: 0 0 18px color-mix(in srgb, var(--c1) 35%, transparent); }
+.flowtip b { color: var(--c1); letter-spacing: .12em; font-size: 10px; }
+.flowtip div { color: var(--dim); white-space: nowrap; }
