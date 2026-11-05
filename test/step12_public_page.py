@@ -68,10 +68,10 @@ async def main(h):
 
     s, hd, b = http(PUB, "/")
     h.check("public listener serves the terminal page", s == 200 and b"PHOTON POOL" in b and "text/html" in hd.get("content-type", ""))
-    for path in ("/style.css", "/common.js", "/public.js", "/miner.html", "/miner", "/miner.js"):
+    for path in ("/style.css", "/common.js", "/public.js", "/engine.js", "/engine", "/ops", "/miner.html", "/miner", "/miner.js"):
         s, _, _ = http(PUB, path)
         h.check(f"static asset {path} is served", s == 200)
-    for path in ("/index.html", "/app.js", "/api/v1/summary", "/api/v1/ledger", "/../Cargo.toml", "/public/v1/../../api/v1/ledger"):
+    for path in ("/ops.js", "/app.js", "/api/v1/summary", "/api/v1/ledger", "/../Cargo.toml", "/public/v1/../../api/v1/ledger"):
         s, _, _ = http(PUB, path)
         h.check(f"operator resource {path} is NOT reachable on the public listener", s == 404, str(s))
 

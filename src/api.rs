@@ -11,7 +11,7 @@ use std::convert::Infallible;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio_stream::wrappers::BroadcastStream;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Deserialize)]
 struct Limit {
@@ -21,6 +21,7 @@ struct Limit {
 pub fn router(pool: Arc<Pool>) -> Router {
     let ui = pool.cfg.api.ui_dir.clone();
     let music = crate::music::dir(&pool.cfg.api.music_dir, &ui);
+    let shell = std::path::Path::new(&ui).join("index.html");
     Router::new()
         .route("/api/v1/summary", get(summary))
         .route("/api/v1/miners", get(miners))
@@ -35,6 +36,12 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .nest_service("/music", crate::music::files(music))
         .with_state(pool.clone())
         .merge(crate::public::data_router(pool))
+        // the one-page app: every view path answers with the shell, the files are served from the ui directory (ops.js only here)
+        .route_service("/engine", ServeFile::new(shell.clone()))
+        .route_service("/ops", ServeFile::new(shell.clone()))
+        .route_service("/miner", ServeFile::new(shell.clone()))
+        .route_service("/miner.html", ServeFile::new(shell.clone()))
+        .route_service("/miner/*address", ServeFile::new(shell))
         .fallback_service(ServeDir::new(ui))
 }
 

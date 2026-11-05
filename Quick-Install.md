@@ -117,9 +117,9 @@ Files go to `/opt/photond`, `/etc/photond` and `/var/lib/photond`; the pool stop
 
 ## 6. Web UI, public page and API
 
-- UI: `http://127.0.0.1:8081/` (for a remote host use an SSH tunnel: `ssh -L 8081:127.0.0.1:8081 user@host`).
+- UI: `http://127.0.0.1:8081/` (the same pages as the public port plus the OPS view with worker names, ledger and console) (for a remote host use an SSH tunnel: `ssh -L 8081:127.0.0.1:8081 user@host`).
 - API (read-only): `/api/v1/summary`, `/miners`, `/blocks`, `/events`.
-- **Public page for miners:** set `[public] enabled = true` to serve a public terminal page (pool statistics, connection details with ports and modes, blocks, payouts, address lookup) and a personal **miner page** (`/miner/<address>`, also `/miner.html#<address>`: balances, pending PPLNS credits with the blocks until maturity, payouts, workers, 24 h hashrate, blocks found) on its own listener, default `127.0.0.1:8082`. Put a reverse proxy with TLS in front of it and set `trust_proxy = true`. The operator UI and API are never served there. See [`doc-elektron/guideline-public-page.md`](doc-elektron/guideline-public-page.md).
+- **Public page for miners:** set `[public] enabled = true` to serve a public terminal page (pool statistics, connection details with ports and modes, blocks, payouts, address lookup) and a personal **miner page** (`/miner/<address>`, also `/miner.html#<address>`: balances, pending PPLNS credits with the blocks until maturity, payouts, workers, 24 h hashrate, blocks found) on its own listener, default `127.0.0.1:8082`. Put a reverse proxy with TLS in front of it and set `trust_proxy = true`. The admin API and the OPS view are never served there; the ENGINE view (chain tip, allocator, share quality, sanitized events) is. See [`doc-elektron/guideline-public-page.md`](doc-elektron/guideline-public-page.md).
 - The UI shows a `DEMO DATA` tag and simulated numbers when it cannot reach the API.
 
 ## 7. Configuration reference

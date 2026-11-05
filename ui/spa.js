@@ -1,9 +1,20 @@
 'use strict';
 // Single-page shell of the public pages: one document with a persistent title bar (music player, clock), views for the pool and the
-// miner page that are swapped in place, so the music keeps playing across pages. Paths: / (pool), /miner and /miner/<address>.
+// engine, miner and operator views that are swapped in place, so the music keeps playing across pages. Paths: / (pool), /engine,
+// /miner and /miner/<address>, /ops (operator view, only where the admin API answers, i.e. on the operator port).
 window.SPA = (() => {
   let current = null, token = 0;
-  const routeOf = (path) => (/^\/miner(\.html|\/|$)/.test(path) ? 'miner' : 'pool');
+  const routeOf = (path) => (/^\/miner(\.html|\/|$)/.test(path) ? 'miner' : path === '/engine' ? 'engine' : path === '/ops' ? 'ops' : 'pool');
+  // the operator view exists only where the admin API answers; its script is loaded on demand and never offered by the public listener
+  const opsReady = (async () => {
+    try {
+      const r = await fetch('/api/v1/summary', { cache: 'no-store' });
+      if (!r.ok) return false;
+      await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = '/ops.js'; sc.onload = ok; sc.onerror = no; document.head.append(sc); });
+      document.querySelectorAll('[data-nav=ops]').forEach((a) => { a.hidden = false; });
+      return !!(window.Views && Views.ops);
+    } catch (_) { return false; }
+  })();
   const root = () => document.getElementById('view');
 
   function cascade(r) {
@@ -15,7 +26,10 @@ window.SPA = (() => {
   }
 
   async function show(path, instant) {
-    const name = routeOf(path), mine = ++token;
+    let name = routeOf(path);
+    const mine = ++token;
+    if (name === 'ops' && !(await opsReady)) { name = 'pool'; history.replaceState(null, '', '/'); }
+    if (mine !== token) return;
     const swap = () => {
       if (mine !== token) return;
       if (current) { try { Views[current].unmount(); } catch (_) { /* view already gone */ } }
@@ -44,7 +58,7 @@ window.SPA = (() => {
     const a = e.target.closest && e.target.closest('a[href]');
     if (!a || a.target || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const u = new URL(a.href, location.href);
-    if (u.origin !== location.origin || !(u.pathname === '/' || /^\/miner/.test(u.pathname))) return;
+    if (u.origin !== location.origin || !(u.pathname === '/' || /^\/(miner|engine|ops)/.test(u.pathname))) return;
     e.preventDefault();
     go(u.pathname + u.search);
   });

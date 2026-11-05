@@ -323,3 +323,17 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 .hleg .sw { display: inline-block; width: 8px; height: 8px; margin-right: 5px; box-shadow: 0 0 6px currentColor; }
 .hleg .sw.c1 { background: var(--c1); color: var(--c1); } .hleg .sw.c2 { background: var(--c2); color: var(--c2); } .hleg .sw.c3 { background: var(--c3); color: var(--c3); }
 .hleg .sw.ok { background: var(--ok); color: var(--ok); } .hleg .sw.warn { background: var(--warn); color: var(--warn); } .hleg .sw.err { background: var(--err); color: var(--err); }
+
+/* engine view (public) and operator view */
+.p-shares { grid-area: shares; } .p-events { grid-area: events; } .p-oblocks { grid-area: oblocks; } .p-ledger { grid-area: ledger; }
+.grid.engine { grid-template-columns: 1.2fr 1.2fr 1fr; grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "tip alloc shares" "events events events"; }
+.grid.ops { grid-template-columns: 1.6fr 1fr; grid-template-rows: minmax(0, 1.2fr) minmax(0, .8fr) minmax(0, .9fr); grid-template-areas: "miners oblocks" "miners ledger" "tty tty"; }
+.grid.engine .p-events .tty { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+@media (max-width: 1100px) {
+  .grid.engine { grid-template-columns: 1fr 1fr; grid-template-areas: "tip alloc" "shares shares" "events events"; grid-template-rows: auto auto minmax(220px, 1fr); }
+  .grid.ops { grid-template-columns: 1fr; grid-template-areas: "miners" "oblocks" "ledger" "tty"; grid-template-rows: none; }
+}
+@media (max-width: 720px) {
+  .grid.engine { grid-template-columns: 1fr; grid-template-areas: "tip" "alloc" "shares" "events"; grid-template-rows: none; }
+  .grid.ops .p-miners pre { max-height: 300px; }
+}

@@ -75,6 +75,10 @@ async def main(h):
 
     # the operator listener serves the public API as well, and the admin API stays on it only
     h.check("the operator listener serves the public API too", get(API, "/public/v1/engine")["alloc"]["candidates"] == 4 and "events" in get(API, "/public/v1/events?since=0"))
+    for path in ("/", "/engine", "/ops", "/miner", "/miner/" + ACCOUNT):
+        a, b = raw(API, path), raw(PUB, path)
+        h.check(f"one shell page for {path} on both listeners", a[0] == 200 and b[0] == 200 and a[1] == b[1] and "data-nav" in a[1], f"{a[0]} {b[0]}")
+    h.check("the operator script is served on the operator listener only", raw(API, "/ops.js")[0] == 200 and raw(PUB, "/ops.js")[0] == 404)
     h.check("the admin API is not served on the public listener", raw(PUB, "/api/v1/summary")[0] == 404 and raw(PUB, "/api/v1/miners")[0] == 404 and raw(PUB, "/api/v1/events")[0] == 404)
     for path in ("/api/v1/ledger", "/api/v1/account/" + ACCOUNT):
         h.check(f"{path} is not on the public listener", raw(PUB, path)[0] == 404)
