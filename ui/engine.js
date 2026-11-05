@@ -4,7 +4,7 @@ window.Views = window.Views || {};
 Views.engine = (() => {
 'use strict';
 const timers = [], offs = [];
-const on = (t, ev, fn) => { t.addEventListener(ev, fn); offs.push(() => t.removeEventListener(ev, fn)); };
+const on = (t, ev, fn, o) => { t.addEventListener(ev, fn, o); offs.push(() => t.removeEventListener(ev, fn, o)); };
 const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-live="off"></div>
   <main class="grid engine">
     <section class="pane p-tip" aria-label="Chain tip"><h2><span>TIP</span></h2><pre id="pane-tip"></pre></section>
@@ -40,7 +40,27 @@ function addEvent(e) {
   d.innerHTML = `<span class="t">${t}</span> <span class="lv lv-${lv}">${esc(lv.toUpperCase().padEnd(5))}</span>${hashSpans(e.msg)}`;
   box.appendChild(d);
   while (box.childElementCount > 300) box.firstChild.remove();
-  if (view.follow) box.scrollTop = box.scrollHeight;
+  settle();
+}
+
+// Event feed: one line per event that is never wrapped (the font shrinks until the longest line fits, which matters when the pane is maximized and the
+// hashes are complete), and a follow mode that only the reader switches off (wheel, keys, touch or dragging the scrollbar), not layout changes.
+let settleRaf = 0, ours = 0;
+function toBottom(smooth) {
+  const box = $('#events'); if (!box) return;
+  ours = performance.now() + 450; // scroll events until then come from us
+  box.scrollTo({ top: box.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+}
+function fitEvents() {
+  const box = $('#events'); if (!box) return;
+  box.style.fontSize = '';
+  if (box.scrollWidth <= box.clientWidth + 1) return;
+  const px = parseFloat(getComputedStyle(box).fontSize);
+  box.style.fontSize = Math.max(8, Math.floor(px * box.clientWidth / box.scrollWidth * 100) / 100 - 0.2) + 'px';
+}
+function settle() {
+  if (settleRaf) return;
+  settleRaf = requestAnimationFrame(() => { settleRaf = 0; fitEvents(); if (view.follow) toBottom(true); });
 }
 
 // Photon gateways: counters of the public engine data turned into rates between two polls
@@ -151,7 +171,12 @@ async function mount(root) {
   $('#who').textContent = 'engine';
   const tag = $('#mode-tag'); tag.textContent = 'LIVE'; tag.className = 'tag live';
   const box = $('#events');
-  on(box, 'scroll', () => { view.follow = box.scrollTop + box.clientHeight >= box.scrollHeight - 6; });
+  const near = () => box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
+  on(box, 'scroll', () => { if (performance.now() > ours) view.follow = near(); });
+  on(box, 'wheel', () => { setTimeout(() => { view.follow = near(); }, 80); }, { passive: true });
+  on(box, 'touchmove', () => { view.follow = near(); }, { passive: true });
+  on(box, 'keydown', () => { setTimeout(() => { view.follow = near(); }, 0); });
+  const ro = new ResizeObserver(() => { fitEvents(); if (view.follow) toBottom(false); }); ro.observe(box); offs.push(() => ro.disconnect());
   on(document, 'depthchange', () => { try { render(); } catch (_) { /* no data yet */ } });
   startFlow();
   const tick = async () => { try { await refresh(); render(); } catch (e) { if (!view.s) $('#pane-tip').textContent = 'pool API not reachable: ' + e.message; } };
