@@ -14,6 +14,30 @@
 
 **Status:** the pool offers solo (direct coinbase payout, no fee), PPLNS and PPS side by side, keeps a SQLite ledger, tracks block maturity and pays out through a node wallet, and serves a public pool page. All of this is tested on regtest against an unmodified node (see the `test/` directory). **Payouts start in dry-run mode** (`payout.dry_run = true`), so nothing is sent until you switch it off. Not tested yet: real ASIC hardware and firmware (the first test, a Bitaxe on mainnet, is described in [`doc-elektron/guideline-release-and-bitaxe-test.md`](doc-elektron/guideline-release-and-bitaxe-test.md)) and mainnet-scale load. The node is built unmodified by default; the optional Photon node patch (`NODE_PATCHES=true`) is only needed for pools with many payout addresses. Details: [`doc-elektron/guideline-payout-modes.md`](doc-elektron/guideline-payout-modes.md).
 
+## 1a. Which way to install?
+
+Three ways lead to a running pool. Pick by what you already have:
+
+| You want | Use | Section |
+|---|---|---|
+| Everything from one script: node, pool, HTTPS with your domain, and a **new encrypted pool wallet** (generated passphrase, backup of the private descriptors, many payout addresses already provisioned) | **Complete stack** `stack/install.sh` | [10.1](#101-complete-docker-stack-node-pool-https) |
+| Node and pool in Docker, but with **your own payout addresses or your own wallet** (desktop wallet, `elektron-net-electrum`), or you already run a reverse proxy | **Docker compose** | [3](#3-option-a-docker-recommended) |
+| No Docker, everything installed and managed by yourself (systemd) | **Bare metal** | [4](#4-option-b-bare-metal) |
+
+Short version: **new pool with PPLNS or PPS and a public domain: take the complete stack.** It is the least work and the only way that sets up the encrypted wallet for you. **Own keys or own infrastructure: Docker compose or bare metal.**
+
+What changes between the ways:
+
+| | Complete stack | Docker compose | Bare metal |
+|---|---|---|---|
+| Node built from source | yes | yes | you |
+| Pool wallet created and encrypted | yes (passphrase in `stack/CREDENTIALS.txt`) | you (see `payout.wallet`) | you |
+| Payout addresses | provisioned from the wallet (default 512) | your list in `photond.toml`, or provisioned if you set `payout.wallet` | same |
+| HTTPS and domain | Caddy, automatic | optional (`--profile tls`) | your reverse proxy |
+| Payouts at the start | dry run | dry run | dry run |
+
+In every case the payouts start in **dry run** (`payout.dry_run = true`): nothing is sent until you switch it off. Solo miners are paid directly in the coinbase and need no wallet; PPLNS and PPS are paid from the node wallet, see [`doc-elektron/guideline-payout-modes.md`](doc-elektron/guideline-payout-modes.md). The pool only needs addresses, the keys stay in the node wallet.
+
 ## 2. Requirements
 
 - Linux x86_64, 2 CPU cores, 2 GB RAM for the pool plus the resources of an Elektron Net node.
@@ -22,6 +46,8 @@
 - Open TCP ports: `3333` (miners), `8333` (node P2P). Never expose the node RPC (`8332`). Keep the admin API (`8081`) on localhost.
 
 ## 3. Option A: Docker (recommended)
+
+This way needs your own payout addresses (or a wallet you set up yourself). For a complete setup including the encrypted wallet use the [complete stack](#101-complete-docker-stack-node-pool-https) instead, see [section 1a](#1a-which-way-to-install).
 
 ```bash
 git clone https://github.com/kutlusoy/elektron-net-photonpool.git
