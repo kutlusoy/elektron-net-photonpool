@@ -70,8 +70,6 @@ class Node:
 class Harness:
     def __init__(self, name, blocks=130, extra=()):
         self.name, self.blocks, self.failed = name, blocks, 0
-        # a node of the photonpool branch has getattestationbatch off unless it is enabled (set by run_all.sh for the batch steps)
-        if os.environ.get("ELEKTROND_BATCH_OPTION") == "1": extra = list(extra) + ["-enableattestationbatch=1"]
         self.node = Node(os.environ.get("ELEKTROND", sys.argv[1] if len(sys.argv) > 1 else "elektrond"),
                          os.environ.get("PHOTON_DATADIR", "/tmp/photon-test") + "-" + name, extra)
 

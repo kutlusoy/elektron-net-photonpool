@@ -91,7 +91,6 @@ wallet=${WALLET_NAME}
 # elektrond writes a stray default config into the data directory on its first start; without this
 # its own safety check refuses to start.
 allowignoredconf=1
-enableattestationbatch=1
 CONF_EOF
 
 NAME_ESCAPED="${POOL_NAME//\\/\\\\}"; NAME_ESCAPED="${NAME_ESCAPED//\"/\\\"}"
