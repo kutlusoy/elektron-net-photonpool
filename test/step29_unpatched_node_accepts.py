@@ -49,6 +49,11 @@ with Harness("step29", extra=["-acceptnonstdtxn=1"]) as h:
                 if r is None: accepted += 1
                 a.rpc("submitblock", blk)
                 h.check(f"round {round_}: the unpatched node accepts the block of variant {i}", r is None and b.rpc("getbestblockhash") == a.rpc("getbestblockhash"), str(r))
+        # submitblock returning null is not the proof by itself: the block must be part of the ACTIVE chain of the unpatched node, which must hold exactly the same
+        # UTXO set (MuHash over all unspent outputs) as the node that built it
+        tips = b.rpc("getchaintips")
+        h.check("the tip of the unpatched node is the active chain tip with the same hash and height", any(t["status"] == "active" and t["hash"] == a.rpc("getbestblockhash") and t["height"] == a.rpc("getblockcount") for t in tips), str(tips[:2]))
+        h.check("both nodes hold the same UTXO set (MuHash)", b.rpc("gettxoutsetinfo", "muhash")["muhash"] == a.rpc("gettxoutsetinfo", "muhash")["muhash"])
         # wrong attestation must be rejected
         bt = a.rpc("getattestationbatch", {"candidates": variants[:1]})
         datas = [bytes.fromhex(t["data"]) for t in bt["transactions"]]

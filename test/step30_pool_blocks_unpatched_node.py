@@ -87,6 +87,11 @@ async def main(h):
             r = b.rpc("submitblock", a.rpc("getblock", a.rpc("getblockhash", height), 0))
             if r is not None: rej.append((height, r))
         h.check("the unpatched node accepts every block of the chain, including all pool-mined ones", not rej and b.rpc("getbestblockhash") == a.rpc("getbestblockhash"), str(rej))
+        # submitblock returning null is not the proof by itself: the block must be part of the ACTIVE chain of the unpatched node, which must hold exactly the same
+        # UTXO set (MuHash over all unspent outputs) as the node that built it
+        tips = b.rpc("getchaintips")
+        h.check("the tip of the unpatched node is the active chain tip with the same hash and height", any(t["status"] == "active" and t["hash"] == a.rpc("getbestblockhash") and t["height"] == a.rpc("getblockcount") for t in tips), str(tips[:2]))
+        h.check("both nodes hold the same UTXO set (MuHash)", b.rpc("gettxoutsetinfo", "muhash")["muhash"] == a.rpc("gettxoutsetinfo", "muhash")["muhash"])
         h.check(f"{len(pool_blocks)} pool-mined blocks were in that chain", len(pool_blocks) == len(plan) and pool_blocks == list(range(131, 131 + len(plan))), str(pool_blocks))
         # the pool block of a solo miner pays that miner, a pool block pays a pool script: checked on the unpatched node's own copy
         solo_height = next(k for k, v in kinds.items() if v == "solo")
