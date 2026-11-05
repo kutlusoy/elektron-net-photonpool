@@ -409,14 +409,10 @@ body[data-theme="mono"] .pane { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 
    instead of turning cloudy. On Chromium the small elements also refract the background (SVG displacement, see Themes in common.js). */
 body[data-theme="candy"] { --bg: #0c0616; --panel: rgba(40, 20, 60, .5); }
 body[data-theme="candy"] { background:
-    radial-gradient(560px 460px at 10% 16%, rgba(255, 70, 180, .62), transparent 70%),
-    radial-gradient(600px 500px at 88% 12%, rgba(60, 200, 255, .58), transparent 70%),
-    radial-gradient(640px 520px at 72% 94%, rgba(255, 222, 60, .46), transparent 70%),
-    radial-gradient(520px 460px at 4% 90%, rgba(120, 255, 170, .42), transparent 70%),
-    radial-gradient(460px 400px at 46% 50%, rgba(170, 110, 255, .3), transparent 70%),
-    var(--bg); }
+    linear-gradient(125deg, rgba(255, 80, 185, .42) 0%, rgba(170, 110, 255, .36) 30%, rgba(60, 200, 255, .38) 62%, rgba(110, 255, 170, .32) 100%),
+    var(--bg); background-attachment: fixed; }
 body[data-theme="candy"] .fx { background: none; mix-blend-mode: normal; }
-body[data-theme="candy"] .window { clip-path: none; border-radius: 26px; border-color: rgba(255, 255, 255, .25); background: transparent; }
+body[data-theme="candy"] .window { clip-path: none; border-radius: 16px; border-color: rgba(255, 255, 255, .25); background: transparent; }
 body[data-theme="candy"] .titlebar, body[data-theme="candy"] .statusline { background: rgba(255, 255, 255, .08); backdrop-filter: blur(8px) saturate(1.8); -webkit-backdrop-filter: blur(8px) saturate(1.8); }
 /* a candy color per pane */
 body[data-theme="candy"] .pane, body[data-theme="candy"] .card { --jc: 255, 90, 190; }
@@ -425,30 +421,32 @@ body[data-theme="candy"] .pane:nth-child(5n+3), body[data-theme="candy"] .card:n
 body[data-theme="candy"] .pane:nth-child(5n+4), body[data-theme="candy"] .card:nth-child(5n+4) { --jc: 110, 255, 170; }
 body[data-theme="candy"] .pane:nth-child(5n+5), body[data-theme="candy"] .card:nth-child(5n+5) { --jc: 175, 120, 255; }
 body[data-theme="candy"] .pane, body[data-theme="candy"] .card {
-  border: 1.5px solid rgba(255, 255, 255, .55); border-radius: 26px; overflow: hidden;
+  border: 1.5px solid rgba(255, 255, 255, .55); border-radius: 14px; overflow: hidden;
   background:
-    radial-gradient(120% 90% at 25% 0%, rgba(var(--jc), .5), rgba(var(--jc), .16) 55%, rgba(var(--jc), .1) 100%),
+    linear-gradient(180deg, rgba(var(--jc), .3), rgba(var(--jc), .2)),
     linear-gradient(160deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, 0) 40%);
   backdrop-filter: blur(5px) saturate(1.9) brightness(1.15); -webkit-backdrop-filter: blur(5px) saturate(1.9) brightness(1.15);
-  box-shadow: inset 0 3px 2px rgba(255, 255, 255, .75), inset 0 -22px 30px -10px rgba(var(--jc), .75), inset 0 0 0 1px rgba(var(--jc), .35), 0 18px 34px -10px rgba(var(--jc), .55), 0 4px 14px rgba(0, 0, 0, .3);
+  box-shadow: inset 0 3px 2px rgba(255, 255, 255, .75), inset 0 -16px 24px -12px rgba(var(--jc), .6), inset 0 0 0 1px rgba(var(--jc), .35), 0 18px 34px -10px rgba(var(--jc), .55), 0 4px 14px rgba(0, 0, 0, .3);
 }
 /* the glossy highlight: a bent white streak and a small bright dot on the top left (replaces the corner marks) */
 body[data-theme="candy"] .pane::before { display: block; left: 5%; top: 3px; width: 46%; height: 22px; border: 0; border-radius: 50%; background: linear-gradient(180deg, rgba(255, 255, 255, .6), rgba(255, 255, 255, 0)); filter: blur(.5px); opacity: .85; z-index: 1; }
 body[data-theme="candy"] .pane::after { display: block; right: auto; bottom: auto; left: 2.4%; top: 11px; width: 9px; height: 9px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .95); box-shadow: 0 0 8px rgba(255, 255, 255, .9); z-index: 1; }
-body[data-theme="candy"] .pane > h2 { border-bottom: 1px solid rgba(255, 255, 255, .22); background: transparent; border-radius: 26px 26px 0 0; padding-left: 38px; position: relative; z-index: 2; }
+body[data-theme="candy"] .pane > h2 { border-bottom: 1px solid rgba(255, 255, 255, .22); background: transparent; border-radius: 14px 14px 0 0; padding-left: 38px; position: relative; z-index: 2; }
 body[data-theme="candy"] .pane h2, body[data-theme="candy"] .card h3 { color: #fff; text-shadow: 0 1px 6px rgba(var(--jc), .9), 0 0 2px rgba(0, 0, 0, .5); }
-body[data-theme="candy"] .card h3 { background: linear-gradient(90deg, rgba(255, 255, 255, .22), transparent 70%); border-bottom-color: rgba(255, 255, 255, .25); border-radius: 26px 26px 0 0; padding-left: 18px; }
-body[data-theme="candy"] .pane pre, body[data-theme="candy"] .tty, body[data-theme="candy"] .chartpane, body[data-theme="candy"] .cbody { text-shadow: 0 1px 3px rgba(20, 5, 40, .75); }
-body[data-theme="candy"] .dim, body[data-theme="candy"] .row-h { color: rgba(255, 240, 250, .78); }
+body[data-theme="candy"] .card h3 { background: linear-gradient(90deg, rgba(255, 255, 255, .22), transparent 70%); border-bottom-color: rgba(255, 255, 255, .25); border-radius: 14px 14px 0 0; padding-left: 18px; }
+body[data-theme="candy"] .pane pre, body[data-theme="candy"] .tty, body[data-theme="candy"] .chartpane, body[data-theme="candy"] .cbody { background: rgba(16, 6, 32, .5); margin: 6px 8px 8px; border-radius: 8px; text-shadow: 0 1px 2px rgba(10, 2, 24, .9); }
+body[data-theme="candy"] { --fg: #fff4fb; --dim: #e2c9de; }
+body[data-theme="candy"] .pane .tty { margin: 0 8px 4px; }
+body[data-theme="candy"] .dim, body[data-theme="candy"] .row-h { color: #e2c9de; }
 /* maximized: still a jelly, but denser so that charts stay readable */
 body[data-theme="candy"] .pane.front { background: radial-gradient(120% 90% at 25% 0%, rgba(var(--jc), .42), rgba(34, 18, 54, .93) 60%), rgba(34, 18, 54, .93); backdrop-filter: none; -webkit-backdrop-filter: none; }
 body[data-theme="candy"] .music, body[data-theme="candy"] .tag, body[data-theme="candy"] .flowtip, body[data-theme="candy"] .rbtn {
   border-radius: 999px; border: 1.5px solid rgba(255, 255, 255, .6); background: radial-gradient(120% 140% at 30% 0%, rgba(255, 255, 255, .45), rgba(255, 122, 200, .22));
   box-shadow: inset 0 2px 1px rgba(255, 255, 255, .8), inset 0 -6px 10px -4px rgba(255, 122, 200, .6), 0 6px 14px rgba(0, 0, 0, .25); backdrop-filter: blur(4px) saturate(1.9); -webkit-backdrop-filter: blur(4px) saturate(1.9);
 }
-body[data-theme="candy"] .flowtip { border-radius: 18px; background: rgba(40, 18, 62, .88); }
-body[data-theme="candy"] .prompt { background: rgba(255, 255, 255, .1); border-radius: 0 0 26px 26px; }
-body[data-theme="candy"] .flowbox canvas, body[data-theme="candy"] .chartpane { border-radius: 0 0 26px 26px; }
+body[data-theme="candy"] .flowtip { border-radius: 12px; background: rgba(40, 18, 62, .92); }
+body[data-theme="candy"] .prompt { background: rgba(255, 255, 255, .1); border-radius: 0 0 14px 14px; }
+body[data-theme="candy"] .flowbox canvas, body[data-theme="candy"] .chartpane { border-radius: 0 0 14px 14px; }
 /* jelly wobble when the pointer enters a pane (once, ~0.9 s) */
 @media (prefers-reduced-motion: no-preference) {
   body[data-theme="candy"] .pane:not(.front):hover { animation: jelly .9s ease-out; }
@@ -456,3 +454,9 @@ body[data-theme="candy"] .flowbox canvas, body[data-theme="candy"] .chartpane { 
 }
 /* refraction on small glass elements, Chromium only (the class is set by Themes) */
 body[data-theme="candy"].refract .card, body[data-theme="candy"].refract .music, body[data-theme="candy"].refract .tag, body[data-theme="candy"].refract .flowtip { backdrop-filter: url(#lg) blur(6px) saturate(1.8); }
+/* candy: contrast of small labels on the bright rims */
+body[data-theme="candy"] .rbtn { color: #fff; text-shadow: 0 1px 2px rgba(10, 2, 24, .95); background: radial-gradient(120% 140% at 30% 0%, rgba(255, 255, 255, .3), rgba(70, 30, 110, .55)); }
+body[data-theme="candy"] .rbtn.on { background: radial-gradient(120% 140% at 30% 0%, rgba(255, 255, 255, .5), rgba(255, 122, 200, .7)); }
+body[data-theme="candy"] .pane h2 em { color: #fff; text-shadow: 0 1px 3px rgba(10, 2, 24, .95); }
+body[data-theme="candy"] .music { background: radial-gradient(120% 140% at 30% 0%, rgba(255, 255, 255, .3), rgba(70, 30, 110, .6)); color: #fff; }
+body[data-theme="candy"] .prompt { background: rgba(16, 6, 32, .5); }
