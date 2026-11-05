@@ -20,6 +20,10 @@ with Harness("step28", extra=["-acceptnonstdtxn=1"]) as h:
     h.check("values that add up above the reward are refused", refused(n, one([{"scriptPubKey": ok_script, "value": reward}, {"scriptPubKey": ok_script, "value": 1}]), "exceed the block reward"))
     h.check("values near MAX_MONEY cannot overflow the sum, they are refused", refused(n, {"candidates": [{"outputs": [{"scriptPubKey": ok_script, "value": 2100000000000000}] * 500 + [{"scriptPubKey": ok_script}]}]}, "exceed the block reward"))
     h.check("a negative value is refused", refused(n, one([{"scriptPubKey": ok_script, "value": -1}]), "out of range"))
+    # the full batch size stays available: 4096 candidates in one call (and 4097 is refused)
+    t0 = time.time(); full = n.rpc("getattestationbatch", {"candidates": [{"outputs": [{"scriptPubKey": p2wpkh_script(i % 4000).hex()}]} for i in range(4096)]}); dt = time.time() - t0
+    h.check("a batch of 4096 candidates is served", len(full["candidates"]) == 4096, f"{dt:.2f} s")
+    h.check("a batch of 4097 candidates is refused", refused(n, {"candidates": [{"outputs": [{"scriptPubKey": ok_script}]}] * 4097}, "1 to 4096"))
     # total budget: 401 candidates with 1000 outputs each is 401000 outputs
     big = {"candidates": [{"outputs": [{"scriptPubKey": "51", "value": 0}] * 1000} for _ in range(401)]}
     h.check("a request above the output budget is refused before any work", refused(n, {"candidates": big["candidates"]}, "budget"))
