@@ -56,6 +56,15 @@ fn job_delay_ms(cfg: &crate::config::StratumCfg, rolling_bits: u32, hash_est: f6
     (secs * 1000.0).clamp(floor_ms.min(max), max) as u64
 }
 
+/// The hash rate a new connection starts with. A measured rate can be too low because the miner was starved or lost shares, and starting from it again would keep it
+/// low, so where the device type has a typical rate the higher of the two is used; without a typical rate the learned one is all there is.
+fn start_rate(learned: Option<f64>, typical: Option<f64>) -> Option<f64> {
+    match (learned, typical) {
+        (Some(l), Some(t)) => Some(l.max(t)),
+        (l, t) => l.or(t),
+    }
+}
+
 /// Shortest job interval of one connection: the configured minimum, and never so short that all connections together exceed `max_jobs_per_sec`.
 fn floor_ms(cfg: &crate::config::StratumCfg, conns: u64) -> f64 {
     (cfg.min_job_interval_ms as f64).max(1000.0 * conns as f64 / cfg.max_jobs_per_sec.max(1) as f64)
@@ -300,7 +309,7 @@ impl Session {
                 // of the chip. It sets the first share difficulty (about one share per share_secs), the job pace and whether jobs are clean; everything is
                 // corrected by the measurement of this connection from the first shares on.
                 let learned = self.pool.learned.lock().unwrap().get(&crate::devices::profile_key(&agent)).copied().filter(|l| l.samples >= 3);
-                let prior = learned.map(|l| l.hashrate).or_else(|| crate::devices::expected_hashrate(&agent));
+                let prior = start_rate(learned.map(|l| l.hashrate), crate::devices::expected_hashrate(&agent));
                 if let Some(h) = prior.filter(|h| *h > 0.0) {
                     self.prior_hs = h;
                     let d = (h * self.cfg.share_secs / 4_294_967_296.0).clamp(self.cfg.min_difficulty, self.cfg.max_difficulty);
@@ -875,6 +884,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_low_learned_rate_does_not_pull_a_known_chip_below_its_typical_rate() {
+        assert_eq!(start_rate(Some(0.4e12), Some(1.2e12)), Some(1.2e12));
+        assert_eq!(start_rate(Some(2.0e12), Some(1.2e12)), Some(2.0e12));
+        assert_eq!(start_rate(Some(5.0e6), None), Some(5.0e6));
+        assert_eq!(start_rate(None, Some(1.2e12)), Some(1.2e12));
+        assert_eq!(start_rate(None, None), None);
+    }
+
+    #[test]
     fn learning_takes_the_median_per_device_type() {
         let obs: Vec<Observation> = vec![
             ("bitaxe/bm1370".into(), 1.1e12, 90.0, false), ("bitaxe/bm1370".into(), 1.2e12, 100.0, false), ("bitaxe/bm1370".into(), 5.0e12, 400.0, true),
@@ -888,13 +906,13 @@ mod tests {
     }
 
     #[test]
-    fn job_floor_grows_with_the_connections_and_a_starved_fast_miner_gets_work_in_time() {
+    fn job_floor_grows_with_the_connections() {
         let c = cfg();
         // a few connections: the configured minimum; a big farm: the budget decides (50,000 jobs per second in total)
         assert_eq!(floor_ms(&c, 10), c.min_job_interval_ms as f64);
         assert_eq!(floor_ms(&c, 15_000), 300.0);
-        // a Bitaxe of 1.2 TH/s sweeps 2^37 hashes in 114 ms: the interval must be below that, not the old fixed 200 ms
-        let ms = job_delay_ms(&c, 12, 1.2e12, false, floor_ms(&c, 1));
+        // the model alone (with a short floor): a device of 1.2 TH/s sweeps 2^37 hashes in 114 ms, the interval is 0.8 of that
+        let ms = job_delay_ms(&c, 12, 1.2e12, false, 25.0);
         assert!((80..114).contains(&ms), "{ms}");
         // the interval never exceeds max_job_interval_ms even when the floor of a huge farm is above it
         let mut tight = cfg();
@@ -904,12 +922,12 @@ mod tests {
 
     #[test]
     fn a_starved_miner_converges_to_its_real_rate() {
-        // the miner's real rate H, but it only does the work it gets: rate(I) = min(H, 2^37 / I). The pool derives the interval from the measured rate.
+        // the model alone (floor 25 ms), as a property of the formula; the real hardware may behave differently (clean jobs cost it time). The miner's real rate H, but it only does the work it gets: rate(I) = min(H, 2^37 / I). The pool derives the interval from the measured rate.
         let c = cfg();
         let real: f64 = 1.2e12;
         let mut measured: f64 = 0.35e12;
         for _ in 0..12 {
-            let i = job_delay_ms(&c, 12, measured, false, floor_ms(&c, 1)) as f64 / 1000.0;
+            let i = job_delay_ms(&c, 12, measured, false, 25.0) as f64 / 1000.0;
             measured = real.min(2f64.powi(37) / i);
         }
         assert!(measured > 0.97 * real, "{measured}");
@@ -923,8 +941,9 @@ mod tests {
     fn job_cadence_follows_the_space_a_miner_really_sweeps() {
         let c = cfg();
         // a Bitaxe at 1 TH/s sweeps 2^37 hashes per job in about 0.14 s: fresh work a bit earlier, at 0.8 of that
-        assert_eq!(job_delay_ms(&c, 12, 1.0e12, false, c.min_job_interval_ms as f64), (2f64.powi(37) / 1.0e12 * 0.8 * 1000.0) as u64);
-        // a faster one is limited by the shortest interval
+        assert_eq!(job_delay_ms(&c, 12, 1.0e12, false, 25.0), (2f64.powi(37) / 1.0e12 * 0.8 * 1000.0) as u64);
+        // the shortest interval (default 200 ms) is a floor
+        assert_eq!(job_delay_ms(&c, 12, 1.0e12, false, c.min_job_interval_ms as f64), c.min_job_interval_ms);
         assert_eq!(job_delay_ms(&c, 12, 1.0e13, false, c.min_job_interval_ms as f64), c.min_job_interval_ms);
         // a 10 GH/s miner can keep one job for about 11 s, a very slow one never longer than the maximum
         assert_eq!(job_delay_ms(&c, 12, 1.0e10, false, c.min_job_interval_ms as f64), (2f64.powi(37) / 1.0e10 * 0.8 * 1000.0) as u64);

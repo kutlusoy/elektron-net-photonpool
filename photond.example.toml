@@ -70,9 +70,10 @@ share_secs = 10
 max_connections = 200000
 # Drop a connection that sends nothing for this many seconds. Options: whole number. Default 300.
 idle_secs = 300
-# Shortest and longest time between two jobs sent to one miner, in milliseconds. Options: whole numbers. Defaults 25 and 30000.
-# The shortest interval matters for fast miners only: a Bitaxe of 1.2 TH/s has swept the space of a job after about 0.11 s and idles if the next job comes later.
-min_job_interval_ms = 25
+# Shortest and longest time between two jobs sent to one miner, in milliseconds. Options: whole numbers. Defaults 200 and 30000.
+# Every fresh job of an ESP-Miner device (Bitaxe) is a clean job that makes the chip drop its current work, so more jobs are not better: a Bitaxe that was
+# given a job every 90 to 120 ms hashed at 0.28 to 0.4 TH/s, with at least 200 ms between jobs at 0.6 to 0.8 TH/s. Measure before you go below 200.
+min_job_interval_ms = 200
 max_job_interval_ms = 30000
 # Most jobs per second the daemon sends in total. The shortest interval of one connection grows with the number of connections so that this budget is never
 # exceeded (a few fast miners get min_job_interval_ms, 15,000 connections get 300 ms). Options: whole number >= 1. Default 50000 (about 70 % of one core).
@@ -85,8 +86,8 @@ version_space_bits = 5
 # Learn the job interval of every connection: a miner that sends many duplicate or stale shares gets jobs faster, one that does not gets them slower again
 # (never slower than the interval the hash rate calls for, never faster than adaptive_min_interval_ms). Options: true | false. Default true.
 adaptive_jobs = true
-# Shortest job interval the learning may reach, in milliseconds. Options: whole number >= 1. Default 25.
-adaptive_min_interval_ms = 25
+# Shortest job interval the learning may reach, in milliseconds. Options: whole number >= 1. Default 50.
+adaptive_min_interval_ms = 50
 # Miners whose user agent (the name they send with mining.subscribe, for example "bitaxe/BM1370/v2.9.0") contains one of these words, case-insensitive, get every fresh
 # job marked clean, so that they drop their queued older work and switch at once. ESP-Miner (Bitaxe) keeps up to 10 identical jobs queued ahead when the pool sends
 # no extranonce2 space, which showed up as duplicate shares and shares for jobs the pool no longer knew. Large ASICs should not get this: they flush their pipeline on a clean job.

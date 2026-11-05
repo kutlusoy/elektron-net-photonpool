@@ -37,6 +37,7 @@ def preload(db):
     c = sqlite3.connect(db)
     c.execute("CREATE TABLE IF NOT EXISTS device_learned(key TEXT PRIMARY KEY, hashrate REAL NOT NULL, job_ms REAL NOT NULL, clean INTEGER NOT NULL, samples INTEGER NOT NULL, updated INTEGER NOT NULL) WITHOUT ROWID")
     c.execute("INSERT OR REPLACE INTO device_learned VALUES ('bitaxe/bm1366', 2.0e12, 0, 0, 5, ?)", (int(time.time()),))
+    c.execute("INSERT OR REPLACE INTO device_learned VALUES ('bitaxe/bm1368', 0.1e12, 0, 0, 9, ?)", (int(time.time()),))   # a low learned rate must not pull a known chip below its typical rate
     c.execute("INSERT OR REPLACE INTO device_learned VALUES ('cpuminer', 3.0e6, 0, 0, 2, ?)", (int(time.time()),))   # too few observations: not used yet
     c.commit(); c.close()
 
@@ -59,8 +60,10 @@ async def main(h):
     d66 = await first_difficulty("bitaxe/BM1366/v2.9.0")
     d70 = await first_difficulty("bitaxe/BM1370/v2.9.0")
     dcpu = await first_difficulty("cpuminer/2.5.1")
+    d68 = await first_difficulty("bitaxe/BM1368/v2.9.0")
     h.check("a device type with learned values starts at the difficulty of its learned rate (2 TH/s, one share per 10 s)", d66 is not None and abs(d66 - 2.0e12 * 10 / 4294967296) < 1, str(d66))
     h.check("a chip without learned values starts at the typical rate of the chip (1.2 TH/s)", d70 is not None and abs(d70 - 1.2e12 * 10 / 4294967296) < 1, str(d70))
+    h.check("a low learned rate does not pull a known chip below its typical rate (0.7 TH/s)", d68 is not None and abs(d68 - 0.7e12 * 10 / 4294967296) < 1, str(d68))
     h.check("software without enough learned observations starts at the configured difficulty", dcpu == 1024, str(dcpu))
     learned = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{API}/api/v1/learned", timeout=2).read())
     h.check("the operator API lists what was learned", any(x["device"] == "bitaxe/bm1366" and x["samples"] == 5 for x in learned), str(learned))

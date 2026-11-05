@@ -87,7 +87,7 @@ is up to 5 s of latency. Shares then arrive for jobs that the pool has already d
 Changes:
 - `[stratum] clean_work_agents` (default `["bitaxe", "esp-miner"]`): every fresh job for these miners is marked clean, so the chip always gets the newest job at once and no queue builds up.
   Large ASICs do not get it, a clean job makes them flush their pipeline. `test/step24_clean_work_for_esp_miner.py` checks it.
-- `[stratum] version_space_bits` (default 5): job cadence from the space a miner really sweeps (a pass of one job takes the chip about 114 ms at 1.2 TH/s, so about 9 jobs per second; the shortest interval is `min_job_interval_ms`, default 25 ms, raised for big farms by `max_jobs_per_sec`). The default used to be 200 ms and held a Bitaxe of 1.2 TH/s at about 0.7 TH/s.
+- `[stratum] version_space_bits` (default 5): job cadence from the space a miner really sweeps (a pass of one job takes the chip about 114 ms at 1.2 TH/s, so about 9 jobs per second; the shortest interval is `min_job_interval_ms`, default 200 ms, raised for big farms by `max_jobs_per_sec`). A test with 25 ms made it worse (0.28 to 0.4 TH/s instead of 0.6 to 0.8), see the stratum guideline.
 - A duplicate share triggers fresh work at once.
 - The pool keeps the jobs of a connection for 10 s (at least 16, at most 128), so that late shares are still found.
 

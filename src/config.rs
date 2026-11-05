@@ -336,12 +336,12 @@ fn d_s_max_diff() -> f64 { 1.0e12 }
 fn d_s_share_secs() -> f64 { 10.0 }
 fn d_s_max_conn() -> usize { 200_000 }
 fn d_s_idle() -> u64 { 300 }
-fn d_s_min_job() -> u64 { 25 }
+fn d_s_min_job() -> u64 { 200 }
 fn d_s_budget() -> u64 { 50_000 }
 fn d_s_max_job() -> u64 { 30_000 }
 fn d_s_space() -> u32 { 5 }
 fn d_min_cand() -> usize { 16 }
-fn d_s_adapt_floor() -> u64 { 25 }
+fn d_s_adapt_floor() -> u64 { 50 }
 fn d_s_clean_agents() -> Vec<String> { vec!["bitaxe".into(), "esp-miner".into()] }
 
 fn d_poll() -> u64 { 100 }
