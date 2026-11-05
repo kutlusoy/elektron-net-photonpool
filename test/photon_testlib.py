@@ -34,14 +34,15 @@ def p2wpkh_script(i): return b"\x00\x14" + hashlib.sha256(b"photon-test-key-%d" 
 
 
 class Node:
-    def __init__(self, binary, datadir, extra=()):
+    def __init__(self, binary, datadir, extra=(), rpcport=None, port=18998):
         self.binary, self.datadir, self.extra = binary, datadir, list(extra)
+        self.rpcport, self.port = rpcport or RPCPORT, port
         self.auth = base64.b64encode(b"t:t").decode()
         self.proc = None
 
     def start(self):
         shutil.rmtree(self.datadir, ignore_errors=True); os.makedirs(self.datadir)
-        self.proc = subprocess.Popen([self.binary, "-regtest", f"-datadir={self.datadir}", f"-rpcport={RPCPORT}", "-port=18998",
+        self.proc = subprocess.Popen([self.binary, "-regtest", f"-datadir={self.datadir}", f"-rpcport={self.rpcport}", f"-port={self.port}",
                                       "-rpcuser=t", "-rpcpassword=t", "-listen=0", "-dnsseed=0", "-fixedseeds=0", "-persistmempool=0"] + self.extra,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(240):
@@ -56,7 +57,7 @@ class Node:
 
     def rpc(self, method, *params, wallet=None):
         body = json.dumps({"method": method, "params": list(params), "id": 1}).encode()
-        req = urllib.request.Request(f"http://127.0.0.1:{RPCPORT}/" + (f"wallet/{wallet}" if wallet else ""), body, {"Authorization": "Basic " + self.auth, "Content-Type": "application/json"})
+        req = urllib.request.Request(f"http://127.0.0.1:{self.rpcport}/" + (f"wallet/{wallet}" if wallet else ""), body, {"Authorization": "Basic " + self.auth, "Content-Type": "application/json"})
         try: raw = urllib.request.urlopen(req).read()
         except urllib.error.HTTPError as e: raw = e.read()
         r = json.loads(raw, parse_float=Decimal)

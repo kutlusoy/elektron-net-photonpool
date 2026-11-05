@@ -172,6 +172,10 @@ All options with comments are in [`photond.example.toml`](photond.example.toml) 
 | `api.listen`, `api.ui_dir` | Admin API and UI location |
 | `api.explorer_url` | Optional base URL of a mempool-style block explorer (for example `https://mempool.elektron-net.org`). Found blocks and the chain tip then link to `<explorer_url>/block/<hash>` in the UI and in `/api/v1/blocks`. Must start with `http://` or `https://`. |
 
+### 7a. Optional: restrict the pool's RPC user
+
+The pool talks to the node with one RPC user. Everything the pool calls is listed here, so a dedicated user can be limited to it with `rpcauth` and `rpcwhitelist` in `elektron.conf` (generate the line with the `rpcauth.py` script of the node sources; the pool then uses that user and password in `[node] auth`). The methods are: `getblockchaininfo`, `getblockcount`, `getbestblockhash`, `getblockheader`, `getblocktemplate`, `getattestationbatch`, `submitblock` and, for payouts, `createwallet`, `loadwallet`, `listwallets`, `getnewaddress`, `getaddressesbylabel`, `getbalance`, `listtransactions`, `sendmany`, `walletpassphrase`, `walletlock`. This is a suggestion that has not been tested with the pool; the RPC port is not reachable from outside in the Docker setups in any case.
+
 ## 8. Troubleshooting
 
 | Symptom | Cause and fix |
