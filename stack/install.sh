@@ -211,6 +211,8 @@ fi
 
 # ---- build and start the node, set up the wallet ----
 if [ "$UPDATE" = true ]; then
+  SNAP="data/update-backup-$(date +%Y%m%d-%H%M%S)"
+  ( umask 077; mkdir -p "$SNAP"; for f in photond.env "$CONFIG_FILE" data/backup photond.toml; do [ ! -e "$f" ] || cp -a "$f" "$SNAP/"; done ) && log "Saved the wallet backup and settings to stack/${SNAP} (copy it off the server)." || warn "could not write the update backup"
   log "Rebuilding the images with fresh base layers ..."
   docker compose build --pull
 else

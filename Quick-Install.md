@@ -248,7 +248,7 @@ By default all three modes are active (`DEFAULT_MODE=solo`, `STRATUM_PORT=3333`,
 
 An update keeps the wallet, the passphrase, the wallet backup, the pool ledger (`photond.db`) and the blockchain. Only `photond.toml`, `Caddyfile`, `.env` and `docker-compose.ports.yml` are generated again from `stack.conf`, so keep your settings in `stack.conf` and do not edit those files by hand.
 
-1. Back up the wallet files (once before each update, store the copy off the server):
+1. Back up the wallet files. `./install.sh --update` also saves a copy automatically to `stack/data/update-backup-<date>/` (wallet descriptors, passphrase, settings), but that stays on the same server: take a copy off the server as well, and do it before each update:
 
 ```bash
 cd /opt/elektron-net-photonpool/stack
@@ -272,7 +272,7 @@ docker compose ps
 docker compose logs -f photond
 ```
 
-The node is compiled again from the branch `photonpool` (a few minutes) and restarts briefly; miners reconnect by themselves. The log says `Wallet 'pool' is loaded` / `already encrypted` and `Reusing the wallet passphrase of the previous run`; if it says `Generating` or `Creating wallet` instead, stop and check that you are in the right directory.
+The node is compiled again from the branch `photonpool` (a few minutes) and restarts briefly; miners reconnect by themselves. The log says `Wallet 'pool' is loaded` / `already encrypted` and `Reusing the wallet passphrase of the previous run`; if it says `Generated a wallet passphrase` or `Creating wallet` instead, stop and check that you are in the right directory.
 
 Never run `docker compose down -v`: `-v` deletes the volumes including the blockchain. `git pull` does not touch `stack.conf`, `photond.env`, `data/` or the generated files, they are ignored by git.
 
