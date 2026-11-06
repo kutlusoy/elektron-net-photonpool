@@ -463,7 +463,8 @@ body[data-theme="candy"] .prompt { background: rgba(16, 6, 32, .5); }
 
 /* phones: nothing may be wider than the screen, the title bar wraps, the status line scrolls sideways inside itself */
 @media (max-width: 720px) {
-  html, body { max-width: 100%; overflow-x: hidden; }
+  html, body { height: auto; min-height: 100%; max-width: 100%; }
+  body { overflow-x: clip; overflow-y: visible; }
   .window, .view, .grid { min-width: 0; max-width: 100%; }
   .grid > *, .pane, .pane > * { min-width: 0; max-width: 100%; }
   .titlebar { flex-wrap: wrap; gap: 6px 10px; padding: 6px 8px; }
@@ -480,4 +481,14 @@ body[data-theme="candy"] .prompt { background: rgba(16, 6, 32, .5); }
   .crow, .grid.engine, .grid.ops { min-width: 0; }
   .flowbox, .scene, canvas { max-width: 100%; }
   img, svg, video { max-width: 100%; }
+}
+@media (max-width: 720px) {
+  .grid.engine { grid-template-rows: none; }
+  .grid.engine .p-events .tty { flex: 1 1 auto; min-height: 240px; max-height: 340px; overflow-y: auto; white-space: pre-wrap; }
+  .grid.engine .p-events .tty div { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .grid.engine .p-events { min-height: 300px; }
+  .grid.engine .p-flow { min-height: 300px; }
+  .p-shares pre, .p-alloc pre, .p-tip pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .p-blocks pre, .p-miners pre, .p-devices pre { font-size: 11px; }
+  .pane .tty { min-height: 240px; }
 }
