@@ -343,9 +343,10 @@ async fn account(State(p): State<Arc<Pool>>, axum::extract::Path(address): axum:
 }
 
 async fn ledger_view(State(p): State<Arc<Pool>>) -> Json<Value> {
+    let min = p.cfg.payout.min_payout_leptons.max(1);
     let (liabilities, payable, payouts, by_status) = p
         .ledger
-        .call(|c| Ok((ledger::liabilities(c)?, ledger::payable(c, 1)?.len(), ledger::recent_payouts(c, 10)?, ledger::blocks_by_status(c)?)))
+        .call(move |c| Ok((ledger::liabilities(c)?, ledger::payable(c, min)?.len(), ledger::recent_payouts(c, 10)?, ledger::blocks_by_status(c)?)))
         .await
         .unwrap_or_default();
     Json(json!({
