@@ -305,7 +305,7 @@ pre { margin: 0; padding: 8px 10px; font: inherit; white-space: pre; overflow: h
 @media (max-width: 720px) { .mtitle { max-width: 12ch; } }
 
 /* Single-page shell (spa.js): the view is swapped in place; the title bar with the music player stays */
-.window.spa { grid-template-rows: auto 1fr; }
+.window.spa { grid-template-rows: auto 1fr auto; }
 #view { display: grid; grid-template-rows: auto 1fr; min-height: 0; view-transition-name: view; }
 .lnk.on { color: var(--c3); text-shadow: 0 0 8px var(--glow); }
 @keyframes pane-in { from { opacity: 0; transform: translateY(16px) scale(.985); filter: blur(5px); } to { opacity: 1; transform: none; filter: none; } }
@@ -501,3 +501,10 @@ body[data-theme="candy"] .prompt { background: rgba(16, 6, 32, .5); }
   .grid.entering .pane { animation-name: pane-in-ff; }
   @keyframes pane-in-ff { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 }
+
+.footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 18px; padding: 6px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--dim); }
+.footer .fver { color: var(--c1); letter-spacing: .04em; }
+.footer nav { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.footer a { color: var(--dim); text-decoration: none; border-bottom: 1px dotted var(--line); }
+.footer a:hover, .footer a:focus-visible { color: var(--c1); border-bottom-color: var(--c1); outline: none; }
+@media (max-width: 720px) { .footer { padding: 6px 8px; } }

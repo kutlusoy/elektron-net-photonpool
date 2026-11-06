@@ -137,3 +137,12 @@ const Themes = (() => {
   const listHtml = () => THEMES.map((t) => `${span(document.body.dataset.theme === t.id ? 'ok' : 'c1', pad(t.id, 9))}${span('dim', t.mood)}`).join('\n');
   return { set, list: () => THEMES.map((t) => t.id), listHtml };
 })();
+
+
+/* footer: the release name (v<node>-p<pool>) comes from the pool */
+(function () {
+  const el = document.getElementById('release');
+  if (!el) return;
+  const take = (j) => { const r = j && (j.release || (j.pool && j.pool.release)); if (r) el.textContent = 'Photon Pool ' + r; return !!r; };
+  fetch('/public/v1/pool', { cache: 'no-store' }).then((r) => r.json()).then(take).catch(() => {}).then(() => { if (el.textContent === 'Photon Pool') return fetch('/api/v1/summary', { cache: 'no-store' }).then((r) => r.json()).then(take).catch(() => {}); });
+})();

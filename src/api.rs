@@ -177,7 +177,7 @@ pub fn summary_value(p: &Arc<Pool>, public: bool) -> Value {
         .map(|m| json!({"mode": m.as_str(), "fee": p.cfg.payout.fee(*m), "available": p.mode_available(*m).is_ok(), "online": live.by_mode[*m as usize].0, "hashrate": live.by_mode[*m as usize].1}))
         .collect();
     let mut v = json!({
-        "pool": {"name": "photon", "version": env!("CARGO_PKG_VERSION"), "uptime": p.started.elapsed().as_secs_f64(), "mode": "core", "explorerUrl": p.cfg.api.explorer_url},
+        "pool": {"name": "photon", "version": crate::version::POOL, "release": crate::version::release(), "uptime": p.started.elapsed().as_secs_f64(), "mode": "core", "explorerUrl": p.cfg.api.explorer_url},
         "node": {
             "height": height, "tip": tip, "tipTime": tip_time, "connected": s.connected.load(Ordering::Relaxed), "transport": "http-rpc",
             "rttMs": p.node.last_rtt_us.load(Ordering::Relaxed) as f64 / 1000.0,

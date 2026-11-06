@@ -199,7 +199,7 @@ async fn pool_view(State(st): State<St>) -> Json<Value> {
         .collect();
     let ports: Vec<Value> = p.cfg.stratum_ports().iter().map(|x| json!({"port": port_of(&x.listen), "mode": x.mode.as_str(), "override": x.allow_override})).collect();
     Json(json!({
-        "name": p.cfg.public.name, "version": env!("CARGO_PKG_VERSION"), "network": p.cfg.pool.network, "explorerUrl": p.cfg.api.explorer_url,
+        "name": p.cfg.public.name, "version": crate::version::POOL, "release": crate::version::release(), "network": p.cfg.pool.network, "explorerUrl": p.cfg.api.explorer_url,
         "uptime": p.started.elapsed().as_secs_f64(),
         "stratum": {"host": p.cfg.public.stratum_host, "ports": ports},
         "modes": modes, "minPayoutLeptons": p.cfg.payout.min_payout_leptons, "pplnsWindowFactor": p.cfg.payout.pplns.window_factor,
