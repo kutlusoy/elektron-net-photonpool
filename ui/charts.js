@@ -249,31 +249,43 @@ const Extras = (() => {
   };
 })();
 
-// A card in a row whose text is cut off grows while the mouse is over it; the other cards of the row shrink a little to make room.
+// A card in a row whose text is cut off grows while the mouse rests on it; the other cards of the row shrink a little to make room.
+// The growth always starts from the row's own layout (never from a width in the middle of a transition) and waits a moment, so moving the
+// pointer across several cards neither accumulates nor flickers.
 (() => {
   const cut = (card) => card.scrollWidth > card.clientWidth + 1 || [...card.querySelectorAll('*')].some((e) => e.clientWidth && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== 'visible');
+  const rest = (row) => { clearTimeout(row._g); clearTimeout(row._t); if (row._base) { row.style.gridTemplateColumns = row._inline; row._base = null; } row._grown = null; };
+  const cardOf = (ev) => ev.target.closest && ev.target.closest('.crow > .card');
   document.addEventListener('mouseover', (ev) => {
-    const card = ev.target.closest && ev.target.closest('.crow > .card');
+    const card = cardOf(ev);
     if (!card) return;
     const row = card.parentElement;
-    if (row._grown === card || getComputedStyle(row).display !== 'grid') return;
-    const cols = getComputedStyle(row).gridTemplateColumns.split(' ').map(parseFloat);
-    const kids = [...row.children];
-    if (cols.length !== kids.length || kids.some((k) => k.offsetLeft > 0 && k.offsetTop !== kids[0].offsetTop) || !cut(card)) return;
-    clearTimeout(row._t);
-    const i = kids.indexOf(card), total = cols.reduce((a, b) => a + b, 0), want = Math.min(total * 0.6, cols[i] * 1.5);
-    const rest = total - cols[i], scale = (total - want) / rest;
-    if (!row._orig) { row._orig = cols; row._inline = row.style.gridTemplateColumns; }
-    row.style.gridTemplateColumns = cols.map((w, k) => (k === i ? want : w * scale) + 'px').join(' ');
-    row._grown = card;
+    if (row._grown === card || row._want === card) return;
+    clearTimeout(row._g);
+    row._want = card;
+    row._g = setTimeout(() => {
+      row._want = null;
+      if (!card.matches(':hover') || getComputedStyle(row).display !== 'grid') return;
+      clearTimeout(row._t);
+      const cols = row._base || getComputedStyle(row).gridTemplateColumns.split(' ').map(parseFloat);
+      const kids = [...row.children];
+      if (cols.length !== kids.length || cols.some((w) => !(w > 0)) || kids.some((k) => k.offsetLeft > 0 && k.offsetTop !== kids[0].offsetTop) || !cut(card)) return;
+      const i = kids.indexOf(card), total = cols.reduce((a, b) => a + b, 0), want = Math.min(total * 0.6, cols[i] * 1.5);
+      const scale = (total - want) / (total - cols[i]);
+      if (!row._base) { row._base = cols; row._inline = row.style.gridTemplateColumns; }
+      row.style.gridTemplateColumns = cols.map((w, k) => (k === i ? want : w * scale) + 'px').join(' ');
+      row._grown = card;
+    }, 160);
   });
   document.addEventListener('mouseout', (ev) => {
-    const card = ev.target.closest && ev.target.closest('.crow > .card');
+    const card = cardOf(ev);
     if (!card || (ev.relatedTarget && card.contains(ev.relatedTarget))) return;
     const row = card.parentElement;
+    clearTimeout(row._g); row._want = null;
     if (row._grown !== card) return;
     row._grown = null;
-    row.style.gridTemplateColumns = row._orig.map((w) => w + 'px').join(' ');
-    row._t = setTimeout(() => { row.style.gridTemplateColumns = row._inline; row._orig = null; }, 300);
+    row.style.gridTemplateColumns = row._base.map((w) => w + 'px').join(' ');
+    row._t = setTimeout(() => rest(row), 300);
   });
+  addEventListener('resize', () => document.querySelectorAll('.crow').forEach(rest));
 })();
