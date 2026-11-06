@@ -37,9 +37,14 @@ WALLET_ADDRESSES=512
 WALLET_PASSPHRASE=
 
 # --- Stratum ---
-# Options: port number 1-65535. Default 3333 (default mode PPLNS; miners can pick another mode with m=solo|pplns|pps in the password).
+# Main port. Options: port number 1-65535. Default 3333. It uses DEFAULT_MODE; miners can pick another mode with m=solo|pplns|pps in the password.
 STRATUM_PORT=3333
-# Optional extra ports whose default payout mode is PPS or solo (empty = off).
+# Payout mode of the main port and of miners that name no mode. Options: solo | pplns (default) | pps.
+DEFAULT_MODE=pplns
+# Optional extra ports with a fixed payout mode (empty = off). Example for solo as default and the other modes on their own ports:
+#   DEFAULT_MODE=solo   STRATUM_PORT=3333   PORT_PPLNS=3334   PORT_PPS=3335
+# Options: port number, or empty (off).
+PORT_PPLNS=
 # Options: port number, or empty (off).
 PORT_PPS=
 # Options: port number, or empty (off).

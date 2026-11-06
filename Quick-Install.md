@@ -240,7 +240,9 @@ cp stack.conf.example stack.conf      # set at least DOMAIN, optionally POOL_NAM
 ./install.sh
 ```
 
-The script generates the node and pool configuration, creates and encrypts the wallet (with a generated passphrase and a private-descriptor backup), starts the stack and writes `stack/CREDENTIALS.txt`. Payouts start in dry-run mode. Update to a new version: `cd /opt/elektron-net-photonpool && git pull && cd stack && ./install.sh --update`. Re-run `./install.sh` after changing `stack.conf`. Make the DNS record of `DOMAIN` point to the server before the first run so HTTPS can be issued. Details: [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
+The script generates the node and pool configuration, creates and encrypts the wallet (with a generated passphrase and a private-descriptor backup), starts the stack and writes `stack/CREDENTIALS.txt`. Payouts start in dry-run mode.
+
+All three modes with solo as the default: in `stack.conf` set `DEFAULT_MODE=solo`, `STRATUM_PORT=3333`, `PORT_PPLNS=3334`, `PORT_PPS=3335` (PPS needs `PPS_ENABLED=true`, the default). Port 3333 then pays solo, 3334 PPLNS and 3335 PPS. Only the main port lets a miner choose another mode with `m=solo|pplns|pps` in the password. Update to a new version: `cd /opt/elektron-net-photonpool && git pull && cd stack && ./install.sh --update`. Re-run `./install.sh` after changing `stack.conf`. Make the DNS record of `DOMAIN` point to the server before the first run so HTTPS can be issued. Details: [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
 
 ## 11. Photon gateway for farms with their own node (optional)
 
