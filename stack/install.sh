@@ -21,10 +21,10 @@ while [ $# -gt 0 ]; do
 done
 
 # ---- defaults (same names as stack.conf.example) ----
-DOMAIN=""; CADDY_EMAIL=""; POOL_NAME="Photon Pool"; EXPLORER_URL=""
+DOMAIN="phtn.space"; CADDY_EMAIL="ali@kutlusoy.com"; POOL_NAME="Photon Pool"; EXPLORER_URL="https://mempool.elektron-net.org"
 ELEKTRON_REPO="https://github.com/kutlusoy/elektron-net.git"; ELEKTRON_REF="photonpool"
 WALLET_NAME="pool"; WALLET_ADDRESSES="512"; WALLET_PASSPHRASE=""
-STRATUM_PORT="3333"; DEFAULT_MODE="pplns"; PORT_PPLNS=""; PORT_PPS=""; PORT_SOLO=""
+STRATUM_PORT="3333"; DEFAULT_MODE="solo"; PORT_PPLNS="3334"; PORT_PPS="3335"; PORT_SOLO=""
 DRY_RUN="true"; FEE_PPLNS="1.0"; FEE_PPS="2.0"; PPLNS_WINDOW_FACTOR="2.0"; PPS_ENABLED="true"; PPS_RESERVE="5.0"
 MIN_PAYOUT_LEPTONS="100000"; PAYOUT_INTERVAL_MINUTES="60"; PAYOUT_FEE_RATE=""
 FIREWALL="false"
