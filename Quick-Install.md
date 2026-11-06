@@ -47,9 +47,23 @@ In every case the payouts start in **dry run** (`payout.dry_run = true`): nothin
 
 ## 3. Option A: Docker (recommended)
 
+### 3.0 Prepare the server (once, for Docker and the complete stack)
+
+On a fresh Debian or Ubuntu server, as root (or with `sudo`):
+
+```bash
+apt-get update && apt-get install -y git curl openssl     # tools used by the steps below
+curl -fsSL https://get.docker.com | sh                    # Docker Engine and the compose plugin
+docker --version && docker compose version                # both must print a version
+mkdir -p /opt && cd /opt                                  # the install directory used in this guide
+```
+
+The firewall must allow the miner port `3333`, the node port `8333` and, for the complete stack, `80` and `443`. The complete stack script can set this up itself (`FIREWALL` in `stack.conf`).
+
 This way needs your own payout addresses (or a wallet you set up yourself). For a complete setup including the encrypted wallet use the [complete stack](#101-complete-docker-stack-node-pool-https) instead, see [section 1a](#1a-which-way-to-install).
 
 ```bash
+cd /opt
 git clone https://github.com/kutlusoy/elektron-net-photonpool.git
 cd elektron-net-photonpool
 cp docker/photond.docker.toml photond.toml
@@ -80,6 +94,7 @@ The pool authenticates to the node with the RPC cookie in the shared volume, so 
 Update:
 
 ```bash
+cd /opt/elektron-net-photonpool
 git pull
 docker compose up -d --build
 ```
@@ -218,12 +233,14 @@ The public page is then served at `https://pool.example.org`; the admin API and 
 `stack/` in this repository sets up everything with one script: the Elektron Net node (built from source, with an encrypted pool wallet), the pool daemon and Caddy with automatic HTTPS, all pre-configured:
 
 ```bash
-cd stack
+cd /opt
+git clone https://github.com/kutlusoy/elektron-net-photonpool.git     # skip if already cloned
+cd elektron-net-photonpool/stack
 cp stack.conf.example stack.conf      # set at least DOMAIN, optionally POOL_NAME, EXPLORER_URL, fees ...
 ./install.sh
 ```
 
-The script generates the node and pool configuration, creates and encrypts the wallet (with a generated passphrase and a private-descriptor backup), starts the stack and writes `stack/CREDENTIALS.txt`. Payouts start in dry-run mode. Re-run `./install.sh` after changing `stack.conf`, or `./install.sh --update` to rebuild with fresh base images. Details: [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
+The script generates the node and pool configuration, creates and encrypts the wallet (with a generated passphrase and a private-descriptor backup), starts the stack and writes `stack/CREDENTIALS.txt`. Payouts start in dry-run mode. Update to a new version: `cd /opt/elektron-net-photonpool && git pull && cd stack && ./install.sh --update`. Re-run `./install.sh` after changing `stack.conf`. Make the DNS record of `DOMAIN` point to the server before the first run so HTTPS can be issued. Details: [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
 
 ## 11. Photon gateway for farms with their own node (optional)
 
