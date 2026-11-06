@@ -1,0 +1,48 @@
+# Photon Pool for Elektron Net
+
+> Photon Pool is a fast, open-source, headless mining pool for Elektron Net, a SHA-256d proof-of-work chain with 60-second blocks and mandatory 137-day pruning. It serves ASIC and hobby miners over Stratum V1, pays out solo, PPLNS or PPS, and shows its own engine live in the browser. The pool never changes consensus: every block it finds is an ordinary block that any unmodified Elektron Net node validates.
+
+## Elektron Net in brief
+
+Elektron Net is a minimal, focused fork of Bitcoin Core. It keeps Bitcoin's proof-of-work (SHA-256d), script engine, wallet and P2P layer, and its economic model, and changes two things on purpose:
+
+- Block time of 60 seconds instead of 600. The first confirmation arrives in about a minute; halving happens every 2,102,400 blocks (about four years); the nominal supply is 21,000,000 Elek (1 Elek = 100,000,000 leptons).
+- Mandatory pruning after 137 days (197,280 blocks). Transaction history older than that is erased by protocol, not by choice: nodes keep headers, checkpoints and the current UTXO set. Every block carries a compact attestation of the UTXO set, so a new node can bootstrap from a snapshot and verify it instead of trusting someone.
+
+The idea behind it is forgetting as a design principle. A payment system that remembers everything forever turns every transaction into a permanent record; Elektron Net lets history fade the way a pocket receipt does, so privacy is structural and not an add-on. The number 137 (the inverse fine-structure constant, rounded) is the project's nod to a constant that nature did not choose for us. Addresses are Bech32m (`be1q...`, `be1p...`), P2P port 8333, RPC port 8332, license MIT.
+
+- Node and releases: https://github.com/kutlusoy/elektron-net/releases
+- Website: https://www.elektron-net.org/
+- Explorer: https://mempool.elektron-net.org/
+- Android wallet: https://github.com/kutlusoy/elektron-net-mobile
+
+## Photon Pool in brief
+
+Photon is the particle of light: no mass, no delay, nothing carried that is not needed. The pool is built on that idea. The moment the node announces a new block, the pool already holds prepared work for every miner, so a miner does not wait for the pool, only for the network.
+
+- Written in Rust, one process, no database server. A simulated 15,000 connections ran on a 4-core machine in about 115 MB of memory.
+- Stratum V1 with version rolling and automatic difficulty. The pool learns what each device type can do (Bitaxe, Antminer and others) and starts every new connection at a value that suits it, so a miner is neither flooded nor starved.
+- Three payout modes at the same time, selected by port or by the password field (`m=solo|pplns|pps`): solo pays the block reward straight to the finder with no fee, PPLNS shares each block by recent work, PPS pays a fixed amount per share from a reserve.
+- Payouts go through the node's wallet in batches, survive crashes without paying twice, and the wallet is unlocked only for the moment of paying.
+- A new node RPC, `getattestationbatch`, lets the pool prepare thousands of payout variants of a block with one call. It is read-only and does not touch consensus; an unmodified node accepts every block the pool produces.
+- The web interface is a terminal: pool, engine (a live 3D view of jobs, shares and blocks with real numbers), miner lookup by address, and an operator view.
+- Open source (MIT). Source: https://github.com/kutlusoy/elektron-net-photonpool
+
+## For machines
+
+Public, read-only JSON, no key needed (rate limited). Miner addresses are masked in lists.
+
+- `/public/v1/pool`: name, release, network, payout modes, fees, ports, hashrate, height
+- `/public/v1/engine`: allocator, shares, node link and latency
+- `/public/v1/blocks`, `/public/v1/payouts`, `/public/v1/devices`, `/public/v1/history`
+- `/public/v1/account/<address>`: balance, shares and payouts of one payout address
+- `/public/v1/events`: public event feed
+
+## How to mine
+
+Point a SHA-256d miner at the stratum address shown on the pool page. User: `<your Elektron address>.<worker name>`, password: `x` (or `m=solo`, `m=pplns`, `m=pps`). Enable version rolling if the device offers it.
+
+## Optional
+
+- Project documentation: https://github.com/kutlusoy/elektron-net/tree/main/doc-elektron
+- Source map for independent review: https://github.com/kutlusoy/elektron-net/blob/main/doc-elektron/ELEKTRON_NET_AI_AGENT_GUIDE.md

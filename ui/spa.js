@@ -39,6 +39,7 @@ window.SPA = (() => {
       r.className = 'view v-' + name;
       current = name;
       document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === name));
+      document.title = pageTitle(name === 'pool' ? '' : name === 'engine' ? 'Engine' : name === 'ops' ? 'Operator' : 'Miner');
       Views[name].mount(r);
       if (typeof Depth !== 'undefined') Depth.attach();
       cascade(r);

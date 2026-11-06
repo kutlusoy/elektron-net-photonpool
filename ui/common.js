@@ -146,3 +146,11 @@ const Themes = (() => {
   const take = (j) => { const r = j && (j.release || (j.pool && j.pool.release)); if (r) el.textContent = 'Photon Pool ' + r; return !!r; };
   fetch('/public/v1/pool', { cache: 'no-store' }).then((r) => r.json()).then(take).catch(() => {}).then(() => { if (el.textContent === 'Photon Pool') return fetch('/api/v1/summary', { cache: 'no-store' }).then((r) => r.json()).then(take).catch(() => {}); });
 })();
+
+
+/* tab title: "<view> | <pool name> for Elektron Net", the start page adds what the pool is */
+function pageTitle(part, name) {
+  const n = (name || (document.getElementById('pool-name') || {}).textContent || 'Photon Pool').trim();
+  const base = (/^pool$/i.test(n) ? 'Photon Pool' : n) + ' for Elektron Net';
+  return part ? part + ' | ' + base : base + ' | Fast SHA-256d Mining Pool';
+}
