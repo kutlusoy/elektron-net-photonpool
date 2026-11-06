@@ -6,16 +6,16 @@
 # Domain of the pool (its DNS A/AAAA record must point at this server). Leave empty to run without
 # Caddy: the public page is then only available on 127.0.0.1:8082.
 # Options: a host name such as pool.example.org, or empty.
-DOMAIN=
+DOMAIN=phtn.space
 # Optional e-mail for Let's Encrypt notices.
 # Options: an e-mail address, or empty.
-CADDY_EMAIL=
+CADDY_EMAIL=ali@kutlusoy.com
 # Name shown on the public page.
 # Options: any text. Default "Photon Pool".
 POOL_NAME=Photon Pool
 # Optional block explorer, used for links to blocks and transactions (<url>/block/<hash>, <url>/tx/<txid>).
 # Options: a URL starting with http:// or https://, or empty (no links).
-EXPLORER_URL=
+EXPLORER_URL=https://mempool.elektron-net.org
 
 # --- Node ---
 # Options: an https git URL. Default https://github.com/kutlusoy/elektron-net.git
@@ -37,11 +37,16 @@ WALLET_ADDRESSES=512
 WALLET_PASSPHRASE=
 
 # --- Stratum ---
-# Options: port number 1-65535. Default 3333 (default mode PPLNS; miners can pick another mode with m=solo|pplns|pps in the password).
+# Main port. Options: port number 1-65535. Default 3333 (solo). It uses DEFAULT_MODE; miners can pick another mode with m=solo|pplns|pps in the password.
 STRATUM_PORT=3333
-# Optional extra ports whose default payout mode is PPS or solo (empty = off).
+# Payout mode of the main port and of miners that name no mode. Options: solo (default) | pplns | pps.
+DEFAULT_MODE=solo
+# Optional extra ports with a fixed payout mode (empty = off). Example for solo as default and the other modes on their own ports:
+#   DEFAULT_MODE=solo   STRATUM_PORT=3333   PORT_PPLNS=3334   PORT_PPS=3335
 # Options: port number, or empty (off).
-PORT_PPS=
+PORT_PPLNS=3334
+# Options: port number, or empty (off).
+PORT_PPS=3335
 # Options: port number, or empty (off).
 PORT_SOLO=
 
