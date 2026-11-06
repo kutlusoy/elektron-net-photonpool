@@ -3,7 +3,7 @@ pub const NODE: &str = "4.0.6";
 /// Version of the pool itself (Cargo.toml), for example 0.2.0 or 0.2.0-rc1.
 pub const POOL: &str = env!("CARGO_PKG_VERSION");
 
-/// Release name shown in the web footer: v<node>-p<pool>, for example v2.0.6-p0.2.0-rc1.
+/// Release name shown in the web footer: v<node>-p<pool>, for example v4.0.6-p0.2.0-rc1.
 pub fn release() -> String {
     format!("v{NODE}-p{POOL}")
 }
