@@ -13,6 +13,7 @@ mod rpc;
 mod stratum;
 mod template;
 mod tx;
+mod version;
 
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
@@ -90,7 +91,7 @@ async fn main() -> Result<()> {
 
 async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&pool.cfg.api.listen).await?;
-    pool.event("info", format!("photond {} listening on {}", env!("CARGO_PKG_VERSION"), pool.cfg.api.listen));
+    pool.event("info", format!("photond {} listening on {}", version::release(), pool.cfg.api.listen));
     tokio::spawn(pool.clone().run_tip_loop());
     tokio::spawn(pool.clone().run_accounting());
     if pool.cfg.public.enabled {
