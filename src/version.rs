@@ -1,5 +1,5 @@
 /// Version of the Elektron Net node this pool release is built and tested against.
-pub const NODE: &str = "2.0.6";
+pub const NODE: &str = "4.0.6";
 /// Version of the pool itself (Cargo.toml), for example 0.2.0 or 0.2.0-rc1.
 pub const POOL: &str = env!("CARGO_PKG_VERSION");
 
