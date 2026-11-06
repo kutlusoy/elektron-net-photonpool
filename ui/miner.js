@@ -71,7 +71,7 @@ function compress(values, n) {
 const onDepth = () => { try { render(); } catch (_) { /* no data yet */ } };
 function render() {
   const p = M.pool, a = M.acct;
-  if (p) { $('#pool-name').textContent = p.name; document.title = 'MINER | ' + p.name; }
+  if (p) { $('#pool-name').textContent = p.name; document.title = pageTitle('Miner', p.name); }
   if (!a) {
     $('#statusline').innerHTML = `<span>no address selected</span>`;
     for (const id of ['acct', 'bal', 'hr', 'workers', 'pend', 'pay', 'found']) $('#pane-' + id).innerHTML = '';

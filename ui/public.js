@@ -84,7 +84,7 @@ function render() {
   const p = view.pool;
   if (!p) return;
   $('#pool-name').textContent = p.name;
-  document.title = p.name.toUpperCase();
+  document.title = pageTitle('', p.name);
   const age = Date.now() / 1000 - p.node.tipTime;
   $('#statusline').innerHTML = [
     `<span>net <b>${esc(p.network)}</b></span>`,

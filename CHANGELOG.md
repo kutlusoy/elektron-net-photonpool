@@ -3,6 +3,7 @@
 ## 0.2.0-rc1 (release candidate for the first mainnet test)
 
 Pool (`photond`)
+- Search and AI visibility: readable tab titles (`Photon Pool for Elektron Net | Fast SHA-256d Mining Pool`, `Engine | ...`), description, Open Graph, Twitter card and JSON-LD metadata, `/robots.txt` and `/llms.txt` (what Elektron Net and Photon Pool are, the public API, how to mine).
 - Release name `v<node>-p<pool>` (for example `v4.0.6-p0.2.0-rc1`, a full release `v4.0.6-p0.2.0`): the node part is `NODE` in `src/version.rs`, the pool part is `version` in `Cargo.toml`. Both APIs report it as `release`; the web footer shows it together with links to Elektron Net, Elektron Mobile, Elektron Mempool, the website and X.
 - PPLNS end-to-end test (`test/step33_pplns_scenarios.py`): encrypted wallet and passphrase, wrong passphrase, shares, fee split, maturity, payouts, restart, 120 accounts in batches, orphaned block, minimum payout. Fixes found by it: shares were rejected when the node signalled a version bit inside the miner rolling mask; `payableAccounts` ignored the minimum payout.
 - Stratum V1 server with vardiff, version rolling, empty `extranonce1` and `extranonce2_size = 0`, lock-free work allocation; 15,000 simulated connections on one 4-core box in 115 MB RSS.
