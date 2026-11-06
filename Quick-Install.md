@@ -242,7 +242,39 @@ cp stack.conf.example stack.conf      # set at least DOMAIN, optionally POOL_NAM
 
 The script generates the node and pool configuration, creates and encrypts the wallet (with a generated passphrase and a private-descriptor backup), starts the stack and writes `stack/CREDENTIALS.txt`. Payouts start in dry-run mode.
 
-By default all three modes are active (`DEFAULT_MODE=solo`, `STRATUM_PORT=3333`, `PORT_PPLNS=3334`, `PORT_PPS=3335`, `PPS_ENABLED=true`): port 3333 pays solo, 3334 PPLNS and 3335 PPS. Without a `stack.conf` the script also uses `DOMAIN=phtn.space`, `CADDY_EMAIL=ali@kutlusoy.com` and `EXPLORER_URL=https://mempool.elektron-net.org`; change them in `stack.conf` for another pool. Only the main port lets a miner choose another mode with `m=solo|pplns|pps` in the password. Update to a new version: `cd /opt/elektron-net-photonpool && git pull && cd stack && ./install.sh --update`. Re-run `./install.sh` after changing `stack.conf`. Make the DNS record of `DOMAIN` point to the server before the first run so HTTPS can be issued. Details: [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
+By default all three modes are active (`DEFAULT_MODE=solo`, `STRATUM_PORT=3333`, `PORT_PPLNS=3334`, `PORT_PPS=3335`, `PPS_ENABLED=true`): port 3333 pays solo, 3334 PPLNS and 3335 PPS. Without a `stack.conf` the script also uses `DOMAIN=phtn.space`, `CADDY_EMAIL=ali@kutlusoy.com` and `EXPLORER_URL=https://mempool.elektron-net.org`; change them in `stack.conf` for another pool. Only the main port lets a miner choose another mode with `m=solo|pplns|pps` in the password. Re-run `./install.sh` after changing `stack.conf`. Updating: see [10.2](#102-update-the-complete-stack). Make the DNS record of `DOMAIN` point to the server before the first run so HTTPS can be issued. Details: [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
+
+### 10.2 Update the complete stack
+
+An update keeps the wallet, the passphrase, the wallet backup, the pool ledger (`photond.db`) and the blockchain. Only `photond.toml`, `Caddyfile`, `.env` and `docker-compose.ports.yml` are generated again from `stack.conf`, so keep your settings in `stack.conf` and do not edit those files by hand.
+
+1. Back up the wallet files (once before each update, store the copy off the server):
+
+```bash
+cd /opt/elektron-net-photonpool/stack
+mkdir -p /root/photon-backup-$(date +%F)
+cp -a data/backup photond.env stack.conf /root/photon-backup-$(date +%F)/
+```
+
+2. Fetch the new version and rebuild:
+
+```bash
+cd /opt/elektron-net-photonpool
+git pull
+cd stack
+./install.sh --update
+```
+
+3. Check:
+
+```bash
+docker compose ps
+docker compose logs -f photond
+```
+
+The node is compiled again from the branch `photonpool` (a few minutes) and restarts briefly; miners reconnect by themselves. The log says `Wallet 'pool' is loaded` / `already encrypted` and `Reusing the wallet passphrase of the previous run`; if it says `Generating` or `Creating wallet` instead, stop and check that you are in the right directory.
+
+Never run `docker compose down -v`: `-v` deletes the volumes including the blockchain. `git pull` does not touch `stack.conf`, `photond.env`, `data/` or the generated files, they are ignored by git.
 
 ## 11. Photon gateway for farms with their own node (optional)
 
