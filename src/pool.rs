@@ -271,7 +271,7 @@ impl Epoch {
         if slice as u64 >= self.slices {
             return ShareResult::Invalid("bad slice");
         }
-        let expected = c.version | ((slice as u32) << POOL_VERSION_SHIFT);
+        let expected = (c.version | ((slice as u32) << POOL_VERSION_SHIFT)) & !miner_mask;
         if (version & !miner_mask) != expected {
             return ShareResult::Invalid("version bits outside the miner mask");
         }

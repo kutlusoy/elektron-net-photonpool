@@ -3,6 +3,7 @@
 ## 0.2.0-rc1 (release candidate for the first mainnet test)
 
 Pool (`photond`)
+- PPLNS end-to-end test (`test/step33_pplns_scenarios.py`): encrypted wallet and passphrase, wrong passphrase, shares, fee split, maturity, payouts, restart, 120 accounts in batches, orphaned block, minimum payout. Fixes found by it: shares were rejected when the node signalled a version bit inside the miner rolling mask; `payableAccounts` ignored the minimum payout.
 - Stratum V1 server with vardiff, version rolling, empty `extranonce1` and `extranonce2_size = 0`, lock-free work allocation; 15,000 simulated connections on one 4-core box in 115 MB RSS.
 - Payout modes solo (direct coinbase payout, no fee), PPLNS and PPS in one pool; mode per port or `m=` in the password; PPS paused until the wallet reserve is funded.
 - SQLite ledger, maturity tracking (101 confirmations), batched `sendmany` payouts with crash recovery, dry-run by default, encrypted wallet support.
