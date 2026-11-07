@@ -80,6 +80,8 @@ fn data_routes() -> Router<St> {
         .route("/public/v1/history/devices", get(|State(s): State<St>, Query(q): Query<crate::api::RangeQ>| async move { Json(crate::api::device_history_view(&s.pool, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/public/v1/history", get(|State(s): State<St>, Query(q): Query<crate::api::RangeQ>| async move { Json(crate::api::history_view(&s.pool, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/public/v1/account/:address", get(account))
+        .route("/public/v1/account/:address/blocks", get(|State(s): State<St>, Path(a): Path<String>, Query(q): Query<PageQ>| async move { page(s, a, "blocks", q).await }))
+        .route("/public/v1/account/:address/payouts", get(|State(s): State<St>, Path(a): Path<String>, Query(q): Query<PageQ>| async move { page(s, a, "payouts", q).await }))
         .route("/public/v1/engine", get(|State(s): State<St>| async move { Json(crate::api::summary_value(&s.pool, true)) }))
         .route("/public/v1/events", get(public_events))
 }
@@ -247,6 +249,16 @@ async fn payouts(State(st): State<St>, Query(q): Query<Limit>) -> Json<Value> {
     let n = q.limit.unwrap_or(10).min(50) as i64;
     let rows = st.pool.ledger.call(move |c| ledger::recent_payouts(c, n)).await.unwrap_or_default();
     Json(Value::Array(rows.into_iter().filter(|r| r.txid.is_some()).map(|r| json!({"time": r.created_at, "txid": r.txid, "amount": r.amount, "status": r.status})).collect()))
+}
+
+#[derive(serde::Deserialize)]
+struct PageQ { offset: Option<i64>, limit: Option<i64> }
+
+async fn page(st: St, address: String, kind: &str, q: PageQ) -> Response {
+    match crate::api::account_page(&st.pool, &address, kind, q.offset.unwrap_or(0), q.limit.unwrap_or(20)).await {
+        Some(v) => Json(v).into_response(),
+        None => (StatusCode::BAD_REQUEST, "invalid address").into_response(),
+    }
 }
 
 async fn account(State(st): State<St>, Path(address): Path<String>) -> Response {

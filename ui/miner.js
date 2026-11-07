@@ -22,7 +22,8 @@ const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-liv
   </main>`;
 
 const modeLabel = { solo: 'SOLO', pplns: 'PPLNS', pps: 'PPS' };
-const M = { addr: '', acct: null, pool: null, demo: false, timer: null };
+const M = { addr: '', acct: null, pool: null, demo: false, timer: null, pg: { found: { off: 0, items: null }, pay: { off: 0, items: null } } };
+const PAGE = 20;
 
 /* ---------- data ---------- */
 
@@ -50,10 +51,31 @@ function demoData(addr) {
   };
 }
 
+/* blocks found and payouts: the first page comes with the account, further pages are fetched on demand */
+const pageOf = (kind) => { const g = M.pg[kind]; const a = M.acct; const first = kind === 'found' ? a.blocksFound : a.payouts; return { items: g.items || first, off: g.off, total: (kind === 'found' ? a.blocksTotal : a.payoutsTotal) ?? first.length }; };
+function pager(kind) {
+  const { items, off, total } = pageOf(kind);
+  if (total <= PAGE) return [];
+  const btn = (d, label, on) => (on ? `<a class="pgb" href="#" data-pg="${kind}" data-d="${d}">${label}</a>` : span('dim', label));
+  return ['', `${span('dim', `${num(off + 1)}-${num(off + items.length)} of ${num(total)}  `)}${btn(-1, '\u2039 newer', off > 0)}  ${btn(1, 'older \u203a', off + PAGE < total)}`];
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest && e.target.closest('.pgb'); if (!b || !M.acct) return;
+  e.preventDefault();
+  const kind = b.dataset.pg, g = M.pg[kind], off = Math.max(0, g.off + (+b.dataset.d) * PAGE);
+  if (off === 0) { g.off = 0; g.items = null; render(); return; }
+  try {
+    const r = await getJson('/public/v1/account/' + encodeURIComponent(M.addr) + '/' + (kind === 'found' ? 'blocks' : 'payouts') + '?offset=' + off + '&limit=' + PAGE);
+    if (r.items.length) { g.off = off; g.items = r.items; }
+    render();
+  } catch (_) { /* keep the page that is shown */ }
+});
+
 async function load() {
   if (!M.addr) return;
   if (M.demo) { const d = demoData(M.addr); M.acct = d.acct; M.pool = d.pool; return; }
   const [acct, pool] = await Promise.all([getJson('/public/v1/account/' + encodeURIComponent(M.addr)), M.pool ? Promise.resolve(M.pool) : getJson('/public/v1/pool')]);
+  if (M.acct && M.acct.address !== acct.address) M.pg = { found: { off: 0, items: null }, pay: { off: 0, items: null } };
   M.acct = acct;
   M.pool = pool;
 }
@@ -126,11 +148,11 @@ function render() {
     }))
     .concat(a.credits.length ? [] : [span('dim', 'no PPLNS credits yet')]).join('\n');
   $('#pane-pay').innerHTML = [`<span class="row-h">${hdr('pay', [['time', 'AGE', 7], ['amount', 'AMOUNT', 14], ['txid', 'TX', 4, false, 1]], 'time')}</span>`]
-    .concat(sortRows('pay', a.payouts, { time: (x) => x.time, amount: (x) => x.amount, txid: (x) => x.txid || '' }, 'time').map((x) => `${pad(ago(x.time), 7)}${pad(coins(x.amount), 14)}${link(txUrl(explorer, x.txid), wide('pay') ? (x.txid || 'pending') : short(x.txid || 'pending', 6, 4), 'c1')}`))
-    .concat(a.payouts.length ? [] : [span('dim', 'nothing paid out yet')]).join('\n');
+    .concat(sortRows('pay', pageOf('pay').items, { time: (x) => x.time, amount: (x) => x.amount, txid: (x) => x.txid || '' }, 'time').map((x) => `${pad(ago(x.time), 7)}${pad(coins(x.amount), 14)}${link(txUrl(explorer, x.txid), wide('pay') ? (x.txid || 'pending') : short(x.txid || 'pending', 6, 4), 'c1')}`))
+    .concat(a.payouts.length ? pager('pay') : [span('dim', 'nothing paid out yet')]).join('\n');
   $('#pane-found').innerHTML = [span('row-h', pad('BLOCK', 9) + pad('AGE', 7) + pad('MODE', 7) + 'STATE')]
-    .concat(a.blocksFound.map((b) => `${linkPad(b.url, num(b.height), 9)}${pad(ago(b.time), 7)}${span('c2', pad(modeLabel[b.mode] || b.mode, 7))}${b.status}`))
-    .concat(a.blocksFound.length ? [] : [span('dim', 'no block found by this address')]).join('\n');
+    .concat(pageOf('found').items.map((b) => `${linkPad(b.url, num(b.height), 9)}${pad(ago(b.time), 7)}${span('c2', pad(modeLabel[b.mode] || b.mode, 7))}${b.status}`))
+    .concat(a.blocksFound.length ? pager('found') : [span('dim', 'no block found by this address')]).join('\n');
   Extras.tick();
 }
 
@@ -166,12 +188,12 @@ Extras.add('workers', (el) => {
 });
 
 Extras.add('pay', (el) => {
-  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins)', 'wide');
+  const k = card(el, 'payouts', 'wide'), c = card(el, 'amount per payout (coins), latest ' + PAGE, 'wide');
   return () => {
     const a = M.acct; if (!a) return;
     if (!a.payouts.length) { k.innerHTML = '<span class="dim">nothing paid out yet</span>'; return; }
-    const tot = a.payouts.reduce((x, y) => x + y.amount, 0);
-    Neon.kpis(k, [{ label: 'payouts', value: a.payouts.length, fmt: num }, { label: 'total', value: tot, fmt: coins, color: 'c2' }, { label: 'average', value: tot / a.payouts.length, fmt: coins, color: 'c2' }]);
+    const tot = a.payoutsSum ?? a.payouts.reduce((x, y) => x + y.amount, 0), cnt = a.payoutsTotal ?? a.payouts.length;
+    Neon.kpis(k, [{ label: 'payouts', value: cnt, fmt: num }, { label: 'total', value: tot, fmt: coins, color: 'c2' }, { label: 'average', value: tot / cnt, fmt: coins, color: 'c2' }]);
     Neon.columns(c, [...a.payouts].sort((x, y) => x.time - y.time).map((y) => ({ key: y.txid || y.time, label: '', value: y.amount, text: coins(y.amount), tip: agoLabel(y.time) })), { color: 'c2' });
   };
 });
@@ -180,10 +202,12 @@ Extras.add('found', (el) => {
   const k = card(el, 'blocks found by this address', 'wide'), md = card(el, 'by mode'), st = card(el, 'by status');
   return () => {
     const a = M.acct; if (!a || !a.blocksFound.length) { k.innerHTML = '<span class="dim">no block found by this address</span>'; return; }
-    Neon.kpis(k, [{ label: 'blocks', value: a.blocksFound.length, fmt: num }]);
-    const by = (f) => { const o = {}; a.blocksFound.forEach((x) => { o[f(x)] = (o[f(x)] || 0) + 1; }); return Object.entries(o); };
-    Neon.donut(md, by((x) => x.mode).map(([n, v]) => ({ label: modeLabel[n] || n, value: v, text: num(v) })), { big: num(a.blocksFound.length), sub: 'blocks' });
-    Neon.donut(st, by((x) => x.status).map(([n, v]) => ({ label: n, value: v, text: num(v) })), { big: num(a.blocksFound.length), sub: 'blocks' });
+    const total = a.blocksTotal ?? a.blocksFound.length;
+    const count = (f) => { const o = {}; a.blocksFound.forEach((x) => { o[f(x)] = (o[f(x)] || 0) + 1; }); return o; };
+    const byMode = Object.entries(a.blocksByMode || count((x) => x.mode)), byStatus = Object.entries(a.blocksByStatus || count((x) => x.status));
+    Neon.kpis(k, [{ label: 'blocks', value: total, fmt: num }]);
+    Neon.donut(md, byMode.map(([n, v]) => ({ label: modeLabel[n] || n, value: v, text: num(v) })), { big: num(total), sub: 'blocks' });
+    Neon.donut(st, byStatus.map(([n, v]) => ({ label: n, value: v, text: num(v) })), { big: num(total), sub: 'blocks' });
   };
 });
 
@@ -200,7 +224,7 @@ function out(html) {
 
 async function setAddress(addr) {
   M.addr = addr.trim();
-  M.acct = null;
+  M.acct = null; M.pg = { found: { off: 0, items: null }, pay: { off: 0, items: null } };
   try { localStorage.setItem('photon-miner-address', M.addr); } catch (_) { /* storage unavailable */ }
   history.replaceState(null, '', '/miner/' + encodeURIComponent(M.addr));
   try { await load(); out(span('ok', 'loaded ' + maskAddr(M.addr))); } catch (e) { out(span('err', e.message)); }

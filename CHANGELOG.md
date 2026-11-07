@@ -3,6 +3,8 @@
 ## 0.2.0-rc1 (release candidate for the first mainnet test)
 
 Pool (`photond`)
+- Miner page: all blocks found and all payouts of an address, page by page (`‹ newer` / `older ›`, 20 per page); the account view carries the first page and the totals (`blocksTotal`, `blocksByMode`, `blocksByStatus`, `payoutsTotal`, `payoutsSum`), further pages come from `/public/v1/account/<address>/blocks` and `/payouts` (`offset`, `limit` up to 100). The pending list shows up to 150 credits. Test: `test/step36_account_pages.py`.
+- Registry: the log now also says when an explorer accepted a report (`registry: block <hash> reported to <explorer>: attributed`).
 - Engine view: block announcements that arrive together (the same block found in two modes, several blocks at once) stack under each other instead of overlapping.
 - Payouts no longer fail on a chain without fee estimates (`Fee estimation failed. Fallbackfee is disabled`): the pool takes the fee rate from the explorer (`explorer_url`, `/api/v1/fees/recommended`, one-hour target, at least 1 sat/vB), falls back to 2 sat/vB (`payout.fee_rate_fallback`) and still honours a fixed `payout.fee_rate` (`PAYOUT_FEE_RATE` in the stack). After a failed payout run the pool waits at most 8 times the interval before it tries again (was 64 times).
 - Payout schedule on the pages: `/public/v1/pool` reports `payout` (dry run or live, interval, next and last run). The pool page (Modes pane) and the miner page (Balance pane) show it, with a warning while payouts are in dry run.
