@@ -128,7 +128,11 @@ impl Registry {
                 let uri = format!("{}/api/v1/pool-registry/report", murl.trim_end_matches('/'));
                 let req = match Request::builder().method(Method::POST).uri(&uri).header("content-type", "application/json").header("user-agent", "photond").body(Full::new(Bytes::from(body))) { Ok(r) => r, Err(_) => return };
                 match me.request(req).await {
-                    Ok(_) => {}
+                    Ok(body) => {
+                        let attributed = serde_json::from_slice::<serde_json::Value>(&body).ok().and_then(|v| v["attributed"].as_bool());
+                        let text = match attributed { Some(true) => "attributed", Some(false) => "answered, not attributed", None => "answered" };
+                        pool.event("info", format!("registry: block {} reported to {mname}: {text}", &hash[..16.min(hash.len())]));
+                    }
                     Err(e) => pool.event("info", format!("registry: block {} not reported to {mname}: {e}", &hash[..16.min(hash.len())])),
                 }
             });

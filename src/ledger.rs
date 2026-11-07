@@ -50,6 +50,8 @@ pub fn init(conn: &Connection) -> Result<()> {
          CREATE TABLE IF NOT EXISTS balance(account TEXT PRIMARY KEY, confirmed INTEGER NOT NULL DEFAULT 0, paid INTEGER NOT NULL DEFAULT 0);
          CREATE TABLE IF NOT EXISTS payouts(id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, txid TEXT, status TEXT NOT NULL, total INTEGER NOT NULL);
          CREATE TABLE IF NOT EXISTS payout_items(payout_id INTEGER NOT NULL, account TEXT NOT NULL, amount INTEGER NOT NULL);
+         CREATE INDEX IF NOT EXISTS idx_blocks_account ON blocks(account, height);
+         CREATE INDEX IF NOT EXISTS idx_payout_items_account ON payout_items(account, payout_id);
          CREATE TABLE IF NOT EXISTS pool_history(minute INTEGER PRIMARY KEY, hashrate REAL NOT NULL, miners INTEGER NOT NULL, ok INTEGER NOT NULL, stale INTEGER NOT NULL, dup INTEGER NOT NULL, net_diff REAL NOT NULL) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS device_history(minute INTEGER NOT NULL, device TEXT NOT NULL, name TEXT NOT NULL, hashrate REAL NOT NULL, workers INTEGER NOT NULL, PRIMARY KEY(minute, device)) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS device_best(device TEXT PRIMARY KEY, name TEXT NOT NULL, best REAL NOT NULL, updated INTEGER NOT NULL) WITHOUT ROWID;
@@ -310,10 +312,15 @@ pub fn recent_payouts(conn: &Connection, limit: i64) -> Result<Vec<PayoutRow>> {
 }
 
 pub fn account_payouts(conn: &Connection, account: &str, limit: i64) -> Result<Vec<PayoutRow>> {
+    account_payouts_page(conn, account, 0, limit)
+}
+
+/// One page of the payouts of an account, newest first.
+pub fn account_payouts_page(conn: &Connection, account: &str, offset: i64, limit: i64) -> Result<Vec<PayoutRow>> {
     let mut st = conn.prepare(
-        "SELECT p.id, p.created_at, p.txid, p.status, i.amount FROM payouts p JOIN payout_items i ON i.payout_id = p.id WHERE i.account = ?1 AND p.status != 'failed' ORDER BY p.id DESC LIMIT ?2",
+        "SELECT p.id, p.created_at, p.txid, p.status, i.amount FROM payouts p JOIN payout_items i ON i.payout_id = p.id WHERE i.account = ?1 AND p.status != 'failed' ORDER BY p.id DESC LIMIT ?2 OFFSET ?3",
     )?;
-    let v = st.query_map(params![account, limit], |r| Ok(PayoutRow { id: r.get(0)?, created_at: r.get(1)?, txid: r.get(2)?, status: r.get(3)?, amount: r.get(4)? }))?.collect::<std::result::Result<_, _>>()?;
+    let v = st.query_map(params![account, limit, offset], |r| Ok(PayoutRow { id: r.get(0)?, created_at: r.get(1)?, txid: r.get(2)?, status: r.get(3)?, amount: r.get(4)? }))?.collect::<std::result::Result<_, _>>()?;
     Ok(v)
 }
 
@@ -350,11 +357,28 @@ pub fn account_credits(conn: &Connection, account: &str, limit: i64) -> Result<V
 }
 
 pub fn account_blocks(conn: &Connection, account: &str, limit: i64) -> Result<Vec<BlockRow>> {
-    let mut st = conn.prepare("SELECT hash, height, account, worker, mode, status, found_at FROM blocks WHERE account = ?1 ORDER BY height DESC LIMIT ?2")?;
+    account_blocks_page(conn, account, 0, limit)
+}
+
+/// One page of the blocks found by an account, newest first.
+pub fn account_blocks_page(conn: &Connection, account: &str, offset: i64, limit: i64) -> Result<Vec<BlockRow>> {
+    let mut st = conn.prepare("SELECT hash, height, account, worker, mode, status, found_at FROM blocks WHERE account = ?1 ORDER BY height DESC LIMIT ?2 OFFSET ?3")?;
     let v = st
-        .query_map(params![account, limit], |r| Ok(BlockRow { hash: r.get(0)?, height: r.get(1)?, account: r.get(2)?, worker: r.get(3)?, mode: r.get(4)?, status: r.get(5)?, found_at: r.get(6)? }))?
+        .query_map(params![account, limit, offset], |r| Ok(BlockRow { hash: r.get(0)?, height: r.get(1)?, account: r.get(2)?, worker: r.get(3)?, mode: r.get(4)?, status: r.get(5)?, found_at: r.get(6)? }))?
         .collect::<std::result::Result<_, _>>()?;
     Ok(v)
+}
+
+/// Totals over all blocks of an account: (count, per mode, per status).
+pub fn account_block_stats(conn: &Connection, account: &str) -> Result<(i64, Vec<(i64, i64)>, Vec<(String, i64)>)> {
+    let by_mode = conn.prepare("SELECT mode, COUNT(*) FROM blocks WHERE account = ?1 GROUP BY mode")?.query_map(params![account], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
+    let by_status = conn.prepare("SELECT status, COUNT(*) FROM blocks WHERE account = ?1 GROUP BY status")?.query_map(params![account], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok((by_mode.iter().map(|(_, n)| n).sum(), by_mode, by_status))
+}
+
+/// (number, summed amount) of the payouts of an account.
+pub fn account_payout_stats(conn: &Connection, account: &str) -> Result<(i64, i64)> {
+    Ok(conn.query_row("SELECT COUNT(*), COALESCE(SUM(i.amount), 0) FROM payouts p JOIN payout_items i ON i.payout_id = p.id WHERE i.account = ?1 AND p.status != 'failed'", params![account], |r| Ok((r.get(0)?, r.get(1)?)))?)
 }
 
 /// (start minute of the slot, summed difficulty) in slots of `slot_minutes`, oldest first.

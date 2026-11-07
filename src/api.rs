@@ -272,7 +272,7 @@ pub async fn account_view(p: &Arc<Pool>, address: &str) -> Option<Value> {
     crate::addr::script_for_address(address, p.cfg.network().ok()?.hrp).ok()?;
     let now_min = crate::accounting::minute_now();
     let addr = address.to_string();
-    let (info, day, hour, payouts, credits, found, history) = p
+    let (info, day, hour, payouts, credits, found, history, bstats, pstats) = p
         .ledger
         .call(move |c| {
             Ok((
@@ -280,9 +280,11 @@ pub async fn account_view(p: &Arc<Pool>, address: &str) -> Option<Value> {
                 ledger::account_shares(c, &addr, now_min - 1440)?,
                 ledger::account_shares(c, &addr, now_min - 60)?,
                 ledger::account_payouts(c, &addr, 20)?,
-                ledger::account_credits(c, &addr, 30)?,
+                ledger::account_credits(c, &addr, 150)?,
                 ledger::account_blocks(c, &addr, 20)?,
                 ledger::account_history(c, &addr, now_min - 1440, 10)?,
+                ledger::account_block_stats(c, &addr)?,
+                ledger::account_payout_stats(c, &addr)?,
             ))
         })
         .await
@@ -318,6 +320,8 @@ pub async fn account_view(p: &Arc<Pool>, address: &str) -> Option<Value> {
         "shares1h": shares(hour), "shares24h": shares(day),
         "balance": {"pending": info.pending, "confirmed": info.confirmed, "paid": info.paid},
         "minPayoutLeptons": p.cfg.payout.min_payout_leptons,
+        "payoutsTotal": pstats.0, "payoutsSum": pstats.1,
+        "blocksTotal": bstats.0, "blocksByMode": bstats.1.iter().map(|(m, n)| (mode_name(*m).to_string(), *n)).collect::<std::collections::HashMap<_, _>>(), "blocksByStatus": bstats.2.iter().cloned().collect::<std::collections::HashMap<_, _>>(),
         "payouts": payouts.into_iter().map(|r| json!({"time": r.created_at, "txid": r.txid, "amount": r.amount, "status": r.status})).collect::<Vec<_>>(),
         "credits": credits.into_iter().map(|c| {
             let remaining = if c.status == "pending" { (maturity - (tip_height - c.height + 1)).max(0) } else { 0 };
@@ -332,6 +336,27 @@ pub async fn account_view(p: &Arc<Pool>, address: &str) -> Option<Value> {
         }).collect::<Vec<_>>(),
         "history": history.into_iter().map(|(m, d)| json!({"time": m * 60, "hashrate": d * 4_294_967_296.0 / 600.0})).collect::<Vec<_>>(),
     }))
+}
+
+/// One page of an account's blocks or payouts: {"total", "offset", "items"}; the same item format as in the account view.
+pub async fn account_page(p: &Arc<Pool>, address: &str, kind: &str, offset: i64, limit: i64) -> Option<Value> {
+    crate::addr::script_for_address(address, p.cfg.network().ok()?.hrp).ok()?;
+    let (offset, limit) = (offset.clamp(0, 10_000_000), limit.clamp(1, 100));
+    let addr = address.to_string();
+    let base = p.cfg.api.explorer_url.clone();
+    if kind == "blocks" {
+        let (rows, total) = p.ledger.call(move |c| Ok((ledger::account_blocks_page(c, &addr, offset, limit)?, ledger::account_block_stats(c, &addr)?.0))).await.ok()?;
+        let items: Vec<Value> = rows.into_iter().map(|b| {
+            let mut v = json!({"height": b.height, "hash": b.hash, "time": b.found_at, "mode": mode_name(b.mode), "status": b.status});
+            if let Some(u) = block_url(&base, &b.hash) { v["url"] = json!(u); }
+            v
+        }).collect();
+        Some(json!({"total": total, "offset": offset, "items": items}))
+    } else {
+        let (rows, total) = p.ledger.call(move |c| Ok((ledger::account_payouts_page(c, &addr, offset, limit)?, ledger::account_payout_stats(c, &addr)?.0))).await.ok()?;
+        let items: Vec<Value> = rows.into_iter().map(|r| json!({"time": r.created_at, "txid": r.txid, "amount": r.amount, "status": r.status})).collect();
+        Some(json!({"total": total, "offset": offset, "items": items}))
+    }
 }
 
 async fn account(State(p): State<Arc<Pool>>, axum::extract::Path(address): axum::extract::Path<String>) -> axum::response::Response {

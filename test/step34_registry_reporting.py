@@ -44,6 +44,8 @@ async def main(h, pool, cfg):
     h.check("the explorer got exactly one report for the block", ok is not None, str(reports))
     h.check("the report names the pool as in pools.txt and carries the block hash", reports and reports[0] == {"name": "Registry Test Pool", "blockHash": bhash}, str(reports))
     h.check("the callback for that block is confirmed with name", callbacks and callbacks[0].get("confirmed") is True and callbacks[0].get("name") == "Registry Test Pool", str(callbacks))
+    ok = await wait_for(lambda: "reported to Fake Mempool: attributed" in pool.log_text(), 10)
+    h.check("the log says the explorer attributed the block", ok is not None)
     h.check("the same hash in upper case is confirmed too", pub("/api/pool/identity/confirm?blockHash=" + bhash.upper())["confirmed"] is True)
     h.check("another hash is still not confirmed", pub("/api/pool/identity/confirm?blockHash=" + "cd" * 32)["confirmed"] is False)
     h.check("the public API reports the release name", "release" in pub("/public/v1/pool"))
