@@ -244,6 +244,10 @@ The script generates the node and pool configuration, creates and encrypts the w
 
 By default all three modes are active (`DEFAULT_MODE=solo`, `STRATUM_PORT=3333`, `PORT_PPLNS=3334`, `PORT_PPS=3335`, `PPS_ENABLED=true`): port 3333 pays solo, 3334 PPLNS and 3335 PPS. Without a `stack.conf` the script also uses `DOMAIN=phtn.space`, `CADDY_EMAIL=ali@kutlusoy.com` and `EXPLORER_URL=https://mempool.elektron-net.org`; change them in `stack.conf` for another pool. Only the main port lets a miner choose another mode with `m=solo|pplns|pps` in the password. Re-run `./install.sh` after changing `stack.conf`. Updating: see [10.2](#102-update-the-complete-stack). Make the DNS record of `DOMAIN` point to the server before the first run so HTTPS can be issued. Details: [`doc-elektron/guideline-docker-stack.md`](doc-elektron/guideline-docker-stack.md).
 
+### 10.1a Show your pool as the block finder (registry)
+
+Explorers name the pool that found a block through the [Elektron Net registry](https://github.com/kutlusoy/elektron-net-registry). The stack does the pool's part by itself (`REGISTRY_REPORTING=true` is the default): it reports each found block to the listed explorers and answers their confirmation call at `https://<DOMAIN>/api/pool/identity/confirm`. For the explorers to accept it, add a line for your pool to `pools.txt` of the registry by pull request, with the Name exactly as `POOL_NAME` and the URL exactly `https://<DOMAIN>`, for example `"PHOTON", "Photon Pool", "https://phtn.space";`. Details: [`doc-elektron/guideline-pool-registry-reporting.md`](doc-elektron/guideline-pool-registry-reporting.md).
+
 ### 10.2 Update the complete stack
 
 An update keeps the wallet, the passphrase, the wallet backup, the pool ledger (`photond.db`) and the blockchain. Only `photond.toml`, `Caddyfile`, `.env` and `docker-compose.ports.yml` are generated again from `stack.conf`, so keep your settings in `stack.conf` and do not edit those files by hand.

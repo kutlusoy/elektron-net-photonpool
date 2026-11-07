@@ -169,6 +169,16 @@ max_hashrate_share = 0.25
 # listen = "0.0.0.0:3335"
 # mode = "solo"
 
+[registry]
+# Tell the explorers listed in the Elektron Net registry when this pool finds a block, so they can name the pool (mainnet only unless url is changed).
+# The explorers call back to https://<your host>/api/pool/identity/confirm, so the public page must be reachable under the address listed in pools.txt.
+# Options: true | false. Default true.
+enabled = true
+# Base url of the registry files (raw content, no trailing slash). Default "https://raw.githubusercontent.com/kutlusoy/elektron-net-registry/main".
+url = "https://raw.githubusercontent.com/kutlusoy/elektron-net-registry/main"
+# The Name of this pool's line in pools.txt. Options: any text; "" uses the name of the [public] section. Default "".
+name = ""
+
 [public]
 # Public pool page and read-only API on their own listener (off by default). Put a TLS reverse proxy in front: systemd/Caddyfile.example.
 # Options: true | false. Default false.
