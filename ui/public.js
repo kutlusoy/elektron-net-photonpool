@@ -58,7 +58,7 @@ function demoSource() {
         name: 'Photon Demo', version: '0.1.0-demo', network: 'mainnet', explorerUrl: '', uptime: 3 * 86400 + 4000,
         stratum: { host: 'pool.example.org', ports: [{ port: 3333, mode: 'pplns', override: true }, { port: 3334, mode: 'pps', override: false }, { port: 3335, mode: 'solo', override: false }] },
         modes: [{ mode: 'solo', fee: 0, available: true }, { mode: 'pplns', fee: 1, available: true }, { mode: 'pps', fee: 2, available: false }],
-        minPayoutLeptons: 100000, pplnsWindowFactor: 2, hashrate: { now: hist[hist.length - 1], m1: 9.5e16, h1: 9.45e16, hist },
+        minPayoutLeptons: 100000, payout: { dryRun: false, wallet: true, intervalSecs: 3600, nextRunAt: Date.now() / 1000 + 1500, lastRunAt: Date.now() / 1000 - 2100 }, pplnsWindowFactor: 2, hashrate: { now: hist[hist.length - 1], m1: 9.5e16, h1: 9.45e16, hist },
         miners: { online: 998, workers: 1000 }, found24h: 4, blocks: { found: 0, maturing: 2, mature: 40, orphaned: 1 },
         node: { height: 132457, tip: hex(r, 64), tipTime: now() - 23 }, networkDifficulty: 1.2e9,
       };
@@ -117,7 +117,8 @@ function render() {
     .concat(p.modes.map((m) => `${span('c2', pad(modeLabel[m.mode] || m.mode, 7))}${pad(m.fee + '%', 6)}${m.available ? span('ok', pad('open', 8)) : span('warn', pad('paused', 8))}${portsOf(m.mode)}`))
     .concat(['', span('dim', '* port also accepts m=<mode>'),
       ...p.modes.map((m) => `${span('c2', pad((modeLabel[m.mode] || m.mode).toLowerCase(), 6))}${span('dim', modeShort[m.mode] || '')}`),
-      '', span('dim', `min payout ${leptons(p.minPayoutLeptons)} leptons`)]).join('\n');
+      '', span('dim', `min payout ${leptons(p.minPayoutLeptons)} leptons`),
+      p.payout ? span(p.payout.dryRun || !p.payout.wallet ? 'warn' : 'dim', payoutLine(p.payout)) : '']).join('\n');
   const fwk = colw(view.blocks.map((b) => b.finder), 6);
   trackSeries(p);
   const blocksS = sortRows('blocks', view.blocks, { height: (b) => b.height, time: (b) => b.time, mode: (b) => b.mode, finder: (b) => b.finder, status: (b) => b.status }, 'height');

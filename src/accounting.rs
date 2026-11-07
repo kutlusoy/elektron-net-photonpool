@@ -189,7 +189,10 @@ impl Pool {
                 }
             }
             streak = if failed { (streak + 1).min(6) } else { 0 };
-            tokio::time::sleep(Duration::from_secs(self.cfg.payout.interval_secs.max(1) << streak)).await;
+            let wait = self.cfg.payout.interval_secs.max(1) << streak;
+            self.last_payout_at.store(unix_now() as u64, Ordering::Relaxed);
+            self.next_payout_at.store(unix_now() as u64 + wait, Ordering::Relaxed);
+            tokio::time::sleep(Duration::from_secs(wait)).await;
         }
     }
 

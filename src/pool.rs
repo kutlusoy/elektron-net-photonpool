@@ -331,6 +331,9 @@ pub struct Pool {
     pub agg: Mutex<HashMap<(i64, String, u8), (f64, u64)>>,
     pub wallet: Option<NodeRpc>,
     pub treasury_free: AtomicI64,
+    /// Unix time of the next and of the last payout run (0 = none yet), for the public pages.
+    pub next_payout_at: AtomicU64,
+    pub last_payout_at: AtomicU64,
     /// 0 = batch attestation not tried yet, 1 = supported by the node, 2 = not supported.
     pub batch_state: std::sync::atomic::AtomicU8,
     pub backend_name: Mutex<&'static str>,
@@ -389,7 +392,7 @@ impl Pool {
         let pool = Arc::new(Pool {
             registry, cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
             sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), conns: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
-            pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0),
+            pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0), next_payout_at: AtomicU64::new(0), last_payout_at: AtomicU64::new(0),
             batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), active_candidates: AtomicUsize::new(active), demand_units: AtomicU64::new(0), device_best: Mutex::new(bests), learned: Mutex::new(learned), hist_cache: Mutex::new(HashMap::new()), public_events: Mutex::new(VecDeque::new()), public_seq: AtomicU64::new(0), photon: std::sync::OnceLock::new(),
         });
         pool.stats.connected.store(true, Ordering::Relaxed);
