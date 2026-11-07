@@ -131,9 +131,15 @@ wallet_passphrase_env = "PHOTON_WALLET_PASSPHRASE"
 maturity_poll_secs = 30
 # Most recipients in one payout transaction. Options: whole number. Default 100.
 max_outputs_per_tx = 100
-# Fixed fee rate in sat/vB for payout transactions, if the node cannot estimate fees.
-# Options: number > 0, or leave the line out (default: the node's estimate).
+# Fixed fee rate in sat/vB for payout transactions; it wins over everything else.
+# Options: number >= 1, or leave the line out (default: see fee_from_explorer).
 # fee_rate = 5.0
+# Without a fixed rate, ask the explorer (explorer_url in [api], /api/v1/fees/recommended, one-hour target) for the rate.
+# Options: true | false. Default true.
+fee_from_explorer = true
+# Fee rate in sat/vB if the explorer cannot be asked; 0 lets the node estimate, which fails on a chain without estimates ("Fee estimation failed").
+# Options: number >= 0. Default 2.
+fee_rate_fallback = 2.0
 
 [payout.fee_pct]
 # Pool fee in percent of the reward per mode. Solo has no fee. Options: number from 0 to 50. Defaults pplns 1.0, pps 2.0.

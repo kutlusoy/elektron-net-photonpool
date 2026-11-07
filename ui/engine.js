@@ -38,7 +38,10 @@ const get = async (p) => { const r = await fetch(p, { cache: 'no-store' }); if (
 function banner(h, mode) {
   const box = document.querySelector('.flowbox'); if (!box) return;
   const b = document.createElement('div'); b.className = 'flowbanner'; b.textContent = 'BLOCK FOUND' + (h ? ' ' + h : '') + (mode ? ' \u00b7 ' + mode.toUpperCase() : '');
-  box.appendChild(b); setTimeout(() => b.remove(), 5200);
+  let stack = box.querySelector('.flowbanners');
+  if (!stack) { stack = document.createElement('div'); stack.className = 'flowbanners'; box.appendChild(stack); }
+  while (stack.children.length >= 3) stack.firstChild.remove();
+  stack.appendChild(b); setTimeout(() => { b.remove(); if (!stack.children.length) stack.remove(); }, 5200);
 }
 
 function addEvent(e) {

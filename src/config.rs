@@ -157,9 +157,15 @@ pub struct PayoutCfg {
     pub maturity_poll_secs: u64,
     #[serde(default = "d_max_outputs")]
     pub max_outputs_per_tx: usize,
-    /// Fixed fee rate in sat/vB for payout transactions. Use it when the node cannot estimate fees (small or young networks).
+    /// Fixed fee rate in sat/vB for payout transactions; wins over everything else.
     #[serde(default)]
     pub fee_rate: Option<f64>,
+    /// Without a fixed rate: ask the explorer (api explorer_url, /api/v1/fees/recommended) for the fee rate.
+    #[serde(default = "d_true")]
+    pub fee_from_explorer: bool,
+    /// Fee rate in sat/vB when the explorer cannot be asked; 0 lets the node estimate (which fails on a chain without estimates).
+    #[serde(default = "d_fee_fallback")]
+    pub fee_rate_fallback: f64,
 }
 
 #[derive(Deserialize, Clone)]
@@ -347,6 +353,7 @@ impl Default for StratumCfg {
 }
 
 fn d_true() -> bool { true }
+fn d_fee_fallback() -> f64 { 2.0 }
 fn d_s_listen() -> String { "0.0.0.0:3333".into() }
 fn d_s_diff() -> f64 { 1024.0 }
 fn d_s_min_diff() -> f64 { 0.0001 }
@@ -593,7 +600,7 @@ mod tests {
         }
         same!(node.poll_ms, pool.refresh_secs, pool.spot_check, pool.backend, pool.autoscale_candidates, pool.min_candidates);
         same!(stratum.enabled, stratum.listen, stratum.initial_difficulty, stratum.min_difficulty, stratum.max_difficulty, stratum.share_secs, stratum.max_connections, stratum.idle_secs, stratum.min_job_interval_ms, stratum.max_jobs_per_sec, stratum.max_job_interval_ms, stratum.version_space_bits, stratum.clean_work_agents, stratum.adaptive_jobs, stratum.adaptive_min_interval_ms, stratum.require_address);
-        same!(payout.default_mode, payout.modes, payout.min_payout_leptons, payout.max_solo_accounts, payout.dry_run, payout.interval_secs, payout.wallet, payout.wallet_addresses, payout.wallet_passphrase_env, payout.maturity_poll_secs, payout.max_outputs_per_tx, payout.fee_rate);
+        same!(payout.default_mode, payout.modes, payout.min_payout_leptons, payout.max_solo_accounts, payout.dry_run, payout.interval_secs, payout.wallet, payout.wallet_addresses, payout.wallet_passphrase_env, payout.maturity_poll_secs, payout.max_outputs_per_tx, payout.fee_rate, payout.fee_from_explorer, payout.fee_rate_fallback);
         same!(payout.fee_pct.pplns, payout.fee_pct.pps, payout.pplns.window_factor, payout.pps.enabled, payout.pps.reserve_min, payout.pps.max_hashrate_share);
         same!(registry.enabled, registry.url, registry.name);
         same!(public.enabled, public.listen, public.name, public.stratum_host, public.trust_proxy, public.rate_per_min);

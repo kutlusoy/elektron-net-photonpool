@@ -248,6 +248,20 @@ impl Pool {
         Ok(())
     }
 
+    /// Fixed rate if configured, else the explorer's recommendation, else the fallback; None lets the node estimate.
+    async fn payout_fee_rate(&self) -> Option<f64> {
+        let cfg = &self.cfg.payout;
+        if let Some(r) = cfg.fee_rate { return Some(r); }
+        let url = self.cfg.api.explorer_url.trim();
+        if cfg.fee_from_explorer && !url.is_empty() {
+            match self.registry.explorer_fee(url).await {
+                Ok(r) => return Some(r),
+                Err(e) => self.event("warn", format!("fee rate from the explorer failed ({e}), using {} sat/vB", cfg.fee_rate_fallback)),
+            }
+        }
+        (cfg.fee_rate_fallback > 0.0).then_some(cfg.fee_rate_fallback)
+    }
+
     /// Returns true when at least one payout transaction failed and was reverted.
     async fn run_payouts(&self) -> Result<bool> {
         let Some(w) = &self.wallet else { bail!("no wallet") };
@@ -273,7 +287,8 @@ impl Pool {
                 amounts.insert(acc.clone(), json!(*a as f64 / LEPTON as f64));
             }
             let unlocked = self.unlock_wallet(w).await;
-            let params = match self.cfg.payout.fee_rate {
+            let fee_rate = self.payout_fee_rate().await;
+            let params = match fee_rate {
                 Some(rate) => json!(["", Value::Object(amounts), 1, payout_comment(id), [], null, null, null, rate]),
                 None => json!(["", Value::Object(amounts), 1, payout_comment(id)]),
             };
