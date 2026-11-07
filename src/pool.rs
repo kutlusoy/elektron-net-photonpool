@@ -311,6 +311,7 @@ impl Epoch {
 }
 
 pub struct Pool {
+    pub registry: Arc<crate::registry::Registry>,
     pub cfg: Config,
     pub node: NodeRpc,
     pub payouts: Vec<Payout>,
@@ -384,8 +385,9 @@ impl Pool {
         let bests: HashMap<String, f64> = ledger.call(|c| crate::ledger::device_bests(c)).await.unwrap_or_default().into_iter().collect();
         let (events, _) = broadcast::channel(1024);
         let (epoch, _) = watch::channel(None);
+        let registry = Arc::new(crate::registry::Registry::new(&cfg));
         let pool = Arc::new(Pool {
-            cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
+            registry, cfg, node, payouts, epoch, stats: Stats::default(), events, started: Instant::now(), epoch_seq: AtomicU64::new(0),
             sessions: Mutex::new(HashMap::new()), session_seq: AtomicU64::new(0), conns: AtomicU64::new(0), live: Mutex::new(Live::default()), solo_active: Mutex::new(HashMap::new()),
             pps_ready: AtomicBool::new(false), ledger, agg: Mutex::new(HashMap::new()), wallet, treasury_free: AtomicI64::new(0),
             batch_state: std::sync::atomic::AtomicU8::new(0), backend_name: Mutex::new("gbt"), active_candidates: AtomicUsize::new(active), demand_units: AtomicU64::new(0), device_best: Mutex::new(bests), learned: Mutex::new(learned), hist_cache: Mutex::new(HashMap::new()), public_events: Mutex::new(VecDeque::new()), public_seq: AtomicU64::new(0), photon: std::sync::OnceLock::new(),

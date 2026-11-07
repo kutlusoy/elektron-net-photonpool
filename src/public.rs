@@ -115,6 +115,8 @@ pub fn router(pool: Arc<Pool>) -> Router {
         .route("/charts.js", get(|State(s): State<St>| file(s, "charts.js", "text/javascript; charset=utf-8")))
         .route("/depth.js", get(|State(s): State<St>| file(s, "depth.js", "text/javascript; charset=utf-8")))
         .route("/public.js", get(|State(s): State<St>| file(s, "public.js", "text/javascript; charset=utf-8")))
+        .route("/api/pool/identity/confirm", get(identity_confirm))
+        .route("/pool/identity/confirm", get(identity_confirm))
         .route("/llms.txt", get(|State(s): State<St>| file(s, "llms.txt", "text/plain; charset=utf-8")))
         .route("/robots.txt", get(|State(s): State<St>| file(s, "robots.txt", "text/plain; charset=utf-8")))
         .route("/favicon.ico", get(|State(s): State<St>| file(s, "favicon.ico", "image/x-icon")))
@@ -160,6 +162,16 @@ async fn guard(State(st): State<St>, ConnectInfo(peer): ConnectInfo<SocketAddr>,
     h.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     h.entry(header::CACHE_CONTROL).or_insert(HeaderValue::from_static("public, max-age=5"));
     resp
+}
+
+#[derive(serde::Deserialize)]
+struct ConfirmQ { #[serde(rename = "blockHash")] block_hash: Option<String> }
+
+/// The explorer's call back: true only for a block this pool itself found in the last 30 minutes.
+async fn identity_confirm(State(s): State<St>, Query(q): Query<ConfirmQ>) -> Json<Value> {
+    let r = &s.pool.registry;
+    let ok = q.block_hash.as_deref().map(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()) && r.confirmed(h)).unwrap_or(false);
+    Json(json!({"confirmed": ok, "name": if ok { Some(r.name.clone()) } else { None }, "url": if ok && !r.url.is_empty() { Some(r.url.clone()) } else { None }}))
 }
 
 async fn file(st: St, name: &str, ctype: &'static str) -> Response {

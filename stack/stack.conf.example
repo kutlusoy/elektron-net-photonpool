@@ -36,6 +36,11 @@ WALLET_ADDRESSES=512
 # Options: any text without spaces at the ends, or empty (a strong passphrase is generated and kept in the stack files).
 WALLET_PASSPHRASE=
 
+# --- Block attribution ---
+# Tell the explorers of the Elektron Net registry (https://github.com/kutlusoy/elektron-net-registry) when this pool finds a block, so they show
+# POOL_NAME as the finder. POOL_NAME must be exactly the name of your line in pools.txt and DOMAIN its address. Options: true (default) | false.
+REGISTRY_REPORTING=true
+
 # --- Stratum ---
 # Main port. Options: port number 1-65535. Default 3333 (solo). It uses DEFAULT_MODE; miners can pick another mode with m=solo|pplns|pps in the password.
 STRATUM_PORT=3333

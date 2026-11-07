@@ -3,7 +3,7 @@
 # step14 and step15 (differential test, SEED/ROUNDS/MAXCAND tunable) need a node of the photonpool branch of elektron-net (ELEKTROND_BATCH; it has getattestationbatch built in); step11 and step13 need a node built with the wallet; it is skipped when ELEKTROND_WALLET is not set.
 cd "$(dirname "$0")" || exit 1
 rc=0
-for s in step0*.py step10*.py step12*.py step24*.py step25*.py step26*.py step27*.py step32*.py step33*.py; do python3 "$s" || rc=1; done
+for s in step0*.py step10*.py step12*.py step24*.py step25*.py step26*.py step27*.py step32*.py step33*.py step34*.py; do python3 "$s" || rc=1; done
 if [ -n "$ELEKTROND_WALLET" ]; then
   ELEKTROND="$ELEKTROND_WALLET" python3 step11_ledger_and_payouts.py || rc=1
   ELEKTROND="$ELEKTROND_WALLET" python3 step13_encrypted_wallet.py || rc=1

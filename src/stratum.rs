@@ -700,6 +700,7 @@ impl Session {
                         pool.event("err", format!("ledger could not record block {height}: {e}"));
                     }
                     pool.event("blk", format!("BLOCK FOUND {height} {hash} by {worker} [{}] -> submitblock: accepted", mode.as_str()));
+                    pool.registry.block_found(&hash, pool.clone());
                 }
                 Ok(Some(r)) => pool.event("err", format!("block {height} by {worker} rejected by node: {r}")),
                 Err(e) => pool.event("err", format!("submitblock failed for {height}: {e}")),

@@ -9,6 +9,7 @@ mod music;
 mod photon;
 mod pool;
 mod public;
+mod registry;
 mod rpc;
 mod stratum;
 mod template;
@@ -92,6 +93,7 @@ async fn main() -> Result<()> {
 async fn run(pool: std::sync::Arc<Pool>) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(&pool.cfg.api.listen).await?;
     pool.event("info", format!("photond {} listening on {}", version::release(), pool.cfg.api.listen));
+    tokio::spawn(pool.registry.clone().run(pool.clone()));
     tokio::spawn(pool.clone().run_tip_loop());
     tokio::spawn(pool.clone().run_accounting());
     if pool.cfg.public.enabled {

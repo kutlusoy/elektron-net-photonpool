@@ -17,7 +17,25 @@ pub struct Config {
     pub public: PublicCfg,
     #[serde(default)]
     pub photon: PhotonCfg,
+    #[serde(default)]
+    pub registry: RegistryCfg,
 }
+
+/// Block attribution in the Elektron Net registry (explorers show which pool found a block).
+#[derive(Deserialize, Clone)]
+pub struct RegistryCfg {
+    /// Report found blocks to the explorers listed in the registry (mainnet only, unless `url` is changed).
+    #[serde(default = "d_true")]
+    pub enabled: bool,
+    /// Base url of the registry files (raw content, no trailing slash).
+    #[serde(default = "d_reg_url")]
+    pub url: String,
+    /// The Name of this pool's line in pools.txt; empty uses [public] name.
+    #[serde(default)]
+    pub name: String,
+}
+impl Default for RegistryCfg { fn default() -> Self { Self { enabled: true, url: d_reg_url(), name: String::new() } } }
+fn d_reg_url() -> String { crate::registry::DEFAULT_URL.into() }
 
 /// The public pool page and its read-only API, served on its own listener.
 #[derive(Deserialize, Clone)]
@@ -577,6 +595,7 @@ mod tests {
         same!(stratum.enabled, stratum.listen, stratum.initial_difficulty, stratum.min_difficulty, stratum.max_difficulty, stratum.share_secs, stratum.max_connections, stratum.idle_secs, stratum.min_job_interval_ms, stratum.max_jobs_per_sec, stratum.max_job_interval_ms, stratum.version_space_bits, stratum.clean_work_agents, stratum.adaptive_jobs, stratum.adaptive_min_interval_ms, stratum.require_address);
         same!(payout.default_mode, payout.modes, payout.min_payout_leptons, payout.max_solo_accounts, payout.dry_run, payout.interval_secs, payout.wallet, payout.wallet_addresses, payout.wallet_passphrase_env, payout.maturity_poll_secs, payout.max_outputs_per_tx, payout.fee_rate);
         same!(payout.fee_pct.pplns, payout.fee_pct.pps, payout.pplns.window_factor, payout.pps.enabled, payout.pps.reserve_min, payout.pps.max_hashrate_share);
+        same!(registry.enabled, registry.url, registry.name);
         same!(public.enabled, public.listen, public.name, public.stratum_host, public.trust_proxy, public.rate_per_min);
         same!(ledger.path, ledger.keep_days, ledger.stats_keep_days, ledger.device_history_minutes, api.listen, api.ui_dir);
         same!(photon.enabled, photon.listen, photon.key_file, photon.fee_pct, photon.max_outputs, photon.window_factor, photon.initial_difficulty, photon.min_difficulty, photon.max_difficulty, photon.share_secs, photon.max_connections, photon.max_connections_per_ip, photon.max_channels_per_connection, photon.max_reward_over_subsidy_pct, photon.max_check_bytes, photon.idle_secs, photon.max_checks_per_tip, photon.max_concurrent_checks);
