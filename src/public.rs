@@ -216,6 +216,7 @@ async fn pool_view(State(st): State<St>) -> Json<Value> {
         "name": p.cfg.public.name, "version": crate::version::POOL, "release": crate::version::release(), "network": p.cfg.pool.network, "explorerUrl": p.cfg.api.explorer_url,
         "uptime": p.started.elapsed().as_secs_f64(),
         "stratum": {"host": p.cfg.public.stratum_host, "ports": ports},
+        "payout": {"dryRun": p.cfg.payout.dry_run, "wallet": p.wallet.is_some(), "intervalSecs": p.cfg.payout.interval_secs, "nextRunAt": p.next_payout_at.load(Ordering::Relaxed), "lastRunAt": p.last_payout_at.load(Ordering::Relaxed)},
         "modes": modes, "minPayoutLeptons": p.cfg.payout.min_payout_leptons, "pplnsWindowFactor": p.cfg.payout.pplns.window_factor,
         "hashrate": hashrate, "miners": {"online": online, "workers": workers},
         "found24h": found24h, "blocks": by_status.into_iter().collect::<HashMap<_, _>>(),

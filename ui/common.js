@@ -154,3 +154,14 @@ function pageTitle(part, name) {
   const base = (/^pool$/i.test(n) ? 'Photon Pool' : n) + ' for Elektron Net';
   return part ? part + ' | ' + base : base + ' | Fast SHA-256d Mining Pool';
 }
+
+/* "in 23m" for a time in the future */
+const until = (t) => { const a = Math.max(0, t - Date.now() / 1000); return a < 90 ? Math.ceil(a) + 's' : a < 5400 ? Math.round(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h'; };
+const everyText = (s) => (s % 3600 === 0 ? s / 3600 + ' h' : s % 60 === 0 ? s / 60 + ' min' : s + ' s');
+/* one line about the payout run: live or dry run, how often, when next */
+function payoutLine(po) {
+  if (!po) return '';
+  if (!po.wallet) return 'no payout wallet';
+  if (po.dryRun) return 'dry run: payouts are calculated but nothing is sent';
+  return 'payout run every ' + everyText(po.intervalSecs) + (po.nextRunAt ? ', next in ' + until(po.nextRunAt) : '');
+}

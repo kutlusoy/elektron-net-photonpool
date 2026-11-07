@@ -37,7 +37,7 @@ function demoData(addr) {
   const now = Date.now() / 1000;
   const history = Array.from({ length: 144 }, (_, i) => ({ time: now - (143 - i) * 600, hashrate: 1.1e14 + Math.sin(i / 9) * 2e13 + r() * 1e13 }));
   return {
-    pool: { name: 'Photon Demo', explorerUrl: '', minPayoutLeptons: 100000, node: { height: 132457 }, modes: [{ mode: 'pplns', fee: 1, available: true }] },
+    pool: { name: 'Photon Demo', explorerUrl: '', payout: { dryRun: false, wallet: true, intervalSecs: 3600, nextRunAt: Date.now() / 1000 + 1500, lastRunAt: 0 }, minPayoutLeptons: 100000, node: { height: 132457 }, modes: [{ mode: 'pplns', fee: 1, available: true }] },
     acct: {
       address: addr, hashrate: 1.2e14, workers: 3, shares1h: { pplns: { difficulty: 5200, count: 310 } }, shares24h: { pplns: { difficulty: 120000, count: 7400 } },
       balance: { pending: 12.5 * LEPTON, confirmed: 0.0008 * LEPTON, paid: 40 * LEPTON }, minPayoutLeptons: 100000,
@@ -106,6 +106,7 @@ function render() {
     `${span('dim', 'next payout at ')}${leptons(min)} leptons`,
     `${bar(progress, 20, progress >= 1 ? 'ok' : 'c1')} ${pct(progress)}`,
     span('dim', progress >= 1 ? 'due with the next payout run' : `${leptons(Math.max(0, min - a.balance.confirmed))} leptons to go`),
+    p && p.payout ? span(p.payout.dryRun || !p.payout.wallet ? 'warn' : 'dim', payoutLine(p.payout)) : '',
   ].join('\n');
   const rates = compress(a.history.map((x) => x.hashrate), 56);
   const sh = (m) => Object.entries(m).map(([k, v]) => `${modeLabel[k] || k} ${num(v.count)}`).join('  ') || 'none';
