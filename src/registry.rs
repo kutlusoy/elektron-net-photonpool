@@ -130,7 +130,7 @@ impl Registry {
                 match me.request(req).await {
                     Ok(body) => {
                         let attributed = serde_json::from_slice::<serde_json::Value>(&body).ok().and_then(|v| v["attributed"].as_bool());
-                        let text = match attributed { Some(true) => "attributed", Some(false) => "answered, not attributed", None => "answered" };
+                        let text = match attributed { Some(true) => "attributed", Some(false) => "answered, not attributed yet (the explorer retries once it has indexed the block, or the pool did not confirm)", None => "answered" };
                         pool.event("info", format!("registry: block {} reported to {mname}: {text}", &hash[..16.min(hash.len())]));
                     }
                     Err(e) => pool.event("info", format!("registry: block {} not reported to {mname}: {e}", &hash[..16.min(hash.len())])),

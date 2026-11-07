@@ -25,7 +25,13 @@ Explorers (mempool instances) cannot tell from a block alone which pool found it
 
 `registry: N explorers listed, this pool reports blocks as "<name>"` after each refresh, `registry: could not refresh ...` when the registry is unreachable (the last good list stays in use), and `registry: block <hash> not reported to <explorer>: <reason>` when one explorer did not answer. Nothing else in the pool depends on the answers.
 
-## 4. Notes
+## 4. Reading the log
+
+- `reported to <explorer>: attributed` means the explorer indexed the block and named the pool at once.
+- `answered, not attributed yet` is the normal case: the report usually arrives before the explorer has indexed the block, so its first answer is `attributed: false`; the explorer then retries in the background (five times, every 3 s) and names the pool as soon as the block is in its database. The proof is the block page of the explorer (the pool name instead of "Unknown") or `/api/v1/block/<hash>` (`extras.pool.name`).
+- `not reported to <explorer>: HTTP 404` means the explorer does not know the pool name: the line in `pools.txt` is missing, has another name, or has a type other than `PPLNS` or `SOLO`.
+
+## 5. Notes
 
 - TLS uses the bundled Mozilla root certificates (`webpki-roots`), so a minimal container without `ca-certificates` works.
 - A list that parses to zero entries (an error page, an empty file) never replaces a good list.
