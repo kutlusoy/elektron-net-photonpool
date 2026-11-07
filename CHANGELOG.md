@@ -3,6 +3,8 @@
 ## 0.2.0-rc1 (release candidate for the first mainnet test)
 
 Pool (`photond`)
+- Engine view: block announcements that arrive together (the same block found in two modes, several blocks at once) stack under each other instead of overlapping.
+- Payouts no longer fail on a chain without fee estimates (`Fee estimation failed. Fallbackfee is disabled`): the pool takes the fee rate from the explorer (`explorer_url`, `/api/v1/fees/recommended`, one-hour target, at least 1 sat/vB), falls back to 2 sat/vB (`payout.fee_rate_fallback`) and still honours a fixed `payout.fee_rate` (`PAYOUT_FEE_RATE` in the stack). After a failed payout run the pool waits at most 8 times the interval before it tries again (was 64 times).
 - Payout schedule on the pages: `/public/v1/pool` reports `payout` (dry run or live, interval, next and last run). The pool page (Modes pane) and the miner page (Balance pane) show it, with a warning while payouts are in dry run.
 - Block attribution through the Elektron Net registry: the pool reads `mempools.txt`, reports every block it found to the listed explorers and answers their call back at `/api/pool/identity/confirm` (true only for its own recent blocks). `[registry]` in `photond.toml`, `REGISTRY_REPORTING` in `stack.conf`; the name is the pool name, so `POOL_NAME` and `DOMAIN` must match the line in `pools.txt`. Guideline: `doc-elektron/guideline-pool-registry-reporting.md`, test: `test/step34_registry_reporting.py`.
 - Search and AI visibility: readable tab titles (`Photon Pool for Elektron Net | Fast SHA-256d Mining Pool`, `Engine | ...`), description, Open Graph, Twitter card and JSON-LD metadata, `/robots.txt` and `/llms.txt` (what Elektron Net and Photon Pool are, the public API, how to mine).

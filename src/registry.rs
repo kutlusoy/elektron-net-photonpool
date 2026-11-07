@@ -24,6 +24,7 @@ pub struct Registry {
     cache: PathBuf,
     mempools: Mutex<Vec<(String, String)>>,
     recent: Mutex<HashMap<String, Instant>>,
+    fee: Mutex<Option<(Instant, f64)>>,
 }
 
 /// Every quoted substring of a line is a field; a line needs exactly two non-empty ones (name, url), other lines are skipped.
@@ -52,7 +53,20 @@ impl Registry {
         // the shared registry only knows mainnet; a custom registry url (tests, forks) is honoured on any network
         let active = cfg.registry.enabled && !name.is_empty() && (cfg.pool.network == "mainnet" || base != DEFAULT_URL);
         let cache = std::path::Path::new(&cfg.ledger.path).with_file_name("mempools-registry.txt");
-        Self { client: Client::builder(TokioExecutor::new()).build(connector), base, name, url, active, cache, mempools: Mutex::new(Vec::new()), recent: Mutex::new(HashMap::new()) }
+        Self { client: Client::builder(TokioExecutor::new()).build(connector), base, name, url, active, cache, mempools: Mutex::new(Vec::new()), recent: Mutex::new(HashMap::new()), fee: Mutex::new(None) }
+    }
+
+    /// Recommended fee rate (sat/vB, the one-hour target) from the explorer's `/api/v1/fees/recommended`, cached for a minute.
+    /// Clamped to 1 (the wallet minimum) .. 500 sat/vB so a broken or hostile answer cannot make a payout absurdly expensive.
+    pub async fn explorer_fee(&self, explorer_url: &str) -> anyhow::Result<f64> {
+        if let Some((t, v)) = *self.fee.lock().unwrap() {
+            if t.elapsed() < Duration::from_secs(60) { return Ok(v); }
+        }
+        let req = Request::builder().method(Method::GET).uri(format!("{}/api/v1/fees/recommended", explorer_url.trim().trim_end_matches('/'))).header("user-agent", "photond").body(Full::new(Bytes::new()))?;
+        let v: serde_json::Value = serde_json::from_slice(&self.request(req).await?)?;
+        let rate = v["hourFee"].as_f64().filter(|r| r.is_finite() && *r > 0.0).ok_or_else(|| anyhow::anyhow!("no hourFee in the answer"))?.clamp(1.0, 500.0);
+        *self.fee.lock().unwrap() = Some((Instant::now(), rate));
+        Ok(rate)
     }
 
     pub fn mempool_count(&self) -> usize { self.mempools.lock().unwrap().len() }
@@ -124,7 +138,37 @@ impl Registry {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_mempools;
+    use super::{parse_mempools, Registry};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn fake_explorer(body: &'static str) -> String {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = s.read(&mut buf).await;
+                let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await;
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    fn registry() -> Registry {
+        let cfg: crate::config::Config = toml::from_str("[node]\nrpc_url = \"x\"\nauth = \"y\"\n[pool]\nnetwork = \"mainnet\"\n").unwrap();
+        Registry::new(&cfg)
+    }
+
+    #[tokio::test]
+    async fn the_fee_rate_comes_from_the_explorer_within_sane_bounds() {
+        let r = registry();
+        assert_eq!(r.explorer_fee(&fake_explorer(r#"{"fastestFee":9,"halfHourFee":5,"hourFee":3.5,"economyFee":2,"minimumFee":1}"#).await).await.unwrap(), 3.5);
+        assert_eq!(registry().explorer_fee(&fake_explorer(r#"{"hourFee":0.2}"#).await).await.unwrap(), 1.0);
+        assert_eq!(registry().explorer_fee(&fake_explorer(r#"{"hourFee":99999}"#).await).await.unwrap(), 500.0);
+        assert!(registry().explorer_fee(&fake_explorer(r#"{"nothing":1}"#).await).await.is_err());
+        assert!(registry().explorer_fee("http://127.0.0.1:1").await.is_err());
+    }
+
 
     #[test]
     fn parses_the_registry_format_and_skips_bad_lines() {

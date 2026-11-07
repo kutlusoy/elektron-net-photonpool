@@ -74,8 +74,9 @@ PPS_RESERVE=5.0
 MIN_PAYOUT_LEPTONS=100000
 # Options: whole number of minutes >= 1. Default 60.
 PAYOUT_INTERVAL_MINUTES=60
-# Fixed payout fee rate in sat/vB if the node cannot estimate fees (empty = node estimate).
-# Options: number > 0, or empty.
+# Fee rate of the payout transactions in sat/vB. Empty (default): the pool asks the explorer (EXPLORER_URL, /api/v1/fees/recommended, one-hour
+# target) and uses 2 sat/vB if it cannot. A number fixes the rate. The node's own estimate is not used: it fails on a young chain.
+# Options: number >= 1, or empty.
 PAYOUT_FEE_RATE=
 
 # --- Host ---
