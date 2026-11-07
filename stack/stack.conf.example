@@ -74,9 +74,10 @@ PPS_RESERVE=5.0
 MIN_PAYOUT_LEPTONS=100000
 # Options: whole number of minutes >= 1. Default 60.
 PAYOUT_INTERVAL_MINUTES=60
-# Fixed payout fee rate in sat/vB if the node cannot estimate fees (empty = node estimate).
-# Options: number > 0, or empty.
-PAYOUT_FEE_RATE=
+# Fixed fee rate in sat/vB for payout transactions. The default 2 works on a young chain where the node has no fee estimate yet (the node's wallet
+# minimum is 1 sat/vB); empty = ask the node, which fails with "Fee estimation failed" until it has seen enough blocks.
+# Options: number >= 1, or empty. Default 2.
+PAYOUT_FEE_RATE=2
 
 # --- Host ---
 # true = open the needed ports with ufw (22 is left alone, check your SSH port first).
