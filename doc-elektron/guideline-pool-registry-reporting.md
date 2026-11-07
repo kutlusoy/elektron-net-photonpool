@@ -16,7 +16,7 @@ Explorers (mempool instances) cannot tell from a block alone which pool found it
 
 ## 2. What the operator has to do
 
-- **Name and address.** The pool name (`POOL_NAME` in `stack.conf`, `[public] name` or `[registry] name` in `photond.toml`) must be exactly the Name of the line in `pools.txt`, and the public page must be reachable under the URL of that line (`DOMAIN`). The line for Photon Pool is `"PHOTON", "Photon Pool", "https://phtn.space";`.
+- **Name and address.** The pool name (`POOL_NAME` in `stack.conf`, `[public] name` or `[registry] name` in `photond.toml`) must be exactly the Name of the line in `pools.txt`, and the public page must be reachable under the URL of that line (`DOMAIN`). The line for Photon Pool is `"PPLNS", "Photon Pool", "https://phtn.space";`. The type must be `PPLNS` or `SOLO`: the explorer's parser skips every other type (a line with `"PHOTON"` is ignored, and the explorer answers every report with 404 `unknown pool`). Photon Pool offers all modes, `PPLNS` is the right choice.
 - **Registry entry.** Add the line by pull request to the registry repository. The registry lists its own criteria (live for a month, a minimum of active miners).
 - **Switch.** `REGISTRY_REPORTING=true|false` in `stack.conf`, or `[registry] enabled` in `photond.toml`. Default on. Reporting only happens on mainnet, unless `[registry] url` is changed (forks, tests).
 - **Reverse proxy.** The callback is plain HTTPS to the public page, so with the stack nothing is to do (Caddy forwards every path to the public listener). With your own proxy, forward `/api/pool/identity/confirm` as well.

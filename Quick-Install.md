@@ -246,7 +246,7 @@ By default all three modes are active (`DEFAULT_MODE=solo`, `STRATUM_PORT=3333`,
 
 ### 10.1a Show your pool as the block finder (registry)
 
-Explorers name the pool that found a block through the [Elektron Net registry](https://github.com/kutlusoy/elektron-net-registry). The stack does the pool's part by itself (`REGISTRY_REPORTING=true` is the default): it reports each found block to the listed explorers and answers their confirmation call at `https://<DOMAIN>/api/pool/identity/confirm`. For the explorers to accept it, add a line for your pool to `pools.txt` of the registry by pull request, with the Name exactly as `POOL_NAME` and the URL exactly `https://<DOMAIN>`, for example `"PHOTON", "Photon Pool", "https://phtn.space";`. Details: [`doc-elektron/guideline-pool-registry-reporting.md`](doc-elektron/guideline-pool-registry-reporting.md).
+Explorers name the pool that found a block through the [Elektron Net registry](https://github.com/kutlusoy/elektron-net-registry). The stack does the pool's part by itself (`REGISTRY_REPORTING=true` is the default): it reports each found block to the listed explorers and answers their confirmation call at `https://<DOMAIN>/api/pool/identity/confirm`. For the explorers to accept it, add a line for your pool to `pools.txt` of the registry by pull request, with the Name exactly as `POOL_NAME` and the URL exactly `https://<DOMAIN>`, for example `"PPLNS", "Photon Pool", "https://phtn.space";`. Details: [`doc-elektron/guideline-pool-registry-reporting.md`](doc-elektron/guideline-pool-registry-reporting.md).
 
 ### 10.2 Update the complete stack
 
