@@ -77,14 +77,15 @@ function render() {
   ].join('');
   renderMiners();
   const bw = wide('oblocks');
-  const blocks = sortRows('oblocks', bw ? ui.src.blocks(50) : ui.src.blocks(), { height: (b) => b.height, time: (b) => b.time, worker: (b) => b.worker, status: (b) => b.status }, 'height');
+  const pob = pageRows('oblocks', sortRows('oblocks', ui.src.blocks(50), { height: (b) => b.height, time: (b) => b.time, worker: (b) => b.worker, status: (b) => b.status }, 'height'), bw ? 25 : 12);
+  const blocks = pob.rows;
   const bwk = colw(blocks.map((b) => b.worker), 6), bhk = colw(blocks.map((b) => b.hash || ''), 4);
   $('#pane-blocks').innerHTML = [`<span class="row-h">${hdr('oblocks', [['height', 'HEIGHT', 9], ['time', 'AGE', 9], ['worker', 'WORKER', bw ? bwk : 19, false, 1]], 'height')}${bw ? pad('HASH', bhk) : ''}${hdr('oblocks', [['status', 'STATE', 8, false, 1]], 'height')}</span>`]
     .concat(blocks.map((b) => {
       const a = Date.now() / 1000 - b.time;
       const cls = b.status === 'found' ? 'ok' : b.status === 'maturing' ? 'c3' : 'dim';
       return `${linkPad(b.url || blockUrl(s.pool.explorerUrl, b.hash), num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 9)}${bw ? pad(b.worker, bwk) : pad(trunc(workerLabel(b.worker), 18), 19)}${bw ? pad(b.hash || '', bhk) : ''}${span(cls, b.status)}`;
-    })).join('\n');
+    })).concat(pob.bar).join('\n');
   renderLedger();
   Extras.tick();
 }
@@ -112,15 +113,16 @@ function minerRows() {
 function renderMiners() {
   const rows = minerRows();
   const mw = wide('miners');
-  const shown = rows.slice(0, mw ? Math.max(ui.minerLimit, 200) : ui.minerLimit);
+  const pm = pageRows('miners', rows, mw ? Math.max(ui.minerLimit, 200) : ui.minerLimit);
+  const shown = pm.rows;
   const mwk = colw(shown.map((m) => m.name), 6);
-  $('#miners-hint').textContent = `${shown.length}/${rows.length} sort:${sortOf('miners', 'hashrate').k}${sortOf('miners', 'hashrate').d > 0 ? '+' : '-'}${ui.minerFilter ? ' grep:' + ui.minerFilter : ''}`;
+  $('#miners-hint').textContent = `${pm.off + 1}-${pm.off + shown.length}/${rows.length} sort:${sortOf('miners', 'hashrate').k}${sortOf('miners', 'hashrate').d > 0 ? '+' : '-'}${ui.minerFilter ? ' grep:' + ui.minerFilter : ''}`;
   $('#pane-miners').innerHTML = [`<span class="row-h">${hdr('miners', [['name', 'WORKER', mw ? mwk : 19, false, 1], ['device', 'DEVICE', 13, false, 1], ['proto', 'PROTO', 6, false, 1], ['hashrate', 'HASHRATE', 12, true], ['diff', 'DIFF', 10, true], ['ok', 'OK', 8, true], ['stale', 'STALE', 7, true], ['dup', 'DUP', 6, true]], 'hashrate')}  ${hdr('miners', [['seen', 'LAST', 6, false, 1], ['unit', 'UNIT', 14, false, 1], ['jobMs', 'JOB ms', 6, true]], 'hashrate')}</span>`]
     .concat(shown.map((m) => {
       const stale = m.stale / Math.max(1, m.ok + m.stale);
       const seen = m.seen === 0 ? span('ok', 'now   ') : span(m.seen > 5 ? 'warn' : 'dim', pad(m.seen + 's', 6));
       return `${mw ? pad(m.name, mwk) : pad(trunc(workerLabel(m.name), 18), 19)}${span('c2', pad(m.device || '-', 13))}${span(m.proto === 'V2' ? 'c2' : m.proto === 'EDGE' ? 'c3' : 'dim', pad(m.proto, 6))}${lpad(fmtHash(m.hashrate), 12)}${lpad(m.diff.toExponential(1), 10)}${lpad(num(m.ok), 8)}${span(stale > 0.01 ? 'warn' : 'dim', lpad(num(m.stale), 7))}${lpad(num(m.dup), 6)}  ${seen}${span('dim', pad(m.unit, 14))}${lpad(m.jobMs ? Math.round(m.jobMs) : '-', 6)}`;
-    })).join('\n');
+    })).concat(pm.bar).join('\n');
 }
 
 

@@ -16,7 +16,8 @@ const Stats = (() => {
   /* ---- devices ---- */
   const DEV_KEYS = { name: (d) => d.name.toLowerCase(), working: (d) => d.working, hashrate: (d) => d.hashrate, best: (d) => d.best };
   function devicesHtml(list) {
-    const rows = sortRows('devices', list, DEV_KEYS, 'hashrate');
+    const pd = pageRows('devices', sortRows('devices', list, DEV_KEYS, 'hashrate'), 15);
+    const rows = pd.rows;
     const nw = Math.max(8, ...rows.map((d) => d.name.length + 2)) + 2;
     const head = `<span class="row-h">${hdr('devices', [['name', 'DEVICE', nw, false, 1], ['working', 'WORKING', 9, true], ['hashrate', 'HASHRATE', 13, true], ['best', 'BEST DIFF', 12, true]], 'hashrate')}</span>`;
     const body = rows.map((d) => {
@@ -24,7 +25,7 @@ const Stats = (() => {
       const cell = d.url ? link(d.url, d.name, 'c1') + (d.openSource ? span('c3', ' ★') : '') : esc(label);
       return `${cell}${' '.repeat(Math.max(1, nw - label.length))}${lpad(num(d.working), 9)}${lpad(fmtHash(d.hashrate), 13)}${lpad(fmtDiff(d.best), 12)}`;
     });
-    return [head, ...body, ...(rows.length ? ['', span('dim', '★ = open source software and hardware')] : [span('dim', 'no miner is connected right now')])].join('\n');
+    return [head, ...body, ...pd.bar, ...(rows.length ? ['', span('dim', '★ = open source software and hardware')] : [span('dim', 'no miner is connected right now')])].join('\n');
   }
   async function loadDevices(base) {
     const r = await fetch(base + '/devices', { cache: 'no-store' });

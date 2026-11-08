@@ -79,6 +79,28 @@ function txUrl(base, txid) {
   return safeUrl(base) && /^[0-9a-f]{64}$/.test(txid || '') ? `${base.replace(/\/+$/, '')}/tx/${txid}` : '';
 }
 
+/* blocks and payouts of the pool: the newest page comes with every refresh, older pages are fetched when asked for */
+const POOL_PAGE = { blocks: 12, payouts: 8 };
+const poolPg = { blocks: { off: 0, items: null }, payouts: { off: 0, items: null } };
+function poolPage(kind) {
+  const g = poolPg[kind], size = POOL_PAGE[kind], first = view[kind];
+  const total = (view.pool && view.pool[kind + 'Total']) ?? first.length;
+  const items = g.items || first;
+  return { items, bar: total > size ? ['', pagerBar(`data-pgp="${kind}"`, g.off, items.length, total, size)] : [] };
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest && e.target.closest('.pgb[data-pgp]'); if (!b || view.src.demo) return;
+  e.preventDefault();
+  const kind = b.dataset.pgp, g = poolPg[kind], size = POOL_PAGE[kind], off = Math.max(0, g.off + (+b.dataset.d) * size);
+  if (off === 0) { g.off = 0; g.items = null; onDepth(); return; }
+  try {
+    const r = await fetch('/public/v1/' + kind + '?offset=' + off + '&limit=' + size, { cache: 'no-store' });
+    const items = r.ok ? await r.json() : [];
+    if (items.length) { g.off = off; g.items = items; }
+    onDepth();
+  } catch (_) { /* keep the page that is shown */ }
+});
+
 const onDepth = () => { try { render(); } catch (_) { /* no data yet */ } };
 function render() {
   const p = view.pool;
@@ -121,19 +143,20 @@ function render() {
       p.payout ? span(p.payout.dryRun || !p.payout.wallet ? 'warn' : 'dim', payoutLine(p.payout)) : '']).join('\n');
   const fwk = colw(view.blocks.map((b) => b.finder), 6);
   trackSeries(p);
-  const blocksS = sortRows('blocks', view.blocks, { height: (b) => b.height, time: (b) => b.time, mode: (b) => b.mode, finder: (b) => b.finder, status: (b) => b.status }, 'height');
-  const payoutsS = sortRows('payouts', view.payouts, { time: (x) => x.time, amount: (x) => x.amount, txid: (x) => x.txid || '' }, 'time');
+  const pgB = poolPage('blocks'), pgP = poolPage('payouts');
+  const blocksS = sortRows('blocks', pgB.items, { height: (b) => b.height, time: (b) => b.time, mode: (b) => b.mode, finder: (b) => b.finder, status: (b) => b.status }, 'height');
+  const payoutsS = sortRows('payouts', pgP.items, { time: (x) => x.time, amount: (x) => x.amount, txid: (x) => x.txid || '' }, 'time');
   $('#pane-blocks').innerHTML = [`<span class="row-h">${hdr('blocks', [['height', 'HEIGHT', 9], ['time', 'AGE', 8], ['mode', 'MODE', 7, false, 1], ['finder', 'FINDER', wide('blocks') ? fwk : 17, false, 1], ['status', 'STATE', 8, false, 1]], 'height')}</span>`]
     .concat(blocksS.map((b) => {
       const a = Date.now() / 1000 - b.time;
       const cls = b.status === 'mature' ? 'dim' : b.status === 'orphaned' ? 'err' : 'c3';
       return `${linkPad(b.url, num(b.height), 9)}${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 8)}${pad(modeLabel[b.mode] || b.mode, 7)}${fit(b.finder, wide('blocks') ? fwk : 17, wide('blocks'))}${span(cls, b.status)}`;
-    })).join('\n');
+    })).concat(pgB.bar).join('\n');
   $('#pane-payouts').innerHTML = [`<span class="row-h">${hdr('payouts', [['time', 'AGE', 8], ['amount', 'AMOUNT', 15], ['txid', 'TX', 6, false, 1]], 'time')}</span>`]
     .concat(payoutsS.map((x) => {
       const a = Date.now() / 1000 - x.time;
       return `${pad(a < 3600 ? Math.floor(a / 60) + 'm' : (a / 3600).toFixed(1) + 'h', 8)}${pad(coins(x.amount), 15)}${link(txUrl(p.explorerUrl, x.txid), wide('payouts') ? (x.txid || '') : short(x.txid || '', 6, 4), 'c1')}`;
-    })).join('\n') || span('dim', 'no payouts yet');
+    })).concat(pgP.bar).join('\n') || span('dim', 'no payouts yet');
   Stats.S.devices = view.devices;
   $('#pane-devices').innerHTML = Stats.devicesHtml(view.devices || []);
   Extras.tick();

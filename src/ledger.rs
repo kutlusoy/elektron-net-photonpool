@@ -297,6 +297,30 @@ pub fn recent_blocks(conn: &Connection, limit: i64) -> Result<Vec<BlockRow>> {
     Ok(v)
 }
 
+/// One page of the pool's blocks, newest first, and the total number of blocks.
+pub fn blocks_page(conn: &Connection, offset: i64, limit: i64) -> Result<Vec<BlockRow>> {
+    let mut st = conn.prepare("SELECT hash, height, account, worker, mode, status, found_at FROM blocks ORDER BY found_at DESC, height DESC LIMIT ?1 OFFSET ?2")?;
+    let v = st
+        .query_map(params![limit, offset], |r| Ok(BlockRow { hash: r.get(0)?, height: r.get(1)?, account: r.get(2)?, worker: r.get(3)?, mode: r.get(4)?, status: r.get(5)?, found_at: r.get(6)? }))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(v)
+}
+
+pub fn block_count(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM blocks", [], |r| r.get(0))?)
+}
+
+/// One page of the broadcast payouts of the pool (those with a transaction), newest first, and their number.
+pub fn payouts_page(conn: &Connection, offset: i64, limit: i64) -> Result<Vec<PayoutRow>> {
+    let mut st = conn.prepare("SELECT id, created_at, txid, status, total FROM payouts WHERE txid IS NOT NULL ORDER BY id DESC LIMIT ?1 OFFSET ?2")?;
+    let v = st.query_map(params![limit, offset], |r| Ok(PayoutRow { id: r.get(0)?, created_at: r.get(1)?, txid: r.get(2)?, status: r.get(3)?, amount: r.get(4)? }))?.collect::<std::result::Result<_, _>>()?;
+    Ok(v)
+}
+
+pub fn payout_count(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM payouts WHERE txid IS NOT NULL", [], |r| r.get(0))?)
+}
+
 pub struct PayoutRow {
     pub id: i64,
     pub created_at: i64,
@@ -347,11 +371,16 @@ pub struct CreditRow {
 
 /// PPLNS credits of an account per block, newest first.
 pub fn account_credits(conn: &Connection, account: &str, limit: i64) -> Result<Vec<CreditRow>> {
+    account_credits_page(conn, account, 0, limit)
+}
+
+/// One page of the open credits of an account (not yet paid), newest block first, and their number.
+pub fn account_credits_page(conn: &Connection, account: &str, offset: i64, limit: i64) -> Result<Vec<CreditRow>> {
     let mut st = conn.prepare(
-        "SELECT b.height, c.block_hash, c.amount, c.status, b.status FROM credits c JOIN blocks b ON b.hash = c.block_hash WHERE c.account = ?1 ORDER BY b.height DESC LIMIT ?2",
+        "SELECT b.height, c.block_hash, c.amount, c.status, b.status FROM credits c JOIN blocks b ON b.hash = c.block_hash WHERE c.account = ?1 ORDER BY b.height DESC LIMIT ?2 OFFSET ?3",
     )?;
     let v = st
-        .query_map(params![account, limit], |r| Ok(CreditRow { height: r.get(0)?, hash: r.get(1)?, amount: r.get(2)?, status: r.get(3)?, block_status: r.get(4)? }))?
+        .query_map(params![account, limit, offset], |r| Ok(CreditRow { height: r.get(0)?, hash: r.get(1)?, amount: r.get(2)?, status: r.get(3)?, block_status: r.get(4)? }))?
         .collect::<std::result::Result<_, _>>()?;
     Ok(v)
 }
@@ -367,6 +396,10 @@ pub fn account_blocks_page(conn: &Connection, account: &str, offset: i64, limit:
         .query_map(params![account, limit, offset], |r| Ok(BlockRow { hash: r.get(0)?, height: r.get(1)?, account: r.get(2)?, worker: r.get(3)?, mode: r.get(4)?, status: r.get(5)?, found_at: r.get(6)? }))?
         .collect::<std::result::Result<_, _>>()?;
     Ok(v)
+}
+
+pub fn account_credit_count(conn: &Connection, account: &str) -> Result<i64> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM credits WHERE account = ?1", params![account], |r| r.get(0))?)
 }
 
 /// Totals over all blocks of an account: (count, per mode, per status).

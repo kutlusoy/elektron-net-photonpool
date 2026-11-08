@@ -3,6 +3,7 @@
 ## 0.2.0-rc1 (release candidate for the first mainnet test)
 
 Pool (`photond`)
+- Pagination for every list that grows: miner page (pending credits, payouts, blocks found, workers), pool page (blocks, payouts, devices) and operator page (miners, blocks), 20 rows per page with a bar `1-20 of 137  ‹ newer  older ›`. New data: `creditsTotal` and `/public/v1/account/<address>/credits`, `blocksTotal` and `payoutsTotal` in `/public/v1/pool`, `offset` for `/public/v1/blocks` and `/payouts`.
 - Miner page: all blocks found and all payouts of an address, page by page (`‹ newer` / `older ›`, 20 per page); the account view carries the first page and the totals (`blocksTotal`, `blocksByMode`, `blocksByStatus`, `payoutsTotal`, `payoutsSum`), further pages come from `/public/v1/account/<address>/blocks` and `/payouts` (`offset`, `limit` up to 100). The pending list shows up to 150 credits. Test: `test/step36_account_pages.py`.
 - Registry: the log now also says when an explorer accepted a report (`registry: block <hash> reported to <explorer>: attributed`).
 - Engine view: block announcements that arrive together (the same block found in two modes, several blocks at once) stack under each other instead of overlapping.
