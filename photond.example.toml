@@ -93,6 +93,11 @@ adaptive_min_interval_ms = 50
 # no extranonce2 space, which showed up as duplicate shares and shares for jobs the pool no longer knew. Large ASICs should not get this: they flush their pipeline on a clean job.
 # Options: list of words; "*" matches every miner; [] switches it off. Default ["bitaxe", "esp-miner"].
 clean_work_agents = ["bitaxe", "esp-miner"]
+# Miners whose user agent contains one of these words, case-insensitive, receive a non-empty extranonce1 (a label of the connection) in the subscribe answer, because
+# their firmware aborts on an empty one (NerdMiner: "Work aborted"). The label is never part of the coinbase and extranonce2_size stays 0; the firmware has to skip
+# both when the size is 0 (the NerdMiner fork of this project does).
+# Options: list of words; [] sends an empty extranonce1 to everybody. Default ["nerdminer", "han_solominer"].
+label_extranonce_agents = ["nerdminer", "han_solominer"]
 # Miner user name must be "<address>.<worker>" with a valid address of the network.
 # Options: true (default) | false (any user name is accepted; solo mode always needs an address).
 require_address = true

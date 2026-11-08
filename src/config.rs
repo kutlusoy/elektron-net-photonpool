@@ -324,6 +324,10 @@ pub struct StratumCfg {
     /// Miners whose user agent contains one of these words (case-insensitive) get every fresh job marked clean. "*" matches every miner.
     #[serde(default = "d_s_clean_agents")]
     pub clean_work_agents: Vec<String>,
+    /// Miners whose user agent contains one of these words (case-insensitive) get a non-empty extranonce1 in the subscribe answer. Some hobby firmware aborts on an empty one;
+    /// the value is a plain label for the connection and never part of the coinbase (extranonce2_size stays 0).
+    #[serde(default = "d_s_label_agents")]
+    pub label_extranonce_agents: Vec<String>,
     /// Learn the job interval of every connection from its duplicate and stale shares: faster when the miner repeats work, slower again when it does not.
     #[serde(default = "d_true")]
     pub adaptive_jobs: bool,
@@ -367,6 +371,7 @@ fn d_s_max_job() -> u64 { 30_000 }
 fn d_s_space() -> u32 { 5 }
 fn d_min_cand() -> usize { 16 }
 fn d_s_adapt_floor() -> u64 { 50 }
+fn d_s_label_agents() -> Vec<String> { vec!["nerdminer".into(), "han_solominer".into()] }
 fn d_s_clean_agents() -> Vec<String> { vec!["bitaxe".into(), "esp-miner".into()] }
 
 fn d_poll() -> u64 { 100 }
@@ -599,7 +604,7 @@ mod tests {
             ($($($a:ident).+),+ $(,)?) => { $( assert_eq!(format!("{:?}", example.$($a).+), format!("{:?}", d.$($a).+), stringify!($($a).+)); )+ };
         }
         same!(node.poll_ms, pool.refresh_secs, pool.spot_check, pool.backend, pool.autoscale_candidates, pool.min_candidates);
-        same!(stratum.enabled, stratum.listen, stratum.initial_difficulty, stratum.min_difficulty, stratum.max_difficulty, stratum.share_secs, stratum.max_connections, stratum.idle_secs, stratum.min_job_interval_ms, stratum.max_jobs_per_sec, stratum.max_job_interval_ms, stratum.version_space_bits, stratum.clean_work_agents, stratum.adaptive_jobs, stratum.adaptive_min_interval_ms, stratum.require_address);
+        same!(stratum.enabled, stratum.listen, stratum.initial_difficulty, stratum.min_difficulty, stratum.max_difficulty, stratum.share_secs, stratum.max_connections, stratum.idle_secs, stratum.min_job_interval_ms, stratum.max_jobs_per_sec, stratum.max_job_interval_ms, stratum.version_space_bits, stratum.clean_work_agents, stratum.label_extranonce_agents, stratum.adaptive_jobs, stratum.adaptive_min_interval_ms, stratum.require_address);
         same!(payout.default_mode, payout.modes, payout.min_payout_leptons, payout.max_solo_accounts, payout.dry_run, payout.interval_secs, payout.wallet, payout.wallet_addresses, payout.wallet_passphrase_env, payout.maturity_poll_secs, payout.max_outputs_per_tx, payout.fee_rate, payout.fee_from_explorer, payout.fee_rate_fallback);
         same!(payout.fee_pct.pplns, payout.fee_pct.pps, payout.pplns.window_factor, payout.pps.enabled, payout.pps.reserve_min, payout.pps.max_hashrate_share);
         same!(registry.enabled, registry.url, registry.name);

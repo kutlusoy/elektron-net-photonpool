@@ -136,7 +136,7 @@ Observation: the memory of the process stays at its peak after the miners left (
 
 - No accounting, payout or persistence yet; shares are only counted.
 - Not tested on real ASIC or firmware: acceptance of `extranonce2_size = 0` with an empty `extranonce1`, the job rate for fast devices, nTime rolling behaviour.
-- Hobby firmware that rejects an empty `extranonce1` is not supported (the legacy pool has a special mode for it).
+- Hobby firmware that aborts on an empty `extranonce1` (NerdMiner) gets a non-empty label instead (`[stratum] label_extranonce_agents`, default `nerdminer` and `han_solominer`); `extranonce2_size` stays 0 and the label is not coinbase material. The firmware has to skip it when the size is 0 (the NerdMiner fork of this project does, see its `doc-elektron/fix-report-utxo-attestation-extranonce-splice.md`). Test: `test/step37_nerdminer_handshake.py`.
 - Vardiff has only been exercised with synthetic traffic.
 - No TLS, no per-IP limits.
 

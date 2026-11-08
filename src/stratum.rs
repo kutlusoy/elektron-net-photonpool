@@ -103,6 +103,7 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
         let (pool, cfg, port) = (pool.clone(), cfg.clone(), port.clone());
         tokio::spawn(async move {
             let _permit = permit;
+            let started = Instant::now();
             let id = pool.session_seq.fetch_add(1, Ordering::Relaxed) + 1;
             NET.accepted.fetch_add(1, Ordering::Relaxed);
             pool.conns.fetch_add(1, Ordering::Relaxed);
@@ -116,7 +117,13 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
             NET.bytes_in.fetch_add(stats_end.net_in.load(Ordering::Relaxed), Ordering::Relaxed);
             NET.bytes_out.fetch_add(stats_end.net_out.load(Ordering::Relaxed), Ordering::Relaxed);
             NET.jobs.fetch_add(stats_end.net_jobs.load(Ordering::Relaxed), Ordering::Relaxed);
-            if let Err(e) = res {
+            let shares = stats_end.ok.load(Ordering::Relaxed) + stats_end.stale.load(Ordering::Relaxed) + stats_end.inv.load(Ordering::Relaxed) + stats_end.dup.load(Ordering::Relaxed);
+            let (secs, agent) = (started.elapsed().as_secs(), stats_end.agent.lock().unwrap().clone());
+            let why = match &res { Ok(()) => "closed by the miner".to_string(), Err(e) => e.to_string() };
+            if shares == 0 && secs >= 1 {
+                // a miner that connected and never sent a share: the usual sign of a handshake that the firmware did not accept
+                tracing::info!("session {id} {peer} [{}] ended without a share after {secs}s: {why}", if agent.is_empty() { "no user agent" } else { agent.as_str() });
+            } else if let Err(e) = res {
                 tracing::debug!("session {id} {peer} closed: {e}");
             }
         });
@@ -304,6 +311,7 @@ impl Session {
                 self.subscribed = true;
                 let agent = crate::devices::clean_agent(req.params.get(0).and_then(Value::as_str).unwrap_or(""));
                 self.agent_clean = agent_wants_clean(&self.cfg.clean_work_agents, &agent);
+                let label = if agent_wants_clean(&self.cfg.label_extranonce_agents, &agent) { format!("{:08x}", self.id) } else { String::new() };
                 let dev = crate::devices::classify(&agent);
                 // What the pool knows about this kind of device: what it learned from earlier connections (after a few observations), else a typical value
                 // of the chip. It sets the first share difficulty (about one share per share_secs), the job pace and whether jobs are clean; everything is
@@ -326,7 +334,7 @@ impl Session {
                 }
                 *self.stats.device.lock().unwrap() = (dev.key, dev.name);
                 *self.stats.agent.lock().unwrap() = agent;
-                self.reply(wr, &id, &format!("[[[\"mining.notify\",\"{:x}\"]],\"\",0]", self.id), "null").await?;
+                self.reply(wr, &id, &format!("[[[\"mining.notify\",\"{:x}\"]],\"{label}\",0]", self.id), "null").await?;
                 self.maybe_start(wr).await
             }
             "mining.configure" => self.configure(wr, &id, &req.params).await,
@@ -373,6 +381,7 @@ impl Session {
         let valid = !account.is_empty() && (!self.cfg.require_address || script_for_address(account, hrp).is_ok());
         if !valid || worker.len() > 64 {
             self.bad += 1;
+            tracing::info!("session {}: authorization refused, the user name must be <address>.<worker> with a valid address (got {:?})", self.id, user.chars().take(24).collect::<String>());
             if self.bad > 10 {
                 bail!("too many failed authorizations");
             }

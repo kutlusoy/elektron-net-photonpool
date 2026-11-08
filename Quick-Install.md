@@ -206,6 +206,16 @@ The pool talks to the node with one RPC user. Everything the pool calls is liste
 | Miners connect but get no job | No epoch yet: the node is syncing or unreachable. Check `docker compose logs photond`. |
 | Too many open files | Raise `LimitNOFILE` (systemd) or `ulimit -n`. |
 
+### 8a. Reading the pool log
+
+```bash
+docker compose logs -f photond                      # live, Ctrl+C to leave
+docker compose logs --since 30m photond | grep -i "error\|warn\|refused\|ended without"   # problems of the last half hour
+RUST_LOG=photond=debug                               # more detail: set it under environment: of photond in docker-compose.yml, then docker compose up -d
+```
+
+Lines worth knowing: `ERROR` (a payout or a block failed, the text says why), `WARN` (something was skipped, for example the registry could not be read), `session N <ip> [<user agent>] ended without a share after Ns: <reason>` (a miner connected and never delivered a share: wrong firmware handshake, wrong settings or a firewall), `authorization refused, the user name must be <address>.<worker>` (the miner has no valid payout address as user name), `BLOCK FOUND`, `payout N: M accounts, tx ...` and `registry: ...`. A miner that works shows up on the pool page under Devices and on the miner page of its address within a minute.
+
 ## 9. Checklist
 
 - [ ] Node synchronized, RPC not exposed.
