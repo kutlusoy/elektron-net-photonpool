@@ -69,6 +69,7 @@ struct St {
 #[derive(Deserialize)]
 struct Limit {
     limit: Option<usize>,
+    offset: Option<usize>,
 }
 
 fn data_routes() -> Router<St> {
@@ -81,6 +82,7 @@ fn data_routes() -> Router<St> {
         .route("/public/v1/history", get(|State(s): State<St>, Query(q): Query<crate::api::RangeQ>| async move { Json(crate::api::history_view(&s.pool, q.range.as_deref().unwrap_or("24h")).await) }))
         .route("/public/v1/account/:address", get(account))
         .route("/public/v1/account/:address/blocks", get(|State(s): State<St>, Path(a): Path<String>, Query(q): Query<PageQ>| async move { page(s, a, "blocks", q).await }))
+        .route("/public/v1/account/:address/credits", get(|State(s): State<St>, Path(a): Path<String>, Query(q): Query<PageQ>| async move { page(s, a, "credits", q).await }))
         .route("/public/v1/account/:address/payouts", get(|State(s): State<St>, Path(a): Path<String>, Query(q): Query<PageQ>| async move { page(s, a, "payouts", q).await }))
         .route("/public/v1/engine", get(|State(s): State<St>| async move { Json(crate::api::summary_value(&s.pool, true)) }))
         .route("/public/v1/events", get(public_events))
@@ -203,7 +205,7 @@ async fn pool_view(State(st): State<St>) -> Json<Value> {
         None => (0, String::new(), unix_now(), 0.0),
     };
     let day_ago = unix_now() as i64 - 86_400;
-    let (found24h, by_status) = p.ledger.call(move |c| Ok((ledger::blocks_since(c, day_ago)?, ledger::blocks_by_status(c)?))).await.unwrap_or_default();
+    let (found24h, by_status, block_total, payout_total) = p.ledger.call(move |c| Ok((ledger::blocks_since(c, day_ago)?, ledger::blocks_by_status(c)?, ledger::block_count(c)?, ledger::payout_count(c)?))).await.unwrap_or_default();
     let (hashrate, workers, online) = {
         let l = p.live.lock().unwrap();
         (json!({"now": l.hashrate, "m1": l.m1, "h1": l.h1, "hist": l.hist.iter().copied().collect::<Vec<_>>()}), l.total, l.online)
@@ -218,6 +220,7 @@ async fn pool_view(State(st): State<St>) -> Json<Value> {
         "name": p.cfg.public.name, "version": crate::version::POOL, "release": crate::version::release(), "network": p.cfg.pool.network, "explorerUrl": p.cfg.api.explorer_url,
         "uptime": p.started.elapsed().as_secs_f64(),
         "stratum": {"host": p.cfg.public.stratum_host, "ports": ports},
+        "blocksTotal": block_total, "payoutsTotal": payout_total,
         "payout": {"dryRun": p.cfg.payout.dry_run, "wallet": p.wallet.is_some(), "intervalSecs": p.cfg.payout.interval_secs, "nextRunAt": p.next_payout_at.load(Ordering::Relaxed), "lastRunAt": p.last_payout_at.load(Ordering::Relaxed)},
         "modes": modes, "minPayoutLeptons": p.cfg.payout.min_payout_leptons, "pplnsWindowFactor": p.cfg.payout.pplns.window_factor,
         "hashrate": hashrate, "miners": {"online": online, "workers": workers},
@@ -229,8 +232,8 @@ async fn pool_view(State(st): State<St>) -> Json<Value> {
 
 async fn blocks(State(st): State<St>, Query(q): Query<Limit>) -> Json<Value> {
     let p = &st.pool;
-    let n = q.limit.unwrap_or(12).min(50) as i64;
-    let rows = p.ledger.call(move |c| ledger::recent_blocks(c, n)).await.unwrap_or_default();
+    let (n, off) = (q.limit.unwrap_or(12).min(50) as i64, q.offset.unwrap_or(0).min(10_000_000) as i64);
+    let rows = p.ledger.call(move |c| ledger::blocks_page(c, off, n)).await.unwrap_or_default();
     let base = &p.cfg.api.explorer_url;
     Json(Value::Array(
         rows.into_iter()
@@ -246,9 +249,9 @@ async fn blocks(State(st): State<St>, Query(q): Query<Limit>) -> Json<Value> {
 }
 
 async fn payouts(State(st): State<St>, Query(q): Query<Limit>) -> Json<Value> {
-    let n = q.limit.unwrap_or(10).min(50) as i64;
-    let rows = st.pool.ledger.call(move |c| ledger::recent_payouts(c, n)).await.unwrap_or_default();
-    Json(Value::Array(rows.into_iter().filter(|r| r.txid.is_some()).map(|r| json!({"time": r.created_at, "txid": r.txid, "amount": r.amount, "status": r.status})).collect()))
+    let (n, off) = (q.limit.unwrap_or(10).min(50) as i64, q.offset.unwrap_or(0).min(10_000_000) as i64);
+    let rows = st.pool.ledger.call(move |c| ledger::payouts_page(c, off, n)).await.unwrap_or_default();
+    Json(Value::Array(rows.into_iter().map(|r| json!({"time": r.created_at, "txid": r.txid, "amount": r.amount, "status": r.status})).collect()))
 }
 
 #[derive(serde::Deserialize)]

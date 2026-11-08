@@ -22,7 +22,8 @@ const TEMPLATE = `<div class="statusline" id="statusline" role="status" aria-liv
   </main>`;
 
 const modeLabel = { solo: 'SOLO', pplns: 'PPLNS', pps: 'PPS' };
-const M = { addr: '', acct: null, pool: null, demo: false, timer: null, pg: { found: { off: 0, items: null }, pay: { off: 0, items: null } } };
+const freshPg = () => ({ found: { off: 0, items: null }, pay: { off: 0, items: null }, pend: { off: 0, items: null } });
+const M = { addr: '', acct: null, pool: null, demo: false, timer: null, pg: freshPg() };
 const PAGE = 20;
 
 /* ---------- data ---------- */
@@ -52,20 +53,24 @@ function demoData(addr) {
 }
 
 /* blocks found and payouts: the first page comes with the account, further pages are fetched on demand */
-const pageOf = (kind) => { const g = M.pg[kind]; const a = M.acct; const first = kind === 'found' ? a.blocksFound : a.payouts; return { items: g.items || first, off: g.off, total: (kind === 'found' ? a.blocksTotal : a.payoutsTotal) ?? first.length }; };
+const PATHS = { found: 'blocks', pay: 'payouts', pend: 'credits' };
+const pageOf = (kind) => {
+  const g = M.pg[kind], a = M.acct;
+  const first = kind === 'found' ? a.blocksFound : kind === 'pay' ? a.payouts : a.credits;
+  const total = (kind === 'found' ? a.blocksTotal : kind === 'pay' ? a.payoutsTotal : a.creditsTotal) ?? first.length;
+  return { items: g.items || first, off: g.off, total };
+};
 function pager(kind) {
   const { items, off, total } = pageOf(kind);
-  if (total <= PAGE) return [];
-  const btn = (d, label, on) => (on ? `<a class="pgb" href="#" data-pg="${kind}" data-d="${d}">${label}</a>` : span('dim', label));
-  return ['', `${span('dim', `${num(off + 1)}-${num(off + items.length)} of ${num(total)}  `)}${btn(-1, '\u2039 newer', off > 0)}  ${btn(1, 'older \u203a', off + PAGE < total)}`];
+  return total <= PAGE ? [] : ['', pagerBar(`data-pg="${kind}"`, off, items.length, total, PAGE)];
 }
 document.addEventListener('click', async (e) => {
-  const b = e.target.closest && e.target.closest('.pgb'); if (!b || !M.acct) return;
+  const b = e.target.closest && e.target.closest('.pgb[data-pg]'); if (!b || !M.acct) return;
   e.preventDefault();
   const kind = b.dataset.pg, g = M.pg[kind], off = Math.max(0, g.off + (+b.dataset.d) * PAGE);
   if (off === 0) { g.off = 0; g.items = null; render(); return; }
   try {
-    const r = await getJson('/public/v1/account/' + encodeURIComponent(M.addr) + '/' + (kind === 'found' ? 'blocks' : 'payouts') + '?offset=' + off + '&limit=' + PAGE);
+    const r = await getJson('/public/v1/account/' + encodeURIComponent(M.addr) + '/' + PATHS[kind] + '?offset=' + off + '&limit=' + PAGE);
     if (r.items.length) { g.off = off; g.items = r.items; }
     render();
   } catch (_) { /* keep the page that is shown */ }
@@ -75,7 +80,7 @@ async function load() {
   if (!M.addr) return;
   if (M.demo) { const d = demoData(M.addr); M.acct = d.acct; M.pool = d.pool; return; }
   const [acct, pool] = await Promise.all([getJson('/public/v1/account/' + encodeURIComponent(M.addr)), M.pool ? Promise.resolve(M.pool) : getJson('/public/v1/pool')]);
-  if (M.acct && M.acct.address !== acct.address) M.pg = { found: { off: 0, items: null }, pay: { off: 0, items: null } };
+  if (M.acct && M.acct.address !== acct.address) M.pg = freshPg();
   M.acct = acct;
   M.pool = pool;
 }
@@ -138,15 +143,16 @@ function render() {
     `${span('dim', 'shares 24h  ')}${esc(sh(a.shares24h))}`,
   ].join('\n');
   const wwk = colw(a.workerList.map((w) => w.name), 6);
+  const pw = pageRows('workers', sortRows('workers', a.workerList, { name: (w) => w.name, mode: (w) => w.mode, hashrate: (w) => w.hashrate, difficulty: (w) => w.difficulty, accepted: (w) => w.accepted, stale: (w) => w.stale, invalid: (w) => w.invalid, seen: (w) => w.seen }, 'hashrate'), 20);
   $('#pane-workers').innerHTML = [`<span class="row-h">${hdr('workers', [['name', 'WORKER', wide('workers') ? wwk : 16, false, 1], ['mode', 'MODE', 7, false, 1], ['hashrate', 'HASHRATE', 12, true], ['difficulty', 'DIFF', 9, true], ['accepted', 'OK', 8, true], ['stale', 'STALE', 7, true], ['invalid', 'BAD', 5, true]], 'hashrate')}  ${hdr('workers', [['seen', 'LAST', 6, false, 1]], 'hashrate')}</span>`]
-    .concat(sortRows('workers', a.workerList, { name: (w) => w.name, mode: (w) => w.mode, hashrate: (w) => w.hashrate, difficulty: (w) => w.difficulty, accepted: (w) => w.accepted, stale: (w) => w.stale, invalid: (w) => w.invalid, seen: (w) => w.seen }, 'hashrate').map((w) => `${wide('workers') ? pad(w.name, wwk) : pad(trunc(w.name, 15), 16)}${span('c2', pad(modeLabel[w.mode] || w.mode, 7))}${lpad(fmtHash(w.hashrate), 12)}${lpad(num(w.difficulty), 9)}${lpad(num(w.accepted), 8)}${span(w.stale > 0 ? 'warn' : 'dim', lpad(num(w.stale), 7))}${lpad(num(w.invalid), 5)}  ${w.seen < 120 ? span('ok', w.seen + 's') : span('dim', ago(Date.now() / 1000 - w.seen))}`))
-    .concat(a.workerList.length ? [] : [span('dim', 'no worker is connected right now')]).join('\n');
+    .concat(pw.rows.map((w) => `${wide('workers') ? pad(w.name, wwk) : pad(trunc(w.name, 15), 16)}${span('c2', pad(modeLabel[w.mode] || w.mode, 7))}${lpad(fmtHash(w.hashrate), 12)}${lpad(num(w.difficulty), 9)}${lpad(num(w.accepted), 8)}${span(w.stale > 0 ? 'warn' : 'dim', lpad(num(w.stale), 7))}${lpad(num(w.invalid), 5)}  ${w.seen < 120 ? span('ok', w.seen + 's') : span('dim', ago(Date.now() / 1000 - w.seen))}`))
+    .concat(a.workerList.length ? pw.bar : [span('dim', 'no worker is connected right now')]).join('\n');
   $('#pane-pend').innerHTML = [span('row-h', pad('BLOCK', 9) + pad('AMOUNT', 14) + 'STATE')]
-    .concat(a.credits.map((c) => {
+    .concat(pageOf('pend').items.map((c) => {
       const st = c.status === 'pending' ? span('c3', `matures in ${c.maturesIn}`) : c.status === 'confirmed' ? span('ok', 'payable') : span('err', c.status);
       return `${linkPad(c.url, num(c.height), 9)}${pad(coins(c.amount), 14)}${st}`;
     }))
-    .concat(a.credits.length ? [] : [span('dim', 'no PPLNS credits yet')]).join('\n');
+    .concat(a.credits.length ? pager('pend') : [span('dim', 'no PPLNS credits yet')]).join('\n');
   $('#pane-pay').innerHTML = [`<span class="row-h">${hdr('pay', [['time', 'AGE', 7], ['amount', 'AMOUNT', 14], ['txid', 'TX', 4, false, 1]], 'time')}</span>`]
     .concat(sortRows('pay', pageOf('pay').items, { time: (x) => x.time, amount: (x) => x.amount, txid: (x) => x.txid || '' }, 'time').map((x) => `${pad(ago(x.time), 7)}${pad(coins(x.amount), 14)}${link(txUrl(explorer, x.txid), wide('pay') ? (x.txid || 'pending') : short(x.txid || 'pending', 6, 4), 'c1')}`))
     .concat(a.payouts.length ? pager('pay') : [span('dim', 'nothing paid out yet')]).join('\n');
@@ -224,7 +230,7 @@ function out(html) {
 
 async function setAddress(addr) {
   M.addr = addr.trim();
-  M.acct = null; M.pg = { found: { off: 0, items: null }, pay: { off: 0, items: null } };
+  M.acct = null; M.pg = freshPg();
   try { localStorage.setItem('photon-miner-address', M.addr); } catch (_) { /* storage unavailable */ }
   history.replaceState(null, '', '/miner/' + encodeURIComponent(M.addr));
   try { await load(); out(span('ok', 'loaded ' + maskAddr(M.addr))); } catch (e) { out(span('err', e.message)); }

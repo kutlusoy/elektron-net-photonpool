@@ -30,6 +30,14 @@ async def main(h, pool, cfg):
     h.check("together they are all blocks, newest first, without a gap or a repeat", len(set(heights)) == N and heights == sorted(heights, reverse=True) and heights[0] - heights[-1] == N - 1, str(heights[:3]))
     h.check("the first page equals the blocks of the account view", [b["hash"] for b in p0["items"]] == [b["hash"] for b in v["blocksFound"]])
     h.check("a page after the end is empty and reports the total", pub(f"/public/v1/account/{A}/blocks?offset=100")["items"] == [] and pub(f"/public/v1/account/{A}/blocks?offset=100")["total"] == N)
+    h.check("the credits are counted and paged like the blocks", v["creditsTotal"] == N and len(v["credits"]) == 20 and len(pub(f"/public/v1/account/{A}/credits?offset=40")["items"]) == 5 and pub(f"/public/v1/account/{A}/credits?offset=20")["total"] == N, str(v["creditsTotal"]))
+    cr = [c["height"] for off in (0, 20, 40) for c in pub(f"/public/v1/account/{A}/credits?offset={off}")["items"]]
+    h.check("all credits together: every block once, newest first, with the blocks to mature", len(set(cr)) == N and cr == sorted(cr, reverse=True) and pub(f"/public/v1/account/{A}/credits")["items"][0]["maturesIn"] > 0)
+    pv = pub("/public/v1/pool")
+    h.check("the pool reports the totals of blocks and payouts", pv["blocksTotal"] == N and pv["payoutsTotal"] == 0, f'{pv["blocksTotal"]} {pv["payoutsTotal"]}')
+    pb = [len(pub(f"/public/v1/blocks?offset={o}&limit=20")) for o in (0, 20, 40, 60)]
+    h.check("the pool's blocks come in pages (20, 20, 5, 0)", pb == [20, 20, 5, 0], str(pb))
+    h.check("the pool's pages do not overlap", len({b["hash"] for o in (0, 20, 40) for b in pub(f"/public/v1/blocks?offset={o}&limit=20")}) == N)
     h.check("the page size is limited to 100", len(pub(f"/public/v1/account/{A}/blocks?limit=100000")["items"]) == N)
     h.check("an invalid address is a 400", status("/public/v1/account/nope/blocks") == 400 and status("/public/v1/account/nope/payouts") == 400)
     n.rpc("generatetodescriptor", 101, "raw(51)")
@@ -43,6 +51,8 @@ async def main(h, pool, cfg):
         if not pg["items"]: break
         items += pg["items"]; off += 2
     h.check("paging through the payouts with 2 per page finds all of them", len(items) == v["payoutsTotal"] and sum(x["amount"] for x in items) == v["payoutsSum"], f"{len(items)} of {v['payoutsTotal']}")
+    pp = [x["time"] for o in range(0, v["payoutsTotal"], 1) for x in pub(f"/public/v1/payouts?offset={o}&limit=1")]
+    h.check("the pool's payouts can be paged one by one", len(pp) == v["payoutsTotal"] == pub("/public/v1/pool")["payoutsTotal"], f"{len(pp)}")
     pool.stop()
 
 _orig = write_cfg

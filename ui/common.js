@@ -165,3 +165,25 @@ function payoutLine(po) {
   if (po.dryRun) return 'dry run: payouts are calculated but nothing is sent';
   return 'payout run every ' + everyText(po.intervalSecs) + (po.nextRunAt ? ', next in ' + until(po.nextRunAt) : '');
 }
+
+
+/* pagination for lists that grow: a bar "1-20 of 137  < newer  older >"; pageRows() pages a list that is already loaded, the views fetch further pages of
+   the long server lists themselves and use pagerBar() for the bar */
+function pagerBar(attrs, off, shown, total, size) {
+  const btn = (d, label, on) => (on ? `<a class="pgb" href="#" ${attrs} data-d="${d}">${label}</a>` : span('dim', label));
+  return `${span('dim', `${num(off + 1)}-${num(off + shown)} of ${num(total)}  `)}${btn(-1, '\u2039 newer', off > 0)}  ${btn(1, 'older \u203a', off + size < total)}`;
+}
+const PgState = {};
+function pageRows(id, rows, size) {
+  const s = PgState[id] || (PgState[id] = { off: 0 });
+  if (s.off >= rows.length) s.off = Math.max(0, Math.floor((rows.length - 1) / size) * size);
+  const part = rows.slice(s.off, s.off + size);
+  return { rows: part, off: s.off, bar: rows.length > size ? ['', pagerBar(`data-pgid="${id}" data-size="${size}"`, s.off, part.length, rows.length, size)] : [] };
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('.pgb[data-pgid]'); if (!b) return;
+  e.preventDefault();
+  const s = PgState[b.dataset.pgid] || (PgState[b.dataset.pgid] = { off: 0 });
+  s.off = Math.max(0, s.off + (+b.dataset.d) * (+b.dataset.size));
+  document.dispatchEvent(new Event('depthchange'));
+});
