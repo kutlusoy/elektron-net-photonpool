@@ -55,6 +55,15 @@ PORT_PPS=3335
 # Options: port number, or empty (off).
 PORT_SOLO=
 
+# --- Miner firmware (which mode a miner gets, by the words in its user agent, case-insensitive) ---
+# Firmware of the cgminer family refuses extranonce2_size 0, so these agents get extranonce space (8 bytes behind the attestation hash in the coinbase). Others start with
+# header only mining (size 0) and are switched automatically when their connections keep ending without a share. Options: comma separated words, empty = nobody.
+EXTRANONCE_AGENTS=cgminer,bmminer,antminer,whatsminer,btminer,bfgminer,sgminer,cpuminer,avalon,bosminer,braiins,vnish
+# These agents get a non-empty extranonce1 label (their firmware aborts on an empty one), size stays 0. Options: comma separated words, empty = nobody.
+LABEL_EXTRANONCE_AGENTS=nerdminer,han_solominer
+# These agents get every fresh job marked clean (Bitaxe keeps older jobs queued otherwise). Options: comma separated words, * = every miner, empty = nobody.
+CLEAN_WORK_AGENTS=bitaxe,esp-miner
+
 # --- Payout modes ---
 # DRY_RUN=true only logs what would be paid. Set it to false after you have seen plausible payouts in the log.
 # Options: true (default) | false.
