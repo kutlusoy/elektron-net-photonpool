@@ -28,6 +28,9 @@ struct Args {
     /// After the tip fan-out keep counting jobs and bytes for this many seconds (steady-state load).
     #[arg(long, default_value_t = 0)]
     steady_secs: u64,
+    /// Send an extranonce2 of 4 bytes with every share (a miner in extranonce mode, for example agent "bmminer/2.0.0").
+    #[arg(long, default_value_t = false)]
+    en2: bool,
 }
 
 #[derive(Default)]
@@ -94,7 +97,7 @@ async fn conn(i: usize, a: Arc<Args>, sh: Arc<Shared>) {
             }
             _ = tick.tick(), if up && a.share_rate > 0.0 => {
                 seq += 1;
-                let m = format!("{{\"id\":{},\"method\":\"mining.submit\",\"params\":[\"{}.lt{i}\",\"{job_id}\",\"\",\"{:08x}\",\"{:08x}\",\"00000000\"]}}\n", 100 + seq, a.account, 0x6000_0000u32, seq);
+                let m = format!("{{\"id\":{},\"method\":\"mining.submit\",\"params\":[\"{}.lt{i}\",\"{job_id}\",\"{}\",\"{:08x}\",\"{:08x}\",\"00000000\"]}}\n", 100 + seq, a.account, if a.en2 { "0000002a" } else { "" }, 0x6000_0000u32, seq);
                 if wr.write_all(m.as_bytes()).await.is_err() { break; }
             }
         }
