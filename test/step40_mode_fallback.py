@@ -48,10 +48,13 @@ async def main(h, pool, cfg):
     h.check("a miner whose authorization is refused stays in its mode", r[2] == 0, str(r))
     x.w.close()
     # a miner of the list that keeps leaving is switched to header only mining
-    for i in range(2):
+    for i in range(3):
         c, r = await subscribe("cgminer/9.9"); c.w.close(); await asyncio.sleep(0.5)
     c, res = await subscribe("cgminer/9.9")
-    h.check("an agent of the list that leaves twice without a share is tried with header only mining", res[2] == 0, str(res))
+    h.check("an agent of the list keeps extranonce space after three quick ends", res[2] == 4, str(res))
+    c.w.close(); await asyncio.sleep(0.5)
+    c, res = await subscribe("cgminer/9.9")
+    h.check("and is tried with header only mining after four", res[2] == 0, str(res))
     c.w.close()
     pool.stop()
 

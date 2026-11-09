@@ -9,6 +9,8 @@ API, STRATUM = 18981, 18333
 COUNTS = [int(x) for x in os.environ.get("CONNS", "1000,5000,15000").split(",")]
 ADDRS = int(os.environ.get("ADDRS", "64"))
 SHARE_RATE = os.environ.get("SHARE_RATE", "0")
+AGENT = os.environ.get("AGENT", "loadtest")   # for example bmminer/2.0.0 for miners in extranonce mode
+EN2 = ["--en2"] if os.environ.get("EN2") else []
 
 def prog(i): return hashlib.sha256(b"photon-test-key-%d" % i).digest()[:20]
 
@@ -60,7 +62,7 @@ with Harness("bench-stratum") as h:
         print(f"  info daemon ready with {ADDRS} candidates, rss {rss_mb(d.pid):.0f} MB")
         for n in COUNTS:
             lt = subprocess.Popen([os.path.join(TARGET, "loadtest"), "--addr", f"127.0.0.1:{STRATUM}", "--conns", str(n), "--account", account,
-                                   "--share-rate", SHARE_RATE, "--ramp-per-sec", "4000"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                                   "--share-rate", SHARE_RATE, "--ramp-per-sec", "4000", "--agent", AGENT] + EN2, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
             ready = json.loads(lt.stdout.readline())
             time.sleep(2)
             cpu0, t0c = cpu_s(d.pid), time.time()

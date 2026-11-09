@@ -110,6 +110,7 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
             let stats = Arc::new(SessionStats::new());
             pool.sessions.lock().unwrap().insert(id, stats.clone());
             let stats_end = stats.clone();
+            let cfg_for_end = cfg.clone();
             let res = Session::new(pool.clone(), cfg, port, stats, id, peer.ip()).run(stream).await;
             pool.sessions.lock().unwrap().remove(&id);
             NET.closed.fetch_add(1, Ordering::Relaxed);
@@ -122,7 +123,7 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
             let why = match &res { Ok(()) => "closed by the miner".to_string(), Err(e) => e.to_string() };
             // a session whose authorization was refused says nothing about the handshake mode
             let refused = stats_end.name.lock().unwrap().is_empty() && stats_end.trace.lock().unwrap().contains("authorize");
-            if let Some(en) = fb_record(peer.ip(), if refused { "" } else { &agent }, stats_end.en_mode.load(Ordering::Relaxed), shares, started.elapsed()) {
+            if let Some(en) = fb_record(peer.ip(), if refused { "" } else { &agent }, stats_end.en_mode.load(Ordering::Relaxed), agent_wants_clean(&cfg_for_end.extranonce_agents, &agent), shares, started.elapsed()) {
                 tracing::info!("{} [{agent}]: connections ended without a share, the next ones get {}", peer.ip(), if en { "extranonce space" } else { "header only mining" });
             }
             if shares == 0 && secs >= 1 {
@@ -248,7 +249,7 @@ fn fb_mode(ip: std::net::IpAddr, agent: &str) -> Option<bool> {
 }
 
 /// Record the end of a session; returns the new mode when this ended in a switch.
-fn fb_record(ip: std::net::IpAddr, agent: &str, used_en: bool, shares: u64, lived: Duration) -> Option<bool> {
+fn fb_record(ip: std::net::IpAddr, agent: &str, used_en: bool, listed: bool, shares: u64, lived: Duration) -> Option<bool> {
     if agent.is_empty() {
         return None;
     }
@@ -271,7 +272,9 @@ fn fb_record(ip: std::net::IpAddr, agent: &str, used_en: bool, shares: u64, live
         return None;
     }
     e.fails += 1;
-    if e.fails >= 2 && e.flips < 6 {
+    // an agent of the list that is in extranonce mode leaves a few more times before it is tried without: firmware of that family needs the space
+    let limit = if listed && used_en { 4 } else { 2 };
+    if e.fails >= limit && e.flips < 6 {
         e.fails = 0;
         e.flips += 1;
         e.en = Some(!used_en);
@@ -1124,19 +1127,24 @@ mod tests {
         let ip: std::net::IpAddr = "203.0.113.50".parse().unwrap();
         let quick = Duration::from_secs(2);
         assert_eq!(fb_mode(ip, "fbtest/1"), None);
-        assert_eq!(fb_record(ip, "fbtest/1", false, 0, quick), None, "one quick end is no reason yet");
-        assert_eq!(fb_record(ip, "fbtest/1", false, 0, quick), Some(true), "the second one switches to extranonce space");
+        assert_eq!(fb_record(ip, "fbtest/1", false, false, 0, quick), None, "one quick end is no reason yet");
+        assert_eq!(fb_record(ip, "fbtest/1", false, false, 0, quick), Some(true), "the second one switches to extranonce space");
         assert_eq!(fb_mode(ip, "fbtest/1"), Some(true));
-        assert_eq!(fb_record(ip, "fbtest/1", true, 5, Duration::from_secs(60)), None, "a share pins the mode that worked");
+        assert_eq!(fb_record(ip, "fbtest/1", true, false, 5, Duration::from_secs(60)), None, "a share pins the mode that worked");
         assert_eq!(fb_mode(ip, "fbtest/1"), Some(true));
         // a long session without a share does not count, nor does a session without a user agent
-        assert_eq!(fb_record(ip, "fbtest/2", false, 0, Duration::from_secs(120)), None);
-        assert_eq!(fb_record(ip, "fbtest/2", false, 0, Duration::from_secs(120)), None);
+        assert_eq!(fb_record(ip, "fbtest/2", false, false, 0, Duration::from_secs(120)), None);
+        assert_eq!(fb_record(ip, "fbtest/2", false, false, 0, Duration::from_secs(120)), None);
         assert_eq!(fb_mode(ip, "fbtest/2"), None);
-        assert_eq!(fb_record(ip, "", false, 0, quick), None);
+        assert_eq!(fb_record(ip, "", false, false, 0, quick), None);
         // another agent of the same address is not affected, and the switch can go back
         assert_eq!(fb_mode(ip, "fbtest/3"), None);
-        fb_record(ip, "fbtest/4", true, 0, quick);
-        assert_eq!(fb_record(ip, "fbtest/4", true, 0, quick), Some(false));
+        fb_record(ip, "fbtest/4", true, false, 0, quick);
+        assert_eq!(fb_record(ip, "fbtest/4", true, false, 0, quick), Some(false));
+        // an agent of the list in extranonce mode needs four quick ends before it is tried without
+        for _ in 0..3 {
+            assert_eq!(fb_record(ip, "fbtest/5", true, true, 0, quick), None);
+        }
+        assert_eq!(fb_record(ip, "fbtest/5", true, true, 0, quick), Some(false));
     }
 }
