@@ -156,3 +156,36 @@ Observation: the memory of the process stays at its peak after the miners left (
 1. Which firmware families reject `extranonce2_size = 0` or an empty `extranonce1`.
 2. Maximum job rate per device that stock firmware accepts without dropping work.
 3. Whether a compatibility mode for hobby firmware is wanted.
+
+
+## Firmware compatibility, read from the source of open source clients
+
+The pool answers `mining.subscribe` with `extranonce2_size = 0` (header only mining): the coinbase is fixed by the UTXO attestation, so a miner must not add extranonce bytes. The rules below are copied from the client source code (the firmware was not run); `test/step38_firmware_handshake_matrix.py` repeats them against the pool's real answer.
+
+| Client | Rule in its source | With size 0 |
+|---|---|---|
+| cgminer (`util.c`, `initiate_stratum`) | `n2size < 2 \|\| n2size > 16`: "Failed to get valid n2size" | refuses |
+| Bitmain bmminer, `bmminer-mix`, `braiins/bmminer`, `jameshilliard/bmminer` (Antminer stock lineage) | same check | refuses |
+| sgminer, bfgminer | `n2size < 1` | refuses |
+| cpuminer (pooler) | `!xn2_size`: "Failed to get extranonce2_size" | refuses |
+| ESP-Miner (Bitaxe) | `extranonce_2_len` clamped to 0..N | accepts |
+| NerdMiner, Elektron fork | aborts on an empty `extranonce1` only; the fork skips both extranonces when the size is 0 | accepts, with a non-empty `extranonce1` label |
+
+The four clients that refuse a size of 0 get extranonce space from the pool (next section, `extranonce_agents`), so they see a size of 4.
+
+Whatsminer (MicroBT) firmware is not public. What the pool log shows (a Whatsminer connects, subscribes and leaves after one or two seconds) fits the cgminer rule, but is no proof. `mining.extranonce.subscribe` (XNSUB) does not help: it only lets a pool change `extranonce1` without a reconnect and does not remove the extranonce2 space.
+
+## Extranonce mode for ASIC firmware
+
+Firmware derived from cgminer refuses `extranonce2_size = 0` and always puts extranonce1 + extranonce2 into the coinbase, so header only mining does not work for it. The pool therefore gives agents listed in `[stratum] extranonce_agents` (default: cgminer, bmminer, antminer, whatsminer, btminer, bfgminer, sgminer, cpuminer, avalon, bosminer, braiins, vnish) extranonce space without touching what the attestation commits to:
+
+- The attestation is computed over the coinbase **without** its attestation output (`StripAttestationOutput` in `validation.cpp`), and the checks that find that output (`IsCoinbaseUTXOAttestationOutput`, `ExtractCoinbaseUTXOAttestation`) read `OP_RETURN <height> <32 bytes>` and ignore what follows. Bytes behind the hash push inside this output therefore change the coinbase txid and the merkle root, but not the attestation.
+- The pool appends 8 bytes there (`EN1_BYTES` 4 + `EN2_BYTES` 4) and splits the coinbase in front of and behind them: `coinb1` ends behind the 32 byte hash, `coinb2` starts behind the 8 bytes. `mining.subscribe` answers `extranonce1` = a 4 byte label of the connection and `extranonce2_size = 4`.
+- A share is checked with the extranonce the miner submitted (`mining.submit` parameter 3): the pool builds the miner's coinbase, its merkle root and the header, and a block is submitted with exactly that coinbase (`Candidate::block_hex_en`). The attestation inside is the one the node computed for the candidate, valid for every value.
+- Checked on the node (regtest, patched and unpatched): the unmodified coinbase and coinbases with 8, 8 other and 16 bytes behind the hash are accepted; a flipped bit in the hash is rejected with `bad-utxo-attestation`. `test/step39_extranonce_mode_asic.py` mines three blocks through the pool with a client that follows the cgminer rules and different extranonce2 values; the node accepts all of them.
+
+Automatic fallback: the mode is decided by the agent list first. An address and user agent whose connections end without a share twice in a row within 15 seconds (a firmware that refuses the handshake leaves within a second or two) get the other mode on the next connection; a connection that delivers a share pins the mode that worked. Sessions whose authorization was refused do not count, the table is kept 30 minutes, holds at most 10,000 entries and switches at most six times per entry. A firmware that is in neither list therefore finds its mode by itself, and a miner that works is never switched. Test: `test/step40_mode_fallback.py`.
+
+What is not verified: real Antminer or Whatsminer firmware. The cgminer rules are copied from the sources (see the table above), the firmware itself was not run, and MicroBT's firmware is not public. The mode is switched by the agent name, so a firmware that is not in the list keeps header only mining.
+
+Side effect for explorers and tools: the attestation output script of such blocks is longer than 37 bytes (45 bytes in total behind the push). Consensus does not care. A tool that expects an exact length for this output would not recognize it.

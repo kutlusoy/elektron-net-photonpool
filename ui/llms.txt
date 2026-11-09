@@ -40,6 +40,8 @@ Public, read-only JSON, no key needed (rate limited). Miner addresses are masked
 
 ## How to mine
 
+Works today: Bitaxe (ESP-Miner) and NerdMiner (Elektron fork) with header only mining (`extranonce2_size = 0`). Firmware of the cgminer family (Antminer, Whatsminer, Avalon, cgminer, cpuminer) refuses a size of 0, so the pool gives it extranonce space: 8 bytes behind the attestation hash inside the attestation output of the coinbase, where the node ignores them (new, tested with a client that follows the cgminer rules, not yet with real ASIC firmware).
+
 Point a SHA-256d miner at the stratum address shown on the pool page. User: `<your Elektron address>.<worker name>`, password: `x` (or `m=solo`, `m=pplns`, `m=pps`). Enable version rolling if the device offers it.
 
 ## Optional
