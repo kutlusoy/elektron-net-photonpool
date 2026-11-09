@@ -110,7 +110,7 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
             let stats = Arc::new(SessionStats::new());
             pool.sessions.lock().unwrap().insert(id, stats.clone());
             let stats_end = stats.clone();
-            let res = Session::new(pool.clone(), cfg, port, stats, id).run(stream).await;
+            let res = Session::new(pool.clone(), cfg, port, stats, id, peer.ip()).run(stream).await;
             pool.sessions.lock().unwrap().remove(&id);
             NET.closed.fetch_add(1, Ordering::Relaxed);
             pool.conns.fetch_sub(1, Ordering::Relaxed);
@@ -120,6 +120,11 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
             let shares = stats_end.ok.load(Ordering::Relaxed) + stats_end.stale.load(Ordering::Relaxed) + stats_end.inv.load(Ordering::Relaxed) + stats_end.dup.load(Ordering::Relaxed);
             let (secs, agent) = (started.elapsed().as_secs(), stats_end.agent.lock().unwrap().clone());
             let why = match &res { Ok(()) => "closed by the miner".to_string(), Err(e) => e.to_string() };
+            // a session whose authorization was refused says nothing about the handshake mode
+            let refused = stats_end.name.lock().unwrap().is_empty() && stats_end.trace.lock().unwrap().contains("authorize");
+            if let Some(en) = fb_record(peer.ip(), if refused { "" } else { &agent }, stats_end.en_mode.load(Ordering::Relaxed), shares, started.elapsed()) {
+                tracing::info!("{} [{agent}]: connections ended without a share, the next ones get {}", peer.ip(), if en { "extranonce space" } else { "header only mining" });
+            }
             if shares == 0 && secs >= 1 {
                 // a miner that connected and never sent a share: the usual sign of a handshake that the firmware did not accept. Logged for the first few
                 // sessions of every minute, then counted (a miner that is turned away reconnects every second).
@@ -186,6 +191,7 @@ struct Session {
     last_job: Instant,
     dup_until: Instant,
     agent_clean: bool,
+    ip: std::net::IpAddr,
     /// extranonce1 of this connection when it gets extranonce space (see [stratum] extranonce_agents).
     en1: Option<[u8; crate::template::EN1_BYTES]>,
     adapt_ms: Option<f64>,
@@ -221,6 +227,59 @@ pub struct Net {
     pub refused: AtomicU64,
     pub jobs: AtomicU64,
 }
+/// The mode a connection should get when the agent list does not decide it: learned from how earlier connections of the same address and user agent went.
+/// A miner that connects, subscribes and leaves without a share (twice in a row) is tried with the other mode; one that delivers a share keeps its mode.
+struct Fb {
+    /// Some(true) = extranonce mode, Some(false) = header only mining.
+    en: Option<bool>,
+    fails: u8,
+    flips: u8,
+    seen: Instant,
+}
+
+static FALLBACK: std::sync::Mutex<Option<HashMap<(std::net::IpAddr, String), Fb>>> = std::sync::Mutex::new(None);
+const FB_TTL: Duration = Duration::from_secs(1800);
+const FB_MAX: usize = 10_000;
+const FB_QUICK: Duration = Duration::from_secs(15);
+
+fn fb_mode(ip: std::net::IpAddr, agent: &str) -> Option<bool> {
+    let g = FALLBACK.lock().unwrap();
+    g.as_ref()?.get(&(ip, agent.to_string())).filter(|e| e.seen.elapsed() < FB_TTL).and_then(|e| e.en)
+}
+
+/// Record the end of a session; returns the new mode when this ended in a switch.
+fn fb_record(ip: std::net::IpAddr, agent: &str, used_en: bool, shares: u64, lived: Duration) -> Option<bool> {
+    if agent.is_empty() {
+        return None;
+    }
+    let mut g = FALLBACK.lock().unwrap();
+    let map = g.get_or_insert_with(HashMap::new);
+    if map.len() >= FB_MAX {
+        map.retain(|_, e| e.seen.elapsed() < FB_TTL);
+        if map.len() >= FB_MAX {
+            map.clear();
+        }
+    }
+    let e = map.entry((ip, agent.to_string())).or_insert(Fb { en: None, fails: 0, flips: 0, seen: Instant::now() });
+    e.seen = Instant::now();
+    if shares > 0 {
+        e.en = Some(used_en);
+        e.fails = 0;
+        return None;
+    }
+    if lived >= FB_QUICK {
+        return None;
+    }
+    e.fails += 1;
+    if e.fails >= 2 && e.flips < 6 {
+        e.fails = 0;
+        e.flips += 1;
+        e.en = Some(!used_en);
+        return e.en;
+    }
+    None
+}
+
 /// (minute, sessions logged in it, sessions not logged in it) for the sessions that ended without a share.
 static ENDED: std::sync::Mutex<(u64, u32, u32)> = std::sync::Mutex::new((0, 0, 0));
 
@@ -245,12 +304,12 @@ async fn read_chunk(rd: &mut BufReader<OwnedReadHalf>, buf: &mut Vec<u8>, counte
 }
 
 impl Session {
-    fn new(pool: Arc<Pool>, cfg: Arc<StratumCfg>, port: PortCfg, stats: Arc<SessionStats>, id: u64) -> Self {
+    fn new(pool: Arc<Pool>, cfg: Arc<StratumCfg>, port: PortCfg, stats: Arc<SessionStats>, id: u64, ip: std::net::IpAddr) -> Self {
         let now = Instant::now();
         let difficulty = cfg.initial_difficulty.clamp(cfg.min_difficulty, cfg.max_difficulty);
         let epoch_rx = pool.epoch.subscribe();
         Self {
-            pool, cfg, stats, id, mode: port.mode, port, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
+            ip, pool, cfg, stats, id, mode: port.mode, port, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
             difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0, rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(),
             next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, prior_hs: 0.0, last_job: now, dup_until: now, agent_clean: false, en1: None, adapt_ms: None, adapt_ok: 0, adapt_dup: 0, adapt_stale: 0, adapt_t: now, last_adjust: now, shares_since_adjust: 0, bad: 0,
             acc_minute: 0, acc_diff: 0.0, acc_cnt: 0, acc_last: now,
@@ -336,7 +395,8 @@ impl Session {
                 self.subscribed = true;
                 let agent = crate::devices::clean_agent(req.params.get(0).and_then(Value::as_str).unwrap_or(""));
                 self.agent_clean = agent_wants_clean(&self.cfg.clean_work_agents, &agent);
-                let en_mode = agent_wants_clean(&self.cfg.extranonce_agents, &agent);
+                let en_mode = fb_mode(self.ip, &agent).unwrap_or_else(|| agent_wants_clean(&self.cfg.extranonce_agents, &agent));
+                self.stats.en_mode.store(en_mode, Ordering::Relaxed);
                 if en_mode {
                     self.en1 = Some((self.id as u32).to_be_bytes());
                 }
@@ -1057,5 +1117,26 @@ mod tests {
         assert_eq!(job_delay_ms(&c, 12, 0.0, false, c.min_job_interval_ms as f64), 1000);
         assert_eq!(job_delay_ms(&c, 12, 1.0e9, true, c.min_job_interval_ms as f64), c.min_job_interval_ms);
         assert_eq!(job_delay_ms(&c, 12, 0.0, true, c.min_job_interval_ms as f64), c.min_job_interval_ms);
+    }
+
+    #[test]
+    fn a_miner_that_keeps_leaving_is_tried_with_the_other_mode_and_one_that_works_keeps_its_mode() {
+        let ip: std::net::IpAddr = "203.0.113.50".parse().unwrap();
+        let quick = Duration::from_secs(2);
+        assert_eq!(fb_mode(ip, "fbtest/1"), None);
+        assert_eq!(fb_record(ip, "fbtest/1", false, 0, quick), None, "one quick end is no reason yet");
+        assert_eq!(fb_record(ip, "fbtest/1", false, 0, quick), Some(true), "the second one switches to extranonce space");
+        assert_eq!(fb_mode(ip, "fbtest/1"), Some(true));
+        assert_eq!(fb_record(ip, "fbtest/1", true, 5, Duration::from_secs(60)), None, "a share pins the mode that worked");
+        assert_eq!(fb_mode(ip, "fbtest/1"), Some(true));
+        // a long session without a share does not count, nor does a session without a user agent
+        assert_eq!(fb_record(ip, "fbtest/2", false, 0, Duration::from_secs(120)), None);
+        assert_eq!(fb_record(ip, "fbtest/2", false, 0, Duration::from_secs(120)), None);
+        assert_eq!(fb_mode(ip, "fbtest/2"), None);
+        assert_eq!(fb_record(ip, "", false, 0, quick), None);
+        // another agent of the same address is not affected, and the switch can go back
+        assert_eq!(fb_mode(ip, "fbtest/3"), None);
+        fb_record(ip, "fbtest/4", true, 0, quick);
+        assert_eq!(fb_record(ip, "fbtest/4", true, 0, quick), Some(false));
     }
 }

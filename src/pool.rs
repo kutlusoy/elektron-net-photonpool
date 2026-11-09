@@ -95,6 +95,8 @@ pub struct SessionStats {
     pub name: Mutex<String>,
     /// The first messages of the miner (method names and the version rolling request), for the log of a session that ended without a share.
     pub trace: Mutex<String>,
+    /// Whether the connection got extranonce space (extranonce mode) instead of header only mining.
+    pub en_mode: std::sync::atomic::AtomicBool,
     pub ok: AtomicU64,
     pub stale: AtomicU64,
     pub dup: AtomicU64,
@@ -137,6 +139,7 @@ impl SessionStats {
         set_f64(&now, unix_now());
         Self {
             trace: Mutex::new(String::new()),
+            en_mode: std::sync::atomic::AtomicBool::new(false),
             name: Mutex::new(String::new()), ok: AtomicU64::new(0), stale: AtomicU64::new(0), dup: AtomicU64::new(0), inv: AtomicU64::new(0),
             hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0), agent: Mutex::new(String::new()), device: Mutex::new(("other:unknown".into(), "unknown".into())), best: AtomicU64::new(0), net_in: AtomicU64::new(0), net_out: AtomicU64::new(0), net_jobs: AtomicU64::new(0), adapt_ms: AtomicU64::new(0), clean_learned: AtomicU64::new(0),
         }
