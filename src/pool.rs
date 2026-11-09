@@ -93,6 +93,8 @@ pub fn get_f64(a: &AtomicU64) -> f64 {
 /// Counters of one miner connection, read lock-free by the admin API.
 pub struct SessionStats {
     pub name: Mutex<String>,
+    /// The first messages of the miner (method names and the version rolling request), for the log of a session that ended without a share.
+    pub trace: Mutex<String>,
     pub ok: AtomicU64,
     pub stale: AtomicU64,
     pub dup: AtomicU64,
@@ -120,10 +122,21 @@ pub struct SessionStats {
 }
 
 impl SessionStats {
+    pub fn note(&self, s: &str) {
+        let mut t = self.trace.lock().unwrap();
+        if t.len() < 200 {
+            if !t.is_empty() {
+                t.push_str(", ");
+            }
+            t.push_str(s);
+        }
+    }
+
     pub fn new() -> Self {
         let now = AtomicU64::new(0);
         set_f64(&now, unix_now());
         Self {
+            trace: Mutex::new(String::new()),
             name: Mutex::new(String::new()), ok: AtomicU64::new(0), stale: AtomicU64::new(0), dup: AtomicU64::new(0), inv: AtomicU64::new(0),
             hashrate: AtomicU64::new(0), difficulty: AtomicU64::new(0), last_seen: now, unit: AtomicU64::new(0), mode: AtomicU64::new(1), job_ms: AtomicU64::new(0), agent: Mutex::new(String::new()), device: Mutex::new(("other:unknown".into(), "unknown".into())), best: AtomicU64::new(0), net_in: AtomicU64::new(0), net_out: AtomicU64::new(0), net_jobs: AtomicU64::new(0), adapt_ms: AtomicU64::new(0), clean_learned: AtomicU64::new(0),
         }

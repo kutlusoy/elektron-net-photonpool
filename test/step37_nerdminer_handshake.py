@@ -36,11 +36,18 @@ async def main(h, pool, cfg):
     c.w.close()
     # a miner that connects, subscribes and leaves is named in the log
     d = await Client(POOLPORT).open()
+    await d.request("mining.configure", [["version-rolling"], {"version-rolling.mask": "ffffffff", "version-rolling.min-bit-count": 16}])
     await d.request("mining.subscribe", ["SomeFirmware/0.1"])
     await asyncio.sleep(1.5)
     d.w.close()
     ok = await wait_for(lambda: "SomeFirmware/0.1" in pool.log_text() and "ended without a share" in pool.log_text(), 10)
     h.check("a session that ended without a share is logged with its user agent", ok is not None)
+    log = pool.log_text()
+    h.check("the log names what the miner sent before it left (the version rolling request, the subscribe)", "configure(min-bits 16, mask ffffffff), subscribe" in log, log[-400:])
+    for i in range(8):
+        x = await Client(POOLPORT).open(); await x.request("mining.subscribe", ["Flood/1"]); await asyncio.sleep(1.1); x.w.close()
+    await asyncio.sleep(1)
+    h.check("a flood of such sessions does not flood the log (three lines per minute, then a count)", pool.log_text().count("Flood/1") <= 3, str(pool.log_text().count("Flood/1")))
     e = await Client(POOLPORT).open()
     await e.request("mining.subscribe", ["x/1"])
     r4 = await e.request("mining.authorize", ["not-an-address.w", "x"])
