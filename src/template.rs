@@ -1,4 +1,4 @@
-use crate::tx::{build_coinbase, merkle_branch, merkle_root, put_varint, varint_len, TxOutput};
+use crate::tx::{sha256d, build_coinbase, merkle_branch, merkle_root, put_varint, varint_len, TxOutput};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -57,6 +57,10 @@ pub struct Candidate {
     pub txs: Arc<TxSet>,
     pub(crate) notify_b: String,
     pub(crate) notify_c: String,
+    /// Extranonce layout for firmware that insists on extranonce space: the coinbase without witness, with `EN_BYTES` zero bytes behind the attestation hash\n    /// inside the attestation output (the node ignores them there), and the offset of those bytes. Empty without an attestation output.
+    pub(crate) en_cb: Vec<u8>,
+    pub(crate) en_off: usize,
+    pub(crate) notify_en_b: String,
 }
 
 fn rev32(hexstr: &str) -> Result<[u8; 32]> {
@@ -108,6 +112,41 @@ pub struct BatchTemplate {
 pub struct BatchCand {
     pub attestation_script: String,
     pub coinbase_hex: String,
+}
+
+/// Bytes of extranonce1 (a label of the connection) and extranonce2 (rolled by the miner) in extranonce mode.
+pub const EN1_BYTES: usize = 4;
+pub const EN2_BYTES: usize = 4;
+pub const EN_BYTES: usize = EN1_BYTES + EN2_BYTES;
+
+/// True for an output of the shape OP_RETURN <height> <32 bytes>, the attestation output.
+fn is_attestation_script(s: &[u8], height: u32) -> bool {
+    if s.first() != Some(&0x6a) || s.len() < 34 {
+        return false;
+    }
+    let h = if height == 0 { vec![] } else { let mut v = height.to_le_bytes().to_vec(); while v.len() > 1 && v.last() == Some(&0) { v.pop(); } if v.last().map_or(false, |b| b & 0x80 != 0) { v.push(0); } v };
+    let push = if h.is_empty() { vec![0x00] } else if h.len() == 1 && (1..=16).contains(&h[0]) { vec![0x50 + h[0]] } else { let mut p = vec![h.len() as u8]; p.extend(&h); p };
+    s.len() >= 1 + push.len() + 33 && s[1..1 + push.len()] == push[..] && s[1 + push.len()] == 0x20
+}
+
+/// The extranonce layout of a coinbase: the coinbase with `EN_BYTES` zero bytes appended to the attestation output script (after the 32 byte hash push) and the offset
+/// of those bytes. A miner that puts extranonce1 and extranonce2 there changes the coinbase transaction id (and the merkle root) but not the attestation, which is
+/// computed without the attestation output; the node accepts any bytes behind the push.
+fn en_layout(sig: &[u8], height: u32, outputs: &[TxOutput]) -> (Vec<u8>, usize) {
+    let Some(idx) = outputs.iter().position(|o| is_attestation_script(&o.script, height)) else { return (Vec::new(), 0) };
+    let mut outs = outputs.to_vec();
+    let base_len = outs[idx].script.len();
+    outs[idx].script.extend_from_slice(&[0u8; EN_BYTES]);
+    let cb = build_coinbase(sig, height, &outs);
+    let mut off = 4 + 1 + 36 + varint_len(sig.len()) + sig.len() + 4 + varint_len(outs.len());
+    for (i, o) in outs.iter().enumerate() {
+        let len = if i == idx { base_len } else { o.script.len() };
+        off += 8 + varint_len(o.script.len()) + len;
+        if i == idx {
+            break;
+        }
+    }
+    (cb.nowit, off)
 }
 
 impl Candidate {
@@ -168,6 +207,12 @@ impl Candidate {
         let mut target = [0u8; 32];
         target.copy_from_slice(&hex::decode(target_hex)?);
         let nowit = cb.nowit.clone();
+        let (en_cb, en_off) = en_layout(sig, height, outputs);
+        let notify_en_b = if en_cb.is_empty() {
+            String::new()
+        } else {
+            format!("\",\"{}\",\"{}\",\"{}\",[{}],\"", stratum_prevhash(&prev), hex::encode(&en_cb[..en_off]), hex::encode(&en_cb[en_off + EN_BYTES..]), branch)
+        };
         Ok((
             Self {
                 prev,
@@ -183,6 +228,9 @@ impl Candidate {
                 txs,
                 notify_b,
                 notify_c,
+                en_cb,
+                en_off,
+                notify_en_b,
             },
             nowit,
         ))
@@ -191,6 +239,54 @@ impl Candidate {
     /// Appends a complete mining.notify line; the candidate-specific parts are pre-rendered.
     pub fn write_notify(&self, out: &mut String, job_id: u64, version: u32, ntime: u32, clean: bool) {
         let _ = write!(out, "{{\"id\":null,\"method\":\"mining.notify\",\"params\":[\"{job_id:x}{}{version:08x}{}{ntime:08x}\",{clean}]}}\n", self.notify_b, self.notify_c);
+    }
+
+    /// Whether this candidate can serve extranonce mode.
+    pub fn has_en(&self) -> bool {
+        !self.en_cb.is_empty()
+    }
+
+    /// Like `write_notify` for extranonce mode: coinb1 ends in front of the extranonce bytes, coinb2 starts behind them.
+    pub fn write_notify_en(&self, out: &mut String, job_id: u64, version: u32, ntime: u32, clean: bool) {
+        let _ = write!(out, "{{\"id\":null,\"method\":\"mining.notify\",\"params\":[\"{job_id:x}{}{version:08x}{}{ntime:08x}\",{clean}]}}\n", self.notify_en_b, self.notify_c);
+    }
+
+    fn en_coinbase(&self, en: &[u8; EN_BYTES]) -> Vec<u8> {
+        let mut cb = self.en_cb.clone();
+        cb[self.en_off..self.en_off + EN_BYTES].copy_from_slice(en);
+        cb
+    }
+
+    /// Merkle root of the block a miner hashes when it uses these extranonce bytes.
+    pub fn en_root(&self, en: &[u8; EN_BYTES]) -> [u8; 32] {
+        merkle_root(&sha256d(&self.en_coinbase(en)), &self.txs.branch)
+    }
+
+    pub fn header_root(&self, root: &[u8; 32], version: u32, ntime: u32, nonce: u32) -> [u8; 80] {
+        let mut h = self.header(version, ntime, nonce);
+        h[36..68].copy_from_slice(root);
+        h
+    }
+
+    /// The complete block of a share found with these extranonce bytes.
+    pub fn block_hex_en(&self, en: &[u8; EN_BYTES], version: u32, ntime: u32, nonce: u32) -> String {
+        let nowit = self.en_coinbase(en);
+        let n = nowit.len();
+        let mut wit = Vec::with_capacity(n + 40);
+        wit.extend_from_slice(&nowit[..4]);
+        wit.extend_from_slice(&[0x00, 0x01]);
+        wit.extend_from_slice(&nowit[4..n - 4]);
+        wit.extend_from_slice(&[0x01, 0x20]);
+        wit.extend_from_slice(&[0u8; 32]);
+        wit.extend_from_slice(&nowit[n - 4..]);
+        let mut b = Vec::with_capacity(80 + wit.len() + self.txs.datas.iter().map(Vec::len).sum::<usize>() + 9);
+        b.extend_from_slice(&self.header_root(&merkle_root(&sha256d(&nowit), &self.txs.branch), version, ntime, nonce));
+        put_varint(&mut b, 1 + self.txs.datas.len() as u64);
+        b.extend_from_slice(&wit);
+        for t in &self.txs.datas {
+            b.extend_from_slice(t);
+        }
+        hex::encode(b)
     }
 
     pub fn subsidy(&self) -> i64 {
@@ -276,5 +372,50 @@ mod tests {
         let mut internal: [u8; 32] = hex::decode("00000000839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048").unwrap().try_into().unwrap();
         internal.reverse();
         assert_eq!(stratum_prevhash(&internal), "18eb604820161bbf90947ee375428afcd76f411486ab5951839a8e6800000000");
+    }
+
+    fn att(height: u32, hash: u8) -> Vec<u8> {
+        let mut v = vec![0x6a];
+        let mut n = height.to_le_bytes().to_vec();
+        while n.len() > 1 && n.last() == Some(&0) { n.pop(); }
+        if n.last().map_or(false, |b| b & 0x80 != 0) { n.push(0); }
+        v.push(n.len() as u8);
+        v.extend(&n);
+        v.push(0x20);
+        v.extend([hash; 32]);
+        v
+    }
+
+    #[test]
+    fn the_attestation_output_is_recognised_for_any_height() {
+        for h in [17u32, 127, 128, 131, 255, 256, 300_000, 8_388_607, 8_388_608] {
+            assert!(is_attestation_script(&att(h, 7), h), "height {h}");
+            assert!(!is_attestation_script(&att(h + 1, 7), h), "wrong height {h}");
+        }
+        assert!(!is_attestation_script(&[0x51], 5));
+        assert!(!is_attestation_script(&[0x6a, 0x04, 1, 2, 3, 4], 5));
+    }
+
+    #[test]
+    fn extranonce_bytes_land_behind_the_attestation_hash_and_the_rest_is_unchanged() {
+        let height = 300_001;
+        let sig = vec![0x03, 0x61, 0x93, 0x04, 0xaa, 0xbb];
+        let mut wc = vec![0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed];
+        wc.extend([3u8; 32]);
+        let outputs = vec![
+            TxOutput { value: 1_000, script: [vec![0x00, 0x14], vec![9u8; 20]].concat() },
+            TxOutput { value: 0, script: att(height, 5) },
+            TxOutput { value: 0, script: wc },
+        ];
+        let (cb, off) = en_layout(&sig, height, &outputs);
+        assert!(!cb.is_empty());
+        let en = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        let mut spliced = cb.clone();
+        spliced[off..off + EN_BYTES].copy_from_slice(&en);
+        let mut direct_outputs = outputs.clone();
+        direct_outputs[1].script.extend_from_slice(&en);
+        assert_eq!(spliced, build_coinbase(&sig, height, &direct_outputs).nowit);
+        assert_eq!(&cb[off - 32..off], &[5u8; 32]);
+        assert!(en_layout(&sig, height, &outputs[..1]).0.is_empty());
     }
 }

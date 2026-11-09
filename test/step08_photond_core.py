@@ -88,7 +88,7 @@ with Harness("step08") as h:
         h.check("daemon height equals node height", s["node"]["height"] == n.rpc("getblockcount") + 1, f"{s['node']['height']}")
         h.check("node link reported up", s["node"]["connected"] is True)
         page = get("/").decode()
-        h.check("daemon serves the UI", "PHOTON POOL" in page)
+        h.check("daemon serves the UI", "Photon Pool for Elektron Net" in page)
         t0 = time.time()
         n.rpc("generatetodescriptor", 1, "raw(51)")
         for _ in range(100):

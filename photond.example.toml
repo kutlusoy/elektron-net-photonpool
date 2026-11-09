@@ -98,6 +98,11 @@ clean_work_agents = ["bitaxe", "esp-miner"]
 # both when the size is 0 (the NerdMiner fork of this project does).
 # Options: list of words; [] sends an empty extranonce1 to everybody. Default ["nerdminer", "han_solominer"].
 label_extranonce_agents = ["nerdminer", "han_solominer"]
+# Miners whose user agent contains one of these words, case-insensitive, get extranonce space: extranonce1 (4 bytes, a label of the connection) and extranonce2_size 4.
+# Firmware derived from cgminer (Antminer, Whatsminer, Avalon) refuses a size of 0. The pool puts the 8 bytes behind the attestation hash inside the attestation
+# output of the coinbase, where the node ignores them, so the attestation stays valid for every value the miner rolls.
+# Options: list of words; [] gives nobody extranonce space (header only mining for everybody). Default: cgminer, bmminer, antminer, whatsminer, btminer, bfgminer, sgminer, cpuminer, avalon, bosminer, braiins, vnish.
+extranonce_agents = ["cgminer", "bmminer", "antminer", "whatsminer", "btminer", "bfgminer", "sgminer", "cpuminer", "avalon", "bosminer", "braiins", "vnish"]
 # Miner user name must be "<address>.<worker>" with a valid address of the network.
 # Options: true (default) | false (any user name is accepted; solo mode always needs an address).
 require_address = true

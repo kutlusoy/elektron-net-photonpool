@@ -307,9 +307,47 @@ impl Epoch {
         }
     }
 
+    /// Like `check_with_mask` for a miner in extranonce mode: the block it hashed has the merkle root of its own extranonce bytes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_en(&self, c: &Candidate, slice: u8, ntime: u32, version: u32, nonce: u32, share_target: &[u8; 32], miner_mask: u32, en: &[u8; crate::template::EN_BYTES]) -> ShareResult {
+        if !c.has_en() {
+            return ShareResult::Invalid("no extranonce layout for this job");
+        }
+        if slice as u64 >= self.slices {
+            return ShareResult::Invalid("bad slice");
+        }
+        let expected = (c.version | ((slice as u32) << POOL_VERSION_SHIFT)) & !miner_mask;
+        if (version & !miner_mask) != expected {
+            return ShareResult::Invalid("version bits outside the miner mask");
+        }
+        if ntime < c.mintime || ntime > c.curtime.saturating_add(NTIME_SLOTS as u32 + 60) {
+            return ShareResult::Invalid("ntime out of range");
+        }
+        let hash = header_hash(&c.header_root(&c.en_root(en), version, ntime, nonce));
+        let is_block = meets_target(&hash, &c.target);
+        if !is_block && !meets_target(&hash, share_target) {
+            return ShareResult::LowDifficulty;
+        }
+        let key = u128::from_le_bytes(hash[..16].try_into().unwrap());
+        if !self.seen.lock().unwrap().insert(key) {
+            return ShareResult::Duplicate;
+        }
+        if is_block {
+            ShareResult::Block
+        } else {
+            ShareResult::Valid
+        }
+    }
+
     /// Difficulty of the block hash of a share (for the best-share statistics).
     pub fn share_difficulty(&self, c: &Candidate, ntime: u32, version: u32, nonce: u32) -> f64 {
         let mut h = header_hash(&c.header(version, ntime, nonce));
+        h.reverse();
+        crate::diff::difficulty_from_target(&h)
+    }
+
+    pub fn share_difficulty_en(&self, c: &Candidate, ntime: u32, version: u32, nonce: u32, en: &[u8; crate::template::EN_BYTES]) -> f64 {
+        let mut h = header_hash(&c.header_root(&c.en_root(en), version, ntime, nonce));
         h.reverse();
         crate::diff::difficulty_from_target(&h)
     }
@@ -789,7 +827,7 @@ mod tests {
             prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [target; 32], curtime: 1000, mintime: 900, coinbase_value: 0, fees: 0,
             coinbase_wit: vec![], merkle_root: [i; 32],
             txs: std::sync::Arc::new(TxSet { datas: vec![], txids: vec![], branch: vec![] }),
-            notify_b: String::new(), notify_c: String::new(),
+            notify_b: String::new(), notify_c: String::new(), en_cb: vec![], en_off: 0, notify_en_b: String::new(),
         };
         Epoch::new(1, "00".repeat(32), 1, (0..n as u8).map(c).collect())
     }
@@ -800,7 +838,7 @@ mod tests {
             prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [0; 32], curtime: 1000, mintime: 900, coinbase_value: 0, fees: 0,
             coinbase_wit: vec![], merkle_root: [i; 32],
             txs: std::sync::Arc::new(TxSet { datas: vec![], txids: vec![], branch: vec![] }),
-            notify_b: String::new(), notify_c: String::new(),
+            notify_b: String::new(), notify_c: String::new(), en_cb: vec![], en_off: 0, notify_en_b: String::new(),
         };
         let e = Epoch::with_slices(1, "00".repeat(32), 1, vec![c(1), c(2), c(3)], 1);
         assert_eq!(e.units_total(), 3 * NTIME_SLOTS);

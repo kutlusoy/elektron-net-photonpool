@@ -135,7 +135,7 @@ function render() {
     `${span('dim', 'miner     ')}enable version rolling`,
     '',
     `${span('dim', 'works     ')}Bitaxe (ESP-Miner), NerdMiner (Elektron fork)`,
-    `${span('dim', 'not yet   ')}stock Antminer, Whatsminer, Avalon, cgminer, cpuminer: they refuse extranonce2 size 0`,
+    `${span('dim', 'asic      ')}Antminer, Whatsminer, Avalon: with extranonce space (new, in testing)`,
   ].join('\n');
   const portsOf = (mode) => p.stratum.ports.filter((x) => x.mode === mode).map((x) => x.port + (x.override ? '*' : '')).join(',') || '-';
   $('#pane-modes').innerHTML = [span('row-h', pad('MODE', 7) + pad('FEE', 6) + pad('STATE', 8) + 'PORT')]

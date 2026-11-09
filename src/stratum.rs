@@ -186,6 +186,8 @@ struct Session {
     last_job: Instant,
     dup_until: Instant,
     agent_clean: bool,
+    /// extranonce1 of this connection when it gets extranonce space (see [stratum] extranonce_agents).
+    en1: Option<[u8; crate::template::EN1_BYTES]>,
     adapt_ms: Option<f64>,
     adapt_ok: u32,
     adapt_dup: u32,
@@ -250,7 +252,7 @@ impl Session {
         Self {
             pool, cfg, stats, id, mode: port.mode, port, epoch_rx, subscribed: false, authorized: false, started: false, account: String::new(), worker: String::new(),
             difficulty, target: target_from_difficulty(difficulty), prev: None, mask: 0, rolling_bits: 0, jobs: VecDeque::new(), last_tip: String::new(),
-            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, prior_hs: 0.0, last_job: now, dup_until: now, agent_clean: false, adapt_ms: None, adapt_ok: 0, adapt_dup: 0, adapt_stale: 0, adapt_t: now, last_adjust: now, shares_since_adjust: 0, bad: 0,
+            next_job: now + Duration::from_secs(3600), window_start: now, window_diff: 0.0, hash_est: 0.0, prior_hs: 0.0, last_job: now, dup_until: now, agent_clean: false, en1: None, adapt_ms: None, adapt_ok: 0, adapt_dup: 0, adapt_stale: 0, adapt_t: now, last_adjust: now, shares_since_adjust: 0, bad: 0,
             acc_minute: 0, acc_diff: 0.0, acc_cnt: 0, acc_last: now,
         }
     }
@@ -334,7 +336,12 @@ impl Session {
                 self.subscribed = true;
                 let agent = crate::devices::clean_agent(req.params.get(0).and_then(Value::as_str).unwrap_or(""));
                 self.agent_clean = agent_wants_clean(&self.cfg.clean_work_agents, &agent);
-                let label = if agent_wants_clean(&self.cfg.label_extranonce_agents, &agent) { format!("{:08x}", self.id) } else { String::new() };
+                let en_mode = agent_wants_clean(&self.cfg.extranonce_agents, &agent);
+                if en_mode {
+                    self.en1 = Some((self.id as u32).to_be_bytes());
+                }
+                let label = if en_mode || agent_wants_clean(&self.cfg.label_extranonce_agents, &agent) { format!("{:08x}", self.id) } else { String::new() };
+                let n2 = if en_mode { crate::template::EN2_BYTES } else { 0 };
                 let dev = crate::devices::classify(&agent);
                 // What the pool knows about this kind of device: what it learned from earlier connections (after a few observations), else a typical value
                 // of the chip. It sets the first share difficulty (about one share per share_secs), the job pace and whether jobs are clean; everything is
@@ -357,7 +364,7 @@ impl Session {
                 }
                 *self.stats.device.lock().unwrap() = (dev.key, dev.name);
                 *self.stats.agent.lock().unwrap() = agent;
-                self.reply(wr, &id, &format!("[[[\"mining.notify\",\"{:x}\"]],\"{label}\",0]", self.id), "null").await?;
+                self.reply(wr, &id, &format!("[[[\"mining.notify\",\"{:x}\"]],\"{label}\",{n2}]", self.id), "null").await?;
                 self.maybe_start(wr).await
             }
             "mining.configure" => self.configure(wr, &id, &req.params).await,
@@ -545,7 +552,11 @@ impl Session {
         let ntime = cand.curtime.max(cand.mintime) + unit.2;
         let id = (epoch.id << 32) | n as u64;
         let mut msg = String::with_capacity(1024);
-        cand.write_notify(&mut msg, id, version, ntime, clean);
+        if self.en1.is_some() && cand.has_en() {
+            cand.write_notify_en(&mut msg, id, version, ntime, clean);
+        } else {
+            cand.write_notify(&mut msg, id, version, ntime, clean);
+        }
         self.tx(wr, msg.as_bytes()).await?;
         self.stats.net_jobs.fetch_add(1, Ordering::Relaxed);
         self.last_job = Instant::now();
@@ -609,12 +620,32 @@ impl Session {
             Some(e) => (&e.cand, SoloEntry::unit_from_n(job_n).0),
         };
         let (target, credit) = self.accept_target();
-        let result = epoch.check(cand_ref, slice, ntime, version, nonce, &target);
+        let en: Option<[u8; crate::template::EN_BYTES]> = match self.en1 {
+            None => None,
+            Some(en1) => {
+                let en2 = s(2).filter(|x| x.len() == crate::template::EN2_BYTES * 2).and_then(|x| hex::decode(x).ok());
+                let Some(en2) = en2 else {
+                    self.count_invalid();
+                    return self.error(wr, id, 20, "bad extranonce2").await;
+                };
+                let mut b = [0u8; crate::template::EN_BYTES];
+                b[..crate::template::EN1_BYTES].copy_from_slice(&en1);
+                b[crate::template::EN1_BYTES..].copy_from_slice(&en2);
+                Some(b)
+            }
+        };
+        let result = match &en {
+            Some(en) => epoch.check_en(cand_ref, slice, ntime, version, nonce, &target, MINER_VERSION_MASK, en),
+            None => epoch.check(cand_ref, slice, ntime, version, nonce, &target),
+        };
         match result {
             ShareResult::Valid | ShareResult::Block => {
                 self.adapt_ok += 1;
                 self.adapt();
-                let d = epoch.share_difficulty(cand_ref, ntime, version, nonce);
+                let d = match &en {
+                    Some(en) => epoch.share_difficulty_en(cand_ref, ntime, version, nonce, en),
+                    None => epoch.share_difficulty(cand_ref, ntime, version, nonce),
+                };
                 if d > get_f64(&self.stats.best) {
                     set_f64(&self.stats.best, d);
                 }
@@ -622,7 +653,7 @@ impl Session {
                 self.pool.note_best(&agent, d);
                 self.count_ok(credit);
                 if result == ShareResult::Block {
-                    self.block_found(&epoch, cand_ref, version, ntime, nonce);
+                    self.block_found(&epoch, cand_ref, version, ntime, nonce, en.as_ref());
                 }
                 self.reply(wr, id, "true", "null").await?;
                 self.vardiff(wr).await
@@ -716,10 +747,13 @@ impl Session {
         self.set_difficulty(wr, d).await
     }
 
-    fn block_found(&mut self, epoch: &Arc<Epoch>, c: &Candidate, version: u32, ntime: u32, nonce: u32) {
+    fn block_found(&mut self, epoch: &Arc<Epoch>, c: &Candidate, version: u32, ntime: u32, nonce: u32, en: Option<&[u8; crate::template::EN_BYTES]>) {
         self.flush_acc();
-        let hex = c.block_hex(version, ntime, nonce);
-        let mut h = header_hash(&c.header(version, ntime, nonce));
+        let (hex, header) = match en {
+            Some(en) => (c.block_hex_en(en, version, ntime, nonce), c.header_root(&c.en_root(en), version, ntime, nonce)),
+            None => (c.block_hex(version, ntime, nonce), c.header(version, ntime, nonce)),
+        };
+        let mut h = header_hash(&header);
         debug_assert!(meets_target(&h, &c.target));
         h.reverse();
         let (pool, height, hash, account, worker, mode) = (self.pool.clone(), epoch.height, hex::encode(h), self.account.clone(), format!("{}.{}", self.account, self.worker), self.mode);

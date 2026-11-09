@@ -67,7 +67,7 @@ async def main(h):
     h.check("security headers are set", "default-src 'none'" in hd.get("content-security-policy", "") and hd.get("x-content-type-options") == "nosniff" and hd.get("referrer-policy") == "no-referrer", str(hd))
 
     s, hd, b = http(PUB, "/")
-    h.check("public listener serves the terminal page", s == 200 and b"PHOTON POOL" in b and "text/html" in hd.get("content-type", ""))
+    h.check("public listener serves the terminal page", s == 200 and b"Photon Pool for Elektron Net" in b and "text/html" in hd.get("content-type", ""))
     for path in ("/style.css", "/common.js", "/public.js", "/engine.js", "/flow.js", "/scene3d.js", "/vendor/three.min.js", "/favicon.ico", "/engine", "/ops", "/miner.html", "/miner", "/miner.js"):
         s, _, _ = http(PUB, path)
         h.check(f"static asset {path} is served", s == 200)
