@@ -121,8 +121,21 @@ async fn accept_loop(pool: Arc<Pool>, cfg: Arc<StratumCfg>, permits: Arc<Semapho
             let (secs, agent) = (started.elapsed().as_secs(), stats_end.agent.lock().unwrap().clone());
             let why = match &res { Ok(()) => "closed by the miner".to_string(), Err(e) => e.to_string() };
             if shares == 0 && secs >= 1 {
-                // a miner that connected and never sent a share: the usual sign of a handshake that the firmware did not accept
-                tracing::info!("session {id} {peer} [{}] ended without a share after {secs}s: {why}", if agent.is_empty() { "no user agent" } else { agent.as_str() });
+                // a miner that connected and never sent a share: the usual sign of a handshake that the firmware did not accept. Logged for the first few
+                // sessions of every minute, then counted (a miner that is turned away reconnects every second).
+                let trace = stats_end.trace.lock().unwrap().clone();
+                let minute = unix_now() as u64 / 60;
+                let (show, skipped) = {
+                    let mut g = ENDED.lock().unwrap();
+                    let skipped = if g.0 != minute { let s = g.2; *g = (minute, 0, 0); s } else { 0 };
+                    if g.1 < 3 { g.1 += 1; (true, skipped) } else { g.2 += 1; (false, skipped) }
+                };
+                if skipped > 0 {
+                    tracing::info!("{skipped} more sessions ended without a share in the minute before");
+                }
+                if show {
+                    tracing::info!("session {id} {peer} [{}] ended without a share after {secs}s: {why}; it sent: {}", if agent.is_empty() { "no user agent" } else { agent.as_str() }, if trace.is_empty() { "nothing" } else { trace.as_str() });
+                }
             } else if let Err(e) = res {
                 tracing::debug!("session {id} {peer} closed: {e}");
             }
@@ -206,6 +219,9 @@ pub struct Net {
     pub refused: AtomicU64,
     pub jobs: AtomicU64,
 }
+/// (minute, sessions logged in it, sessions not logged in it) for the sessions that ended without a share.
+static ENDED: std::sync::Mutex<(u64, u32, u32)> = std::sync::Mutex::new((0, 0, 0));
+
 pub static NET: Net = Net { bytes_in: AtomicU64::new(0), bytes_out: AtomicU64::new(0), accepted: AtomicU64::new(0), closed: AtomicU64::new(0), refused: AtomicU64::new(0), jobs: AtomicU64::new(0) };
 
 async fn send(wr: &mut OwnedWriteHalf, data: &[u8]) -> Result<()> {
@@ -306,6 +322,13 @@ impl Session {
             return Ok(());
         };
         let id = req.id.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "null".into());
+        self.stats.note(&match req.method {
+            "mining.configure" => {
+                let o = req.params.get(1);
+                format!("configure(min-bits {}, mask {})", o.and_then(|o| o.get("version-rolling.min-bit-count")).map(|v| v.to_string()).unwrap_or("-".into()), o.and_then(|o| o.get("version-rolling.mask")).and_then(Value::as_str).unwrap_or("-"))
+            }
+            m => m.strip_prefix("mining.").unwrap_or(m).chars().take(24).collect(),
+        });
         match req.method {
             "mining.subscribe" => {
                 self.subscribed = true;
