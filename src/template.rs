@@ -60,7 +60,7 @@ pub struct Candidate {
     /// Extranonce layout for firmware that insists on extranonce space: the coinbase without witness, with `EN_BYTES` zero bytes behind the attestation hash\n    /// inside the attestation output (the node ignores them there), and the offset of those bytes. Empty without an attestation output.
     pub(crate) en_cb: Vec<u8>,
     pub(crate) en_off: usize,
-    pub(crate) notify_en_b: String,
+    pub(crate) notify_en_b: std::sync::OnceLock<String>,
 }
 
 fn rev32(hexstr: &str) -> Result<[u8; 32]> {
@@ -208,11 +208,6 @@ impl Candidate {
         target.copy_from_slice(&hex::decode(target_hex)?);
         let nowit = cb.nowit.clone();
         let (en_cb, en_off) = en_layout(sig, height, outputs);
-        let notify_en_b = if en_cb.is_empty() {
-            String::new()
-        } else {
-            format!("\",\"{}\",\"{}\",\"{}\",[{}],\"", stratum_prevhash(&prev), hex::encode(&en_cb[..en_off]), hex::encode(&en_cb[en_off + EN_BYTES..]), branch)
-        };
         Ok((
             Self {
                 prev,
@@ -230,7 +225,7 @@ impl Candidate {
                 notify_c,
                 en_cb,
                 en_off,
-                notify_en_b,
+                notify_en_b: std::sync::OnceLock::new(),
             },
             nowit,
         ))
@@ -248,7 +243,15 @@ impl Candidate {
 
     /// Like `write_notify` for extranonce mode: coinb1 ends in front of the extranonce bytes, coinb2 starts behind them.
     pub fn write_notify_en(&self, out: &mut String, job_id: u64, version: u32, ntime: u32, clean: bool) {
-        let _ = write!(out, "{{\"id\":null,\"method\":\"mining.notify\",\"params\":[\"{job_id:x}{}{version:08x}{}{ntime:08x}\",{clean}]}}\n", self.notify_en_b, self.notify_c);
+        let _ = write!(out, "{{\"id\":null,\"method\":\"mining.notify\",\"params\":[\"{job_id:x}{}{version:08x}{}{ntime:08x}\",{clean}]}}\n", self.notify_en(), self.notify_c);
+    }
+
+    /// The candidate specific part of an extranonce mode notify, rendered the first time a miner in that mode needs it.
+    fn notify_en(&self) -> &str {
+        self.notify_en_b.get_or_init(|| {
+            let branch = self.txs.branch.iter().map(|h| format!("\"{}\"", hex::encode(h))).collect::<Vec<_>>().join(",");
+            format!("\",\"{}\",\"{}\",\"{}\",[{}],\"", stratum_prevhash(&self.prev), hex::encode(&self.en_cb[..self.en_off]), hex::encode(&self.en_cb[self.en_off + EN_BYTES..]), branch)
+        })
     }
 
     fn en_coinbase(&self, en: &[u8; EN_BYTES]) -> Vec<u8> {

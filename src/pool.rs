@@ -827,7 +827,7 @@ mod tests {
             prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [target; 32], curtime: 1000, mintime: 900, coinbase_value: 0, fees: 0,
             coinbase_wit: vec![], merkle_root: [i; 32],
             txs: std::sync::Arc::new(TxSet { datas: vec![], txids: vec![], branch: vec![] }),
-            notify_b: String::new(), notify_c: String::new(), en_cb: vec![], en_off: 0, notify_en_b: String::new(),
+            notify_b: String::new(), notify_c: String::new(), en_cb: vec![], en_off: 0, notify_en_b: std::sync::OnceLock::new(),
         };
         Epoch::new(1, "00".repeat(32), 1, (0..n as u8).map(c).collect())
     }
@@ -838,7 +838,7 @@ mod tests {
             prev: [i; 32], version: 0x2000_0000, bits: 0x207f_ffff, target: [0; 32], curtime: 1000, mintime: 900, coinbase_value: 0, fees: 0,
             coinbase_wit: vec![], merkle_root: [i; 32],
             txs: std::sync::Arc::new(TxSet { datas: vec![], txids: vec![], branch: vec![] }),
-            notify_b: String::new(), notify_c: String::new(), en_cb: vec![], en_off: 0, notify_en_b: String::new(),
+            notify_b: String::new(), notify_c: String::new(), en_cb: vec![], en_off: 0, notify_en_b: std::sync::OnceLock::new(),
         };
         let e = Epoch::with_slices(1, "00".repeat(32), 1, vec![c(1), c(2), c(3)], 1);
         assert_eq!(e.units_total(), 3 * NTIME_SLOTS);
