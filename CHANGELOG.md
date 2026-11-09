@@ -3,6 +3,7 @@
 ## 0.2.0-rc1 (release candidate for the first mainnet test)
 
 Pool (`photond`)
+- Firmware compatibility from source: cgminer, Bitmain bmminer, sgminer, bfgminer and cpuminer refuse `extranonce2_size = 0`, ESP-Miner and the NerdMiner fork accept it (`test/step38_firmware_handshake_matrix.py`, table in `doc-elektron/guideline-stratum-v1.md`). The pool page says which firmware works.
 - Log of sessions that ended without a share: at most three lines per minute (then a count), each with what the miner sent before it left (`configure(min-bits N, mask M), subscribe, ...`), so the handshake that a foreign firmware does not accept can be read from the pool log alone.
 - NerdMiner: the subscribe answer carries a non-empty extranonce1 label for the agents in `label_extranonce_agents` (default `nerdminer`, `han_solominer`), because that firmware aborts with "Work aborted" on an empty one; extranonce2_size stays 0 and the label is never part of the coinbase. The log now names sessions that ended without a share (with the user agent) and refused authorizations with the reason. Test: `test/step37_nerdminer_handshake.py`.
 - Pagination for every list that grows: miner page (pending credits, payouts, blocks found, workers), pool page (blocks, payouts, devices) and operator page (miners, blocks), 20 rows per page with a bar `1-20 of 137  ‹ newer  older ›`. New data: `creditsTotal` and `/public/v1/account/<address>/credits`, `blocksTotal` and `payoutsTotal` in `/public/v1/pool`, `offset` for `/public/v1/blocks` and `/payouts`.

@@ -156,3 +156,21 @@ Observation: the memory of the process stays at its peak after the miners left (
 1. Which firmware families reject `extranonce2_size = 0` or an empty `extranonce1`.
 2. Maximum job rate per device that stock firmware accepts without dropping work.
 3. Whether a compatibility mode for hobby firmware is wanted.
+
+
+## Firmware compatibility, read from the source of open source clients
+
+The pool answers `mining.subscribe` with `extranonce2_size = 0` (header only mining): the coinbase is fixed by the UTXO attestation, so a miner must not add extranonce bytes. The rules below are copied from the client source code (the firmware was not run); `test/step38_firmware_handshake_matrix.py` repeats them against the pool's real answer.
+
+| Client | Rule in its source | With size 0 |
+|---|---|---|
+| cgminer (`util.c`, `initiate_stratum`) | `n2size < 2 \|\| n2size > 16`: "Failed to get valid n2size" | refuses |
+| Bitmain bmminer, `bmminer-mix`, `braiins/bmminer`, `jameshilliard/bmminer` (Antminer stock lineage) | same check | refuses |
+| sgminer, bfgminer | `n2size < 1` | refuses |
+| cpuminer (pooler) | `!xn2_size`: "Failed to get extranonce2_size" | refuses |
+| ESP-Miner (Bitaxe) | `extranonce_2_len` clamped to 0..N | accepts |
+| NerdMiner, Elektron fork | aborts on an empty `extranonce1` only; the fork skips both extranonces when the size is 0 | accepts, with a non-empty `extranonce1` label |
+
+Whatsminer (MicroBT) firmware is not public. What the pool log shows (a Whatsminer connects, subscribes and leaves after one or two seconds) fits the cgminer rule, but is no proof. `mining.extranonce.subscribe` (XNSUB) does not help: it only lets a pool change `extranonce1` without a reconnect and does not remove the extranonce2 space.
+
+A pool cannot work around this for stock firmware: with `extranonce2_size >= 2` the miner chooses the extranonce2 bytes itself, every value changes the coinbase transaction id and with it the attestation inside the coinbase, so the pool would need one attested coinbase for every value the miner may use. The ways forward are Stratum V2 standard channels (header only mining by design, supported by Braiins OS+) or firmware that accepts a size of 0. The compatibility table of the legacy pool (`Miner_Compatibility_List.md`) marks Antminer and Whatsminer as compatible; the client source above does not support that for stock firmware.

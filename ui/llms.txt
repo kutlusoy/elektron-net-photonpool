@@ -40,6 +40,8 @@ Public, read-only JSON, no key needed (rate limited). Miner addresses are masked
 
 ## How to mine
 
+Works today: Bitaxe (ESP-Miner) and NerdMiner (Elektron fork). Stock Antminer, Whatsminer, Avalon, cgminer and cpuminer refuse the pool's `extranonce2_size = 0` (header only mining, required by the UTXO attestation); Stratum V2 standard channels are the planned way for ASICs.
+
 Point a SHA-256d miner at the stratum address shown on the pool page. User: `<your Elektron address>.<worker name>`, password: `x` (or `m=solo`, `m=pplns`, `m=pps`). Enable version rolling if the device offers it.
 
 ## Optional
